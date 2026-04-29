@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stock-manager"
+version = "0.1.0"
+description = "A local CLI application for family stock management."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "python-dotenv>=1.0.0",
+    "rich>=13.0.0",
+    "typer>=0.12.0",
+]
+
+[project.scripts]
+stock = "stock_manager.cli:app"
+
+[tool.setuptools.packages.find]
+include = ["stock_manager*"]
