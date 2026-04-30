@@ -151,4 +151,60 @@ The first version supports two notification methods:
 
 macOS notifications are enabled by default.
 
-Email alerts are an optional feature. If no email address is configured, the application should not stop running; it should simply display a message in the CLI indicating that email alerts are not configured.
+*Email alerts are an optional feature. If no email address is configured, the application should not stop running; it should simply display a message in the CLI indicating that email alerts are not configured.*
+
+
+## Current Usable Commands
+
+During the current development stage, use:
+
+```bash
+python3 -m stock_manager <command>
+```
+
+Available commands:
+
+```bash
+python3 -m stock_manager --help
+python3 -m stock_manager --version
+python3 -m stock_manager init
+python3 -m stock_manager add
+python3 -m stock_manager list
+```
+
+### Command Options
+
+`init` initializes the local SQLite database.
+
+```bash
+python3 -m stock_manager init
+python3 -m stock_manager init --database stock.db
+python3 -m stock_manager init -d stock.db
+```
+
+`add` adds one stock item through interactive prompts.
+
+```bash
+python3 -m stock_manager add
+python3 -m stock_manager add --database stock.db
+python3 -m stock_manager add -d stock.db
+```
+
+`list` shows stock items and supports filters.
+
+```bash
+python3 -m stock_manager list
+python3 -m stock_manager list --category fruit
+python3 -m stock_manager list --owner Anthony
+python3 -m stock_manager list --location fridge
+python3 -m stock_manager list --status active
+python3 -m stock_manager list --database stock.db
+python3 -m stock_manager list -d stock.db
+```
+python3 -m stock_manager list
+Commands that appear in help but are not implemented yet:
+
+```bash
+python3 -m stock_manager search
+python3 -m stock_manager remind
+```
