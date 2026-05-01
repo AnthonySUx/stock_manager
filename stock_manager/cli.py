@@ -2,7 +2,7 @@
 
 from datetime import date
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import typer
 import typer.rich_utils
@@ -17,6 +17,7 @@ from stock_manager.database import (
     add_item,
     initialize_database,
     list_items as fetch_items,
+    search_items as fetch_search_items,
 )
 
 PURPLE = "#8b5cf6"
@@ -151,6 +152,39 @@ def _format_quantity(quantity_value: float, quantity_unit: str) -> str:
     return f"{quantity_value:g} {quantity_unit}"
 
 
+def _show_items_table(rows: list[Any], title: str) -> None:
+    """Render stock items with the standard Stock Manager table style."""
+    table = Table(
+        title=title,
+        box=box.ROUNDED,
+        border_style=PURPLE,
+        header_style=f"bold {PURPLE}",
+        title_style="bold",
+    )
+    table.add_column("ID", justify="right", overflow="fold")
+    table.add_column("Name", overflow="fold")
+    table.add_column("Category", overflow="fold")
+    table.add_column("Owner", overflow="fold")
+    table.add_column("Quantity", overflow="fold")
+    table.add_column("Location", overflow="fold")
+    table.add_column("Expiration", overflow="fold")
+    table.add_column("Status", overflow="fold")
+
+    for row in rows:
+        table.add_row(
+            str(row["id"]),
+            row["name"],
+            row["category"],
+            row["owner"],
+            _format_quantity(row["quantity_value"], row["quantity_unit"]),
+            row["location"],
+            row["current_expiration_date"],
+            row["status"],
+        )
+
+    console.print(table)
+
+
 @app.command()
 def init(
     database: str = typer.Option(
@@ -248,35 +282,7 @@ def list_items(
         console.print("[yellow]No stock items found.[/yellow]")
         return
 
-    table = Table(
-        title="Stock Items",
-        box=box.ROUNDED,
-        border_style=PURPLE,
-        header_style=f"bold {PURPLE}",
-        title_style="bold",
-    )
-    table.add_column("ID", justify="right", overflow="fold")
-    table.add_column("Name", overflow="fold")
-    table.add_column("Category", overflow="fold")
-    table.add_column("Owner", overflow="fold")
-    table.add_column("Quantity", overflow="fold")
-    table.add_column("Location", overflow="fold")
-    table.add_column("Expiration", overflow="fold")
-    table.add_column("Status", overflow="fold")
-
-    for row in rows:
-        table.add_row(
-            str(row["id"]),
-            row["name"],
-            row["category"],
-            row["owner"],
-            _format_quantity(row["quantity_value"], row["quantity_unit"]),
-            row["location"],
-            row["current_expiration_date"],
-            row["status"],
-        )
-
-    console.print(table)
+    _show_items_table(rows, "Stock Items")
 
 
 @app.command()
@@ -284,9 +290,26 @@ def search(
     keyword: str = typer.Argument(..., help="Keyword to search in stock items."),
     owner: Optional[str] = typer.Option(None, help="Filter by purchaser or assigned user."),
     location: Optional[str] = typer.Option(None, help="Filter by storage location."),
+    database: str = typer.Option(
+        str(DEFAULT_DATABASE_PATH),
+        "--database",
+        "-d",
+        help="Path to the SQLite database file.",
+    ),
 ) -> None:
     """Search stock items by keyword."""
-    _not_implemented("stock search")
+    rows = fetch_search_items(
+        keyword,
+        owner=owner,
+        location=location,
+        database_path=Path(database),
+    )
+
+    if not rows:
+        console.print("[yellow]No matching stock items found.[/yellow]")
+        return
+
+    _show_items_table(rows, f'Search Results for "{keyword}"')
 
 
 @app.command()

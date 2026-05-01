@@ -176,3 +176,53 @@ def list_items(
         rows = connection.execute(query, parameters).fetchall()
 
     return rows
+
+
+def search_items(
+    keyword: str,
+    *,
+    owner: str | None = None,
+    location: str | None = None,
+    database_path: Path = DEFAULT_DATABASE_PATH,
+) -> list[sqlite3.Row]:
+    """Return stock items matching a keyword and optional filters."""
+    resolved_path = initialize_database(database_path)
+    query = """
+        SELECT
+            id,
+            name,
+            category,
+            owner,
+            purchase_date,
+            quantity_value,
+            quantity_unit,
+            location,
+            current_expiration_date,
+            status,
+            notes
+        FROM items
+        WHERE (
+            lower(name) LIKE lower(?)
+            OR lower(category) LIKE lower(?)
+            OR lower(owner) LIKE lower(?)
+            OR lower(location) LIKE lower(?)
+            OR lower(coalesce(notes, '')) LIKE lower(?)
+        )
+    """
+    keyword_pattern = f"%{keyword}%"
+    parameters: list[str] = [keyword_pattern] * 5
+
+    if owner is not None:
+        query += " AND lower(owner) = lower(?)"
+        parameters.append(owner)
+    if location is not None:
+        query += " AND lower(location) = lower(?)"
+        parameters.append(location)
+
+    query += " ORDER BY id"
+
+    with sqlite3.connect(resolved_path) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(query, parameters).fetchall()
+
+    return rows

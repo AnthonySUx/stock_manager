@@ -170,6 +170,7 @@ python3 -m stock_manager --version
 python3 -m stock_manager init
 python3 -m stock_manager add
 python3 -m stock_manager list
+python3 -m stock_manager search
 ```
 
 ### Command Options
@@ -201,10 +202,19 @@ python3 -m stock_manager list --status active
 python3 -m stock_manager list --database stock.db
 python3 -m stock_manager list -d stock.db
 ```
-python3 -m stock_manager list
+
+`search` searches stock items by keyword and supports filters.
+
+```bash
+python3 -m stock_manager search milk
+python3 -m stock_manager search milk --owner Anthony
+python3 -m stock_manager search milk --location fridge
+python3 -m stock_manager search milk --database stock.db
+python3 -m stock_manager search milk -d stock.db
+```
+
 Commands that appear in help but are not implemented yet:
 
 ```bash
-python3 -m stock_manager search
 python3 -m stock_manager remind
 ```
