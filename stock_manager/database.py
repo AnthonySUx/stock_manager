@@ -1,5 +1,6 @@
 """SQLite database setup for Stock Manager."""
 
+from datetime import date, timedelta
 from pathlib import Path
 import sqlite3
 from typing import Any
@@ -128,6 +129,92 @@ def add_item(item: dict[str, Any], database_path: Path = DEFAULT_DATABASE_PATH) 
     return int(cursor.lastrowid)
 
 
+def _get_expiration_warning_days(connection: sqlite3.Connection) -> int:
+    """Return the configured expiration warning window in days."""
+    row = connection.execute(
+        """
+        SELECT value
+        FROM settings
+        WHERE key = 'expiration_reminder_days'
+        """
+    ).fetchone()
+
+    if row is None:
+        return int(DEFAULT_REMINDER_DAYS)
+
+    try:
+        warning_days = int(row[0])
+    except ValueError:
+        return int(DEFAULT_REMINDER_DAYS)
+
+    return max(warning_days, 0)
+
+
+def _calculate_status(
+    quantity_value: float,
+    current_expiration_date: str,
+    warning_days: int,
+    today: date,
+) -> str:
+    """Calculate the current stock status from quantity and expiration date."""
+    if quantity_value <= 0:
+        return "consumed"
+
+    if current_expiration_date == "infinite":
+        return "active"
+
+    try:
+        expiration_date = date.fromisoformat(current_expiration_date)
+    except ValueError:
+        return "active"
+
+    if expiration_date < today:
+        return "expired"
+
+    if expiration_date <= today + timedelta(days=warning_days):
+        return "expiring soon"
+
+    return "active"
+
+
+def refresh_item_statuses(database_path: Path = DEFAULT_DATABASE_PATH) -> int:
+    """Refresh item statuses and return the number of changed rows."""
+    resolved_path = initialize_database(database_path)
+    today = date.today()
+    changed_rows = 0
+
+    with sqlite3.connect(resolved_path) as connection:
+        warning_days = _get_expiration_warning_days(connection)
+        rows = connection.execute(
+            """
+            SELECT id, quantity_value, current_expiration_date, status
+            FROM items
+            """
+        ).fetchall()
+
+        for item_id, quantity_value, current_expiration_date, current_status in rows:
+            new_status = _calculate_status(
+                quantity_value,
+                current_expiration_date,
+                warning_days,
+                today,
+            )
+            if new_status == current_status:
+                continue
+
+            connection.execute(
+                """
+                UPDATE items
+                SET status = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (new_status, item_id),
+            )
+            changed_rows += 1
+
+    return changed_rows
+
+
 def list_items(
     *,
     category: str | None = None,
@@ -138,6 +225,7 @@ def list_items(
 ) -> list[sqlite3.Row]:
     """Return stock items that match the optional filters."""
     resolved_path = initialize_database(database_path)
+    refresh_item_statuses(resolved_path)
     query = """
         SELECT
             id,
@@ -187,6 +275,7 @@ def search_items(
 ) -> list[sqlite3.Row]:
     """Return stock items matching a keyword and optional filters."""
     resolved_path = initialize_database(database_path)
+    refresh_item_statuses(resolved_path)
     query = """
         SELECT
             id,

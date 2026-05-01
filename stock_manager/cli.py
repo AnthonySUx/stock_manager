@@ -112,6 +112,28 @@ def _prompt_required_date(label: str) -> str:
         return value
 
 
+def _prompt_purchase_date() -> str:
+    """Prompt for purchase date, defaulting to today's date on empty input."""
+    today = date.today().isoformat()
+    prompt = (
+        f"[bold red][Required][/bold red] "
+        f"[bold {PURPLE}]Purchase date[/bold {PURPLE}] "
+        f"[dim]YYYY-MM-DD [{today}][/dim]"
+    )
+    while True:
+        value = Prompt.ask(prompt, default="", show_default=False).strip()
+        if not value:
+            return today
+
+        try:
+            date.fromisoformat(value)
+        except ValueError:
+            console.print("[red]Use YYYY-MM-DD or press Enter for today.[/red]")
+            continue
+
+        return value
+
+
 def _prompt_optional_date(label: str) -> Optional[str]:
     """Prompt for an optional ISO date."""
     while True:
@@ -152,6 +174,18 @@ def _format_quantity(quantity_value: float, quantity_unit: str) -> str:
     return f"{quantity_value:g} {quantity_unit}"
 
 
+def _format_status(status: str) -> str:
+    """Apply a visual color to a stock status value."""
+    status_styles = {
+        "active": "green",
+        "expiring soon": "yellow",
+        "expired": "red",
+        "consumed": "dim",
+    }
+    style = status_styles.get(status, "white")
+    return f"[{style}]{status}[/{style}]"
+
+
 def _show_items_table(rows: list[Any], title: str) -> None:
     """Render stock items with the standard Stock Manager table style."""
     table = Table(
@@ -179,7 +213,7 @@ def _show_items_table(rows: list[Any], title: str) -> None:
             _format_quantity(row["quantity_value"], row["quantity_unit"]),
             row["location"],
             row["current_expiration_date"],
-            row["status"],
+            _format_status(row["status"]),
         )
 
     console.print(table)
@@ -219,7 +253,7 @@ def add(
     name = _prompt_required("Name")
     category = _prompt_required("Category")
     owner = _prompt_required("Owner")
-    purchase_date = _prompt_required_date("Purchase date")
+    purchase_date = _prompt_purchase_date()
     quantity_value = _prompt_quantity_value()
     quantity_unit = _prompt_required("Quantity unit")
     location = _prompt_required("Location")
@@ -313,9 +347,29 @@ def search(
 
 
 @app.command()
-def remind() -> None:
-    """Show expiration and restocking reminders."""
-    _not_implemented("stock remind")
+def remind(
+    database: str = typer.Option(
+        str(DEFAULT_DATABASE_PATH),
+        "--database",
+        "-d",
+        help="Path to the SQLite database file.",
+    ),
+) -> None:
+    """Show expiration reminder information."""
+    expired_rows = fetch_items(status="expired", database_path=Path(database))
+    expiring_soon_rows = fetch_items(status="expiring soon", database_path=Path(database))
+
+    if not expired_rows and not expiring_soon_rows:
+        console.print("[green]No expiration reminders for now.[/green]")
+        return
+
+    console.print(Panel.fit("[bold]Expiration Reminders[/bold]", border_style=PURPLE))
+
+    if expired_rows:
+        _show_items_table(expired_rows, "Expired Items")
+
+    if expiring_soon_rows:
+        _show_items_table(expiring_soon_rows, "Expiring Soon")
 
 
 @app.callback()

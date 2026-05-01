@@ -119,7 +119,7 @@ Support filtering based on the following criteria:
 - Expiring soon
 - Expired
 
-### 6. Restocking list and Weekly Shopping Day Reminder
+### 6. Restocking List
 
 In the following scenarios, ask whether to add the item to the restocking list:
 
@@ -127,9 +127,17 @@ In the following scenarios, ask whether to add the item to the restocking list:
 - The food has been consumed
 - The food has been manually deleted
 
-The application supports setting a fixed weekly shopping day.
+Restocking is a separate management area, not just a one-time reminder output.
 
-When the reminder command is executed, if it is a shopping day, the application should check the restocking list and send a reminder. The application should not clear the restocking list automatically. Items should only be marked as done manually.
+The restock module should provide detailed restock-list management:
+
+- View pending and completed restock items
+- Add a manual restock item
+- Mark a restock item as done
+- Delete a restock item
+- Show notes for each restock item
+
+The restock list should not be cleared automatically. Items should only be marked as done manually.
 
 ### 7. Expiration Reminder
 
@@ -141,8 +149,16 @@ Rule:
 - For unopened food items, the expiration date on the package applies.
 - Items with an infinite expiration period are not included in expiration reminders.
 - Deleted and consumed food items are not included in expiration reminders.
+- The reminder module should focus on reminder information only. It should not be the detailed restock-list management view.
+- The current reminder command is manual. It does not run in the background or send notifications automatically yet.
 
-### 8. Notification Method
+### 8. Weekly Shopping Day Reminder
+
+The application supports setting a fixed weekly shopping day.
+
+When the reminder command is executed on a shopping day, it may show a short shopping-day notice and point the user to the restock command for details. Detailed restock-list output belongs to the restock module.
+
+### 9. Notification Method
 
 The first version supports two notification methods:
 
@@ -171,6 +187,7 @@ python3 -m stock_manager init
 python3 -m stock_manager add
 python3 -m stock_manager list
 python3 -m stock_manager search
+python3 -m stock_manager remind
 ```
 
 ### Command Options
@@ -183,7 +200,7 @@ python3 -m stock_manager init --database stock.db
 python3 -m stock_manager init -d stock.db
 ```
 
-`add` adds one stock item through interactive prompts.
+`add` adds one stock item through interactive prompts. Purchase date can be left empty to use today's date.
 
 ```bash
 python3 -m stock_manager add
@@ -191,7 +208,7 @@ python3 -m stock_manager add --database stock.db
 python3 -m stock_manager add -d stock.db
 ```
 
-`list` shows stock items and supports filters.
+`list` shows stock items, refreshes item statuses automatically, and supports filters.
 
 ```bash
 python3 -m stock_manager list
@@ -203,7 +220,7 @@ python3 -m stock_manager list --database stock.db
 python3 -m stock_manager list -d stock.db
 ```
 
-`search` searches stock items by keyword and supports filters.
+`search` refreshes item statuses automatically, then searches stock items by keyword and supports filters.
 
 ```bash
 python3 -m stock_manager search milk
@@ -213,8 +230,47 @@ python3 -m stock_manager search milk --database stock.db
 python3 -m stock_manager search milk -d stock.db
 ```
 
-Commands that appear in help but are not implemented yet:
+`remind` refreshes item statuses automatically and shows expiration reminder information only. This command is manual. It does not run in the background or send notifications automatically yet.
 
 ```bash
 python3 -m stock_manager remind
+python3 -m stock_manager remind --database stock.db
+python3 -m stock_manager remind -d stock.db
 ```
+
+### Planned Command Design
+
+The following commands are planned but not implemented yet.
+
+`restock` should be a separate command group for detailed restock-list management.
+
+```bash
+python3 -m stock_manager restock list
+python3 -m stock_manager restock add
+python3 -m stock_manager restock done <id>
+python3 -m stock_manager restock delete <id>
+python3 -m stock_manager restock list --status pending
+python3 -m stock_manager restock list --status done
+python3 -m stock_manager restock list --database stock.db
+python3 -m stock_manager restock list -d stock.db
+```
+
+Reminder and restock are intentionally separate:
+
+- `remind` is a short reminder view for expired and expiring-soon stock.
+- `restock` is the detailed restock-list management area.
+- `remind` may point users to `restock`, but it should not replace the restock management commands.
+
+### Planned Automation
+
+The following automation features are planned but not implemented yet:
+
+- Background expiration reminder checks. The current `remind` command is manual.
+- macOS system notifications from inside Stock Manager.
+- Email alerts for expiration reminders.
+- A settings command for reminder days, shopping day, and notification preferences.
+- Weekly shopping-day reminder logic.
+- Automatically sending the restock list by email on the configured shopping day.
+- A macOS LaunchAgent or equivalent scheduler for running reminders automatically.
+
+Current automatic behavior is limited to command-triggered status refreshes. `list`, `search`, and `remind` refresh item statuses when they run, but Stock Manager does not run by itself in the background yet.
