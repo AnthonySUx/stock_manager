@@ -129,6 +129,36 @@ def add_item(item: dict[str, Any], database_path: Path = DEFAULT_DATABASE_PATH) 
     return int(cursor.lastrowid)
 
 
+def add_restock_item(item: dict[str, Any], database_path: Path = DEFAULT_DATABASE_PATH) -> int:
+    """Insert one restock item and return its database id."""
+    resolved_path = initialize_database(database_path)
+
+    with sqlite3.connect(resolved_path) as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO restock_items (
+                name,
+                category,
+                quantity_value,
+                quantity_unit,
+                status,
+                notes
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                item["name"],
+                item["category"],
+                item["quantity_value"],
+                item["quantity_unit"],
+                item["status"],
+                item["notes"],
+            ),
+        )
+
+    return int(cursor.lastrowid)
+
+
 def _get_expiration_warning_days(connection: sqlite3.Connection) -> int:
     """Return the configured expiration warning window in days."""
     row = connection.execute(
@@ -315,3 +345,126 @@ def search_items(
         rows = connection.execute(query, parameters).fetchall()
 
     return rows
+
+
+def list_restock_items(
+    *,
+    status: str | None = None,
+    database_path: Path = DEFAULT_DATABASE_PATH,
+) -> list[sqlite3.Row]:
+    """Return restock items that match the optional status filter."""
+    resolved_path = initialize_database(database_path)
+    query = """
+        SELECT
+            id,
+            name,
+            category,
+            quantity_value,
+            quantity_unit,
+            source_item_id,
+            status,
+            notes,
+            created_at,
+            done_at
+        FROM restock_items
+        WHERE 1 = 1
+    """
+    parameters: list[str] = []
+
+    if status is not None:
+        query += " AND status = ?"
+        parameters.append(status)
+
+    query += """
+        ORDER BY
+            CASE status WHEN 'pending' THEN 0 ELSE 1 END,
+            id
+    """
+
+    with sqlite3.connect(resolved_path) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(query, parameters).fetchall()
+
+    return rows
+
+
+def get_restock_item(item_id: int, database_path: Path = DEFAULT_DATABASE_PATH) -> sqlite3.Row | None:
+    """Return one restock item by id, or None if it does not exist."""
+    resolved_path = initialize_database(database_path)
+
+    with sqlite3.connect(resolved_path) as connection:
+        connection.row_factory = sqlite3.Row
+        row = connection.execute(
+            """
+            SELECT
+                id,
+                name,
+                category,
+                quantity_value,
+                quantity_unit,
+                source_item_id,
+                status,
+                notes,
+                created_at,
+                done_at
+            FROM restock_items
+            WHERE id = ?
+            """,
+            (item_id,),
+        ).fetchone()
+
+    return row
+
+
+def mark_restock_item_done(item_id: int, database_path: Path = DEFAULT_DATABASE_PATH) -> bool:
+    """Mark one restock item as done and return whether it changed."""
+    resolved_path = initialize_database(database_path)
+
+    with sqlite3.connect(resolved_path) as connection:
+        cursor = connection.execute(
+            """
+            UPDATE restock_items
+            SET status = 'done', done_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND status != 'done'
+            """,
+            (item_id,),
+        )
+
+    return cursor.rowcount > 0
+
+
+def update_restock_item_quantity(
+    item_id: int,
+    quantity_value: float,
+    database_path: Path = DEFAULT_DATABASE_PATH,
+) -> bool:
+    """Update the remaining quantity for one pending restock item."""
+    resolved_path = initialize_database(database_path)
+
+    with sqlite3.connect(resolved_path) as connection:
+        cursor = connection.execute(
+            """
+            UPDATE restock_items
+            SET quantity_value = ?
+            WHERE id = ? AND status = 'pending'
+            """,
+            (quantity_value, item_id),
+        )
+
+    return cursor.rowcount > 0
+
+
+def delete_restock_item(item_id: int, database_path: Path = DEFAULT_DATABASE_PATH) -> bool:
+    """Delete one restock item and return whether it existed."""
+    resolved_path = initialize_database(database_path)
+
+    with sqlite3.connect(resolved_path) as connection:
+        cursor = connection.execute(
+            """
+            DELETE FROM restock_items
+            WHERE id = ?
+            """,
+            (item_id,),
+        )
+
+    return cursor.rowcount > 0

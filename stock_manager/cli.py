@@ -9,15 +9,20 @@ import typer.rich_utils
 from rich import box
 from rich.console import Console
 from rich.panel import Panel
-from rich.prompt import Prompt
+from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
 from stock_manager.database import (
     DEFAULT_DATABASE_PATH,
     add_item,
+    add_restock_item,
+    delete_restock_item,
     initialize_database,
     list_items as fetch_items,
+    list_restock_items as fetch_restock_items,
+    mark_restock_item_done,
     search_items as fetch_search_items,
+    update_restock_item_quantity,
 )
 
 PURPLE = "#8b5cf6"
@@ -45,6 +50,13 @@ app = typer.Typer(
     add_completion=False,
     rich_markup_mode="rich",
 )
+restock_app = typer.Typer(
+    help="Manage restock list items.",
+    invoke_without_command=True,
+    no_args_is_help=True,
+    rich_markup_mode="rich",
+)
+app.add_typer(restock_app, name="restock")
 console = Console(width=100)
 
 
@@ -167,6 +179,29 @@ def _prompt_quantity_value() -> float:
         return quantity
 
 
+def _prompt_nonnegative_quantity(label: str, default: float) -> float:
+    """Prompt until the user enters a non-negative quantity number."""
+    default_text = f"{default:g}"
+    while True:
+        value = Prompt.ask(
+            f"[bold red][Required][/bold red] [bold {PURPLE}]{label}[/bold {PURPLE}] "
+            f"[dim][{default_text}][/dim]",
+            default=default_text,
+            show_default=False,
+        ).strip()
+        try:
+            quantity = float(value)
+        except ValueError:
+            console.print("[red]Quantity value must be a number.[/red]")
+            continue
+
+        if quantity < 0:
+            console.print("[red]Quantity value cannot be negative.[/red]")
+            continue
+
+        return quantity
+
+
 def _format_quantity(quantity_value: float, quantity_unit: str) -> str:
     """Format quantity without a trailing .0 for whole numbers."""
     if quantity_value.is_integer():
@@ -181,9 +216,18 @@ def _format_status(status: str) -> str:
         "expiring soon": "yellow",
         "expired": "red",
         "consumed": "dim",
+        "pending": "yellow",
+        "done": "green",
     }
     style = status_styles.get(status, "white")
     return f"[{style}]{status}[/{style}]"
+
+
+def _format_optional(value: Any) -> str:
+    """Format nullable values for table output."""
+    if value is None or value == "":
+        return "-"
+    return str(value)
 
 
 def _show_items_table(rows: list[Any], title: str) -> None:
@@ -217,6 +261,69 @@ def _show_items_table(rows: list[Any], title: str) -> None:
         )
 
     console.print(table)
+
+
+def _show_restock_table(rows: list[Any], title: str) -> None:
+    """Render restock items with detailed restock-list fields."""
+    table = Table(
+        title=title,
+        box=box.ROUNDED,
+        border_style=PURPLE,
+        header_style=f"bold {PURPLE}",
+        title_style="bold",
+    )
+    table.add_column("ID", justify="right", overflow="fold")
+    table.add_column("Name", overflow="fold")
+    table.add_column("Category", overflow="fold")
+    table.add_column("Quantity", overflow="fold")
+    table.add_column("Status", overflow="fold")
+    table.add_column("Created", overflow="fold")
+    table.add_column("Notes", overflow="fold")
+
+    for row in rows:
+        quantity = "-"
+        if row["quantity_value"] is not None and row["quantity_unit"]:
+            quantity = _format_quantity(row["quantity_value"], row["quantity_unit"])
+
+        table.add_row(
+            str(row["id"]),
+            row["name"],
+            _format_optional(row["category"]),
+            quantity,
+            _format_status(row["status"]),
+            row["created_at"],
+            _format_optional(row["notes"]),
+        )
+
+    console.print(table)
+
+
+def _parse_restock_ids(value: str, valid_ids: set[int], missing_message: str) -> list[int] | None:
+    """Parse a comma-separated restock id selection."""
+    selected_ids: list[int] = []
+    for raw_id in value.split(","):
+        raw_id = raw_id.strip()
+        if not raw_id:
+            continue
+
+        try:
+            item_id = int(raw_id)
+        except ValueError:
+            console.print(f"[red]Invalid restock item id:[/red] {raw_id}")
+            return None
+
+        if item_id not in valid_ids:
+            console.print(f"[red]{missing_message.format(item_id=item_id)}[/red]")
+            return None
+
+        if item_id not in selected_ids:
+            selected_ids.append(item_id)
+
+    if not selected_ids:
+        console.print("[red]Select at least one restock item id.[/red]")
+        return None
+
+    return selected_ids
 
 
 @app.command()
@@ -370,6 +477,182 @@ def remind(
 
     if expiring_soon_rows:
         _show_items_table(expiring_soon_rows, "Expiring Soon")
+
+
+@restock_app.command(name="list")
+def list_restock(
+    status: Optional[str] = typer.Option(None, help="Filter by restock status: pending or done."),
+    database: str = typer.Option(
+        str(DEFAULT_DATABASE_PATH),
+        "--database",
+        "-d",
+        help="Path to the SQLite database file.",
+    ),
+) -> None:
+    """Show restock list items."""
+    rows = fetch_restock_items(status=status, database_path=Path(database))
+
+    if not rows:
+        console.print("[yellow]No restock items found.[/yellow]")
+        return
+
+    _show_restock_table(rows, "Restock Items")
+
+
+@restock_app.command(name="add")
+def add_restock(
+    database: str = typer.Option(
+        str(DEFAULT_DATABASE_PATH),
+        "--database",
+        "-d",
+        help="Path to the SQLite database file.",
+    ),
+) -> None:
+    """Add a new restock list item."""
+    console.print(
+        Panel.fit(
+            "[bold]Add a restock item[/bold]",
+            border_style=PURPLE,
+        )
+    )
+
+    name = _prompt_required("Name")
+    category = _prompt_required("Category")
+    quantity_value = _prompt_quantity_value()
+    quantity_unit = _prompt_required("Quantity unit")
+    notes = _prompt_optional("Notes")
+
+    item_id = add_restock_item(
+        {
+            "name": name,
+            "category": category,
+            "quantity_value": quantity_value,
+            "quantity_unit": quantity_unit,
+            "status": "pending",
+            "notes": notes,
+        },
+        Path(database),
+    )
+
+    console.print(f"[green]Added restock item #{item_id}:[/green] {name}")
+
+
+@restock_app.command(name="done")
+def done_restock(
+    database: str = typer.Option(
+        str(DEFAULT_DATABASE_PATH),
+        "--database",
+        "-d",
+        help="Path to the SQLite database file.",
+    ),
+) -> None:
+    """Interactively mark pending restock items as done."""
+    pending_rows = fetch_restock_items(status="pending", database_path=Path(database))
+
+    if not pending_rows:
+        console.print("[yellow]No pending restock items found.[/yellow]")
+        return
+
+    _show_restock_table(pending_rows, "Pending Restock Items")
+    pending_by_id = {int(row["id"]): row for row in pending_rows}
+
+    while True:
+        selected = Prompt.ask(
+            f"[bold red][Required][/bold red] [bold {PURPLE}]Restock item IDs[/bold {PURPLE}] "
+            "[dim]comma-separated[/dim]"
+        )
+        selected_ids = _parse_restock_ids(
+            selected,
+            set(pending_by_id),
+            "Restock item #{item_id} is not pending or does not exist.",
+        )
+        if selected_ids is not None:
+            break
+
+    for item_id in selected_ids:
+        row = pending_by_id[item_id]
+        planned_quantity = row["quantity_value"]
+        quantity_unit = row["quantity_unit"]
+
+        if planned_quantity is None or not quantity_unit:
+            if Confirm.ask(f"Mark restock item #{item_id} {row['name']} as done?", default=True):
+                mark_restock_item_done(item_id, Path(database))
+                console.print(f"[green]Marked restock item #{item_id} as done.[/green]")
+            continue
+
+        planned_quantity = float(planned_quantity)
+        purchased_quantity = _prompt_nonnegative_quantity(
+            f"Purchased quantity for {row['name']} [{_format_quantity(planned_quantity, quantity_unit)}]",
+            planned_quantity,
+        )
+
+        if purchased_quantity >= planned_quantity:
+            mark_restock_item_done(item_id, Path(database))
+            console.print(f"[green]Marked restock item #{item_id} as done.[/green]")
+            continue
+
+        remaining_quantity = planned_quantity - purchased_quantity
+        keep_remaining = Confirm.ask(
+            (
+                f"Only {_format_quantity(purchased_quantity, quantity_unit)} of "
+                f"{_format_quantity(planned_quantity, quantity_unit)} was bought. "
+                f"Keep remaining {_format_quantity(remaining_quantity, quantity_unit)} in restock list?"
+            ),
+            default=True,
+        )
+
+        if keep_remaining:
+            update_restock_item_quantity(item_id, remaining_quantity, Path(database))
+            console.print(
+                f"[yellow]Kept restock item #{item_id} pending with "
+                f"{_format_quantity(remaining_quantity, quantity_unit)} remaining.[/yellow]"
+            )
+        else:
+            mark_restock_item_done(item_id, Path(database))
+            console.print(f"[green]Marked restock item #{item_id} as done.[/green]")
+
+
+@restock_app.command(name="delete")
+def delete_restock(
+    database: str = typer.Option(
+        str(DEFAULT_DATABASE_PATH),
+        "--database",
+        "-d",
+        help="Path to the SQLite database file.",
+    ),
+) -> None:
+    """Interactively delete restock list items."""
+    rows = fetch_restock_items(database_path=Path(database))
+
+    if not rows:
+        console.print("[yellow]No restock items found.[/yellow]")
+        return
+
+    _show_restock_table(rows, "Restock Items")
+    rows_by_id = {int(row["id"]): row for row in rows}
+
+    while True:
+        selected = Prompt.ask(
+            f"[bold red][Required][/bold red] [bold {PURPLE}]Restock item IDs[/bold {PURPLE}] "
+            "[dim]comma-separated[/dim]"
+        )
+        selected_ids = _parse_restock_ids(
+            selected,
+            set(rows_by_id),
+            "Restock item #{item_id} does not exist.",
+        )
+        if selected_ids is not None:
+            break
+
+    names = ", ".join(f"#{item_id} {rows_by_id[item_id]['name']}" for item_id in selected_ids)
+    if not Confirm.ask(f"Delete restock item(s): {names}?", default=False):
+        console.print("[yellow]Delete cancelled.[/yellow]")
+        return
+
+    for item_id in selected_ids:
+        row = rows_by_id[item_id]
+        delete_restock_item(item_id, Path(database))
+        console.print(f"[green]Deleted restock item #{item_id}:[/green] {row['name']}")
 
 
 @app.callback()

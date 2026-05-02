@@ -158,7 +158,21 @@ The application supports setting a fixed weekly shopping day.
 
 When the reminder command is executed on a shopping day, it may show a short shopping-day notice and point the user to the restock command for details. Detailed restock-list output belongs to the restock module.
 
-### 9. Notification Method
+### 9. Cleanup
+
+The application provides a separate cleanup command for batch removal of old records that are no longer useful in daily views.
+
+Cleanup should support:
+
+- Removing old done restock items
+- Removing consumed stock items by default
+- Removing expired stock items only when explicitly requested
+- Retention rules such as older-than N days
+- Confirmation before deleting records
+
+*`clean stock` default to consumed items only. Expired items should require an explicit option because an expired item may still physically exist at home and require user action.*
+
+### 10. Notification Method
 
 The first version supports two notification methods:
 
@@ -188,6 +202,10 @@ python3 -m stock_manager add
 python3 -m stock_manager list
 python3 -m stock_manager search
 python3 -m stock_manager remind
+python3 -m stock_manager restock list
+python3 -m stock_manager restock add
+python3 -m stock_manager restock done
+python3 -m stock_manager restock delete
 ```
 
 ### Command Options
@@ -238,22 +256,62 @@ python3 -m stock_manager remind --database stock.db
 python3 -m stock_manager remind -d stock.db
 ```
 
-### Planned Command Design
-
-The following commands are planned but not implemented yet.
-
-`restock` should be a separate command group for detailed restock-list management.
+`restock list` shows restock-list items as a separate management view.
 
 ```bash
 python3 -m stock_manager restock list
-python3 -m stock_manager restock add
-python3 -m stock_manager restock done <id>
-python3 -m stock_manager restock delete <id>
 python3 -m stock_manager restock list --status pending
 python3 -m stock_manager restock list --status done
 python3 -m stock_manager restock list --database stock.db
 python3 -m stock_manager restock list -d stock.db
 ```
+
+`restock add` adds one restock-list item through interactive prompts. Name, category, quantity value, and quantity unit are required. Notes are optional.
+
+```bash
+python3 -m stock_manager restock add
+python3 -m stock_manager restock add --database stock.db
+python3 -m stock_manager restock add -d stock.db
+```
+
+`restock done` is interactive. The user selects one or more pending restock items and enters the actually purchased quantity. The default purchased quantity is the quantity currently shown in the restock list.
+
+If the purchased quantity is lower than the planned quantity, the command asks whether to keep the unpurchased remainder. If the user keeps the remainder, the current restock item is updated to the remaining quantity and stay `pending`. If the user does not keep the remainder, the item is marked as `done`.
+
+```bash
+python3 -m stock_manager restock done
+python3 -m stock_manager restock done --database stock.db
+python3 -m stock_manager restock done -d stock.db
+```
+
+`restock delete` is interactive. The user selects one or more restock-list items from the list, then confirms deletion.
+
+```bash
+python3 -m stock_manager restock delete
+python3 -m stock_manager restock delete --database stock.db
+python3 -m stock_manager restock delete -d stock.db
+```
+
+### Planned Command Design
+
+The following commands are planned but not implemented yet.
+
+The clean command group should later support removing old records that are no longer useful in daily views.
+
+```bash
+python3 -m stock_manager clean restock
+python3 -m stock_manager clean stock
+python3 -m stock_manager clean stock --expired
+python3 -m stock_manager clean stock --all
+```
+
+Cleanup commands are planned because old `done`, `consumed`, and historical records can make the useful list harder to scan.
+
+`clean restock` should support manually deleting old done restock items, with confirmation by default.
+
+`clean stock` should support manually cleaning consumed stock history by default. Expired stock items should only be removed when the user explicitly passes `--expired` or `--all`. All cleanup commands should require confirmation by default.
+
+Single stock item deletion should belong to the normal stock delete command, not to cleanup.
 
 Reminder and restock are intentionally separate:
 
@@ -271,6 +329,9 @@ The following automation features are planned but not implemented yet:
 - A settings command for reminder days, shopping day, and notification preferences.
 - Weekly shopping-day reminder logic.
 - Automatically sending the restock list by email on the configured shopping day.
+- Automatically cleaning old done restock items after a configured retention period.
+- Automatically cleaning old consumed inventory items after a configured retention period.
+- Expired items should not be automatically deleted by default.
 - A macOS LaunchAgent or equivalent scheduler for running reminders automatically.
 
 Current automatic behavior is limited to command-triggered status refreshes. `list`, `search`, and `remind` refresh item statuses when they run, but Stock Manager does not run by itself in the background yet.
