@@ -64,13 +64,25 @@ DEFAULT_SETTINGS = {
 }
 
 
+def _resolve_database_path(database_path: Path = DEFAULT_DATABASE_PATH) -> Path:
+    """Return the absolute path used for a database file."""
+    return database_path.expanduser().resolve()
+
+
+def connect_database(database_path: Path = DEFAULT_DATABASE_PATH) -> sqlite3.Connection:
+    """Open a SQLite connection with project-wide connection settings."""
+    resolved_path = _resolve_database_path(database_path)
+    resolved_path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(resolved_path)
+    connection.execute("PRAGMA foreign_keys = ON")
+    return connection
+
+
 def initialize_database(database_path: Path = DEFAULT_DATABASE_PATH) -> Path:
     """Create the SQLite database and required tables if they do not exist."""
-    resolved_path = database_path.expanduser().resolve()
-    resolved_path.parent.mkdir(parents=True, exist_ok=True)
+    resolved_path = _resolve_database_path(database_path)
 
-    with sqlite3.connect(resolved_path) as connection:
-        connection.execute("PRAGMA foreign_keys = ON")
+    with connect_database(resolved_path) as connection:
         for statement in SCHEMA_STATEMENTS:
             connection.execute(statement)
 
@@ -89,7 +101,7 @@ def add_item(item: dict[str, Any], database_path: Path = DEFAULT_DATABASE_PATH) 
     """Insert one stock item and return its database id."""
     resolved_path = initialize_database(database_path)
 
-    with sqlite3.connect(resolved_path) as connection:
+    with connect_database(resolved_path) as connection:
         cursor = connection.execute(
             """
             INSERT INTO items (
@@ -129,11 +141,43 @@ def add_item(item: dict[str, Any], database_path: Path = DEFAULT_DATABASE_PATH) 
     return int(cursor.lastrowid)
 
 
+def get_item(item_id: int, database_path: Path = DEFAULT_DATABASE_PATH) -> sqlite3.Row | None:
+    """Return one stock item by id, or None if it does not exist."""
+    resolved_path = initialize_database(database_path)
+
+    with connect_database(resolved_path) as connection:
+        connection.row_factory = sqlite3.Row
+        row = connection.execute(
+            """
+            SELECT
+                id,
+                name,
+                category,
+                owner,
+                purchase_date,
+                quantity_value,
+                quantity_unit,
+                location,
+                unopened_expiration_date,
+                opened_expiration_date,
+                opened_date,
+                current_expiration_date,
+                status,
+                notes
+            FROM items
+            WHERE id = ?
+            """,
+            (item_id,),
+        ).fetchone()
+
+    return row
+
+
 def add_restock_item(item: dict[str, Any], database_path: Path = DEFAULT_DATABASE_PATH) -> int:
     """Insert one restock item and return its database id."""
     resolved_path = initialize_database(database_path)
 
-    with sqlite3.connect(resolved_path) as connection:
+    with connect_database(resolved_path) as connection:
         cursor = connection.execute(
             """
             INSERT INTO restock_items (
@@ -207,13 +251,21 @@ def _calculate_status(
     return "active"
 
 
-def refresh_item_statuses(database_path: Path = DEFAULT_DATABASE_PATH) -> int:
+def refresh_item_statuses(
+    database_path: Path = DEFAULT_DATABASE_PATH,
+    *,
+    ensure_schema: bool = True,
+) -> int:
     """Refresh item statuses and return the number of changed rows."""
-    resolved_path = initialize_database(database_path)
+    if ensure_schema:
+        resolved_path = initialize_database(database_path)
+    else:
+        resolved_path = _resolve_database_path(database_path)
+
     today = date.today()
     changed_rows = 0
 
-    with sqlite3.connect(resolved_path) as connection:
+    with connect_database(resolved_path) as connection:
         warning_days = _get_expiration_warning_days(connection)
         rows = connection.execute(
             """
@@ -255,7 +307,7 @@ def list_items(
 ) -> list[sqlite3.Row]:
     """Return stock items that match the optional filters."""
     resolved_path = initialize_database(database_path)
-    refresh_item_statuses(resolved_path)
+    refresh_item_statuses(resolved_path, ensure_schema=False)
     query = """
         SELECT
             id,
@@ -289,7 +341,7 @@ def list_items(
 
     query += " ORDER BY id"
 
-    with sqlite3.connect(resolved_path) as connection:
+    with connect_database(resolved_path) as connection:
         connection.row_factory = sqlite3.Row
         rows = connection.execute(query, parameters).fetchall()
 
@@ -299,13 +351,15 @@ def list_items(
 def search_items(
     keyword: str,
     *,
+    category: str | None = None,
     owner: str | None = None,
     location: str | None = None,
+    status: str | None = None,
     database_path: Path = DEFAULT_DATABASE_PATH,
 ) -> list[sqlite3.Row]:
     """Return stock items matching a keyword and optional filters."""
     resolved_path = initialize_database(database_path)
-    refresh_item_statuses(resolved_path)
+    refresh_item_statuses(resolved_path, ensure_schema=False)
     query = """
         SELECT
             id,
@@ -337,10 +391,16 @@ def search_items(
     if location is not None:
         query += " AND lower(location) = lower(?)"
         parameters.append(location)
+    if category is not None:
+        query += " AND lower(category) = lower(?)"
+        parameters.append(category)
+    if status is not None:
+        query += " AND status = ?"
+        parameters.append(status)
 
     query += " ORDER BY id"
 
-    with sqlite3.connect(resolved_path) as connection:
+    with connect_database(resolved_path) as connection:
         connection.row_factory = sqlite3.Row
         rows = connection.execute(query, parameters).fetchall()
 
@@ -381,7 +441,7 @@ def list_restock_items(
             id
     """
 
-    with sqlite3.connect(resolved_path) as connection:
+    with connect_database(resolved_path) as connection:
         connection.row_factory = sqlite3.Row
         rows = connection.execute(query, parameters).fetchall()
 
@@ -392,7 +452,7 @@ def get_restock_item(item_id: int, database_path: Path = DEFAULT_DATABASE_PATH) 
     """Return one restock item by id, or None if it does not exist."""
     resolved_path = initialize_database(database_path)
 
-    with sqlite3.connect(resolved_path) as connection:
+    with connect_database(resolved_path) as connection:
         connection.row_factory = sqlite3.Row
         row = connection.execute(
             """
@@ -420,7 +480,7 @@ def mark_restock_item_done(item_id: int, database_path: Path = DEFAULT_DATABASE_
     """Mark one restock item as done and return whether it changed."""
     resolved_path = initialize_database(database_path)
 
-    with sqlite3.connect(resolved_path) as connection:
+    with connect_database(resolved_path) as connection:
         cursor = connection.execute(
             """
             UPDATE restock_items
@@ -441,7 +501,7 @@ def update_restock_item_quantity(
     """Update the remaining quantity for one pending restock item."""
     resolved_path = initialize_database(database_path)
 
-    with sqlite3.connect(resolved_path) as connection:
+    with connect_database(resolved_path) as connection:
         cursor = connection.execute(
             """
             UPDATE restock_items
@@ -458,7 +518,7 @@ def delete_restock_item(item_id: int, database_path: Path = DEFAULT_DATABASE_PAT
     """Delete one restock item and return whether it existed."""
     resolved_path = initialize_database(database_path)
 
-    with sqlite3.connect(resolved_path) as connection:
+    with connect_database(resolved_path) as connection:
         cursor = connection.execute(
             """
             DELETE FROM restock_items

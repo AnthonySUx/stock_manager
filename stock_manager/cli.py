@@ -17,6 +17,7 @@ from stock_manager.database import (
     add_item,
     add_restock_item,
     delete_restock_item,
+    get_item,
     initialize_database,
     list_items as fetch_items,
     list_restock_items as fetch_restock_items,
@@ -74,6 +75,19 @@ def _prompt_required(label: str) -> str:
         console.print("[red]This field is required.[/red]")
 
 
+def _prompt_required_with_default(label: str, default: Optional[str]) -> str:
+    """Prompt for a required value, defaulting on empty input when provided."""
+    if not default:
+        return _prompt_required(label)
+
+    prompt = f"[bold red][Required][/bold red] [bold {PURPLE}]{label}[/bold {PURPLE}] [dim][{default}][/dim]"
+    while True:
+        value = Prompt.ask(prompt, default=default, show_default=False).strip()
+        if value:
+            return value
+        console.print("[red]This field is required.[/red]")
+
+
 def _prompt_optional(label: str, guidance: str | None = None) -> Optional[str]:
     """Prompt for an optional value and normalize empty input to None."""
     prompt = f"[bold green][Optional][/bold green] [bold {PURPLE}]{label}[/bold {PURPLE}]"
@@ -82,6 +96,19 @@ def _prompt_optional(label: str, guidance: str | None = None) -> Optional[str]:
     value = Prompt.ask(
         prompt,
         default="",
+        show_default=False,
+    ).strip()
+    return value or None
+
+
+def _prompt_optional_with_default(label: str, default: Optional[str]) -> Optional[str]:
+    """Prompt for an optional value with a visible default."""
+    if not default:
+        return _prompt_optional(label)
+
+    value = Prompt.ask(
+        f"[bold green][Optional][/bold green] [bold {PURPLE}]{label}[/bold {PURPLE}] [dim][{default}][/dim]",
+        default=default,
         show_default=False,
     ).strip()
     return value or None
@@ -326,6 +353,67 @@ def _parse_restock_ids(value: str, valid_ids: set[int], missing_message: str) ->
     return selected_ids
 
 
+def _add_purchased_restock_to_stock(row: Any, purchased_quantity: float, database: Path) -> None:
+    """Prompt for stock-specific fields and add a purchased restock item to stock."""
+    quantity_unit = row["quantity_unit"]
+    if purchased_quantity <= 0 or not quantity_unit:
+        return
+
+    if not Confirm.ask(
+        f"Add purchased {_format_quantity(purchased_quantity, quantity_unit)} {row['name']} to stock list?",
+        default=True,
+    ):
+        return
+
+    console.print(
+        Panel.fit(
+            f"[bold]Add purchased {row['name']} to stock[/bold]",
+            border_style=PURPLE,
+        )
+    )
+
+    source_item = None
+    if row["source_item_id"] is not None:
+        source_item = get_item(int(row["source_item_id"]), database)
+
+    category = row["category"] or _prompt_required("Category")
+    owner_default = source_item["owner"] if source_item is not None else None
+    location_default = source_item["location"] if source_item is not None else None
+
+    owner = _prompt_required_with_default("Owner", owner_default)
+    purchase_date = _prompt_purchase_date()
+    location = _prompt_required_with_default("Location", location_default)
+    unopened_expiration_date = _prompt_date_or_infinite("Unopened expiration date", required=True)
+    opened_expiration_date = _prompt_date_or_infinite("Opened expiration date", required=False)
+    opened_date = _prompt_optional_date("Opened date")
+    current_expiration_date = (
+        opened_expiration_date
+        if opened_date is not None and opened_expiration_date is not None
+        else unopened_expiration_date
+    )
+    notes = _prompt_optional_with_default("Notes", row["notes"])
+
+    item_id = add_item(
+        {
+            "name": row["name"],
+            "category": category,
+            "owner": owner,
+            "purchase_date": purchase_date,
+            "quantity_value": purchased_quantity,
+            "quantity_unit": quantity_unit,
+            "location": location,
+            "unopened_expiration_date": unopened_expiration_date,
+            "opened_expiration_date": opened_expiration_date,
+            "opened_date": opened_date,
+            "current_expiration_date": current_expiration_date,
+            "status": "active",
+            "notes": notes,
+        },
+        database,
+    )
+    console.print(f"[green]Added stock item #{item_id} from restock:[/green] {row['name']}")
+
+
 @app.command()
 def init(
     database: str = typer.Option(
@@ -429,8 +517,10 @@ def list_items(
 @app.command()
 def search(
     keyword: str = typer.Argument(..., help="Keyword to search in stock items."),
+    category: Optional[str] = typer.Option(None, help="Filter by category."),
     owner: Optional[str] = typer.Option(None, help="Filter by purchaser or assigned user."),
     location: Optional[str] = typer.Option(None, help="Filter by storage location."),
+    status: Optional[str] = typer.Option(None, help="Filter by stock status."),
     database: str = typer.Option(
         str(DEFAULT_DATABASE_PATH),
         "--database",
@@ -441,8 +531,10 @@ def search(
     """Search stock items by keyword."""
     rows = fetch_search_items(
         keyword,
+        category=category,
         owner=owner,
         location=location,
+        status=status,
         database_path=Path(database),
     )
 
@@ -589,6 +681,7 @@ def done_restock(
         if purchased_quantity >= planned_quantity:
             mark_restock_item_done(item_id, Path(database))
             console.print(f"[green]Marked restock item #{item_id} as done.[/green]")
+            _add_purchased_restock_to_stock(row, purchased_quantity, Path(database))
             continue
 
         remaining_quantity = planned_quantity - purchased_quantity
@@ -607,9 +700,11 @@ def done_restock(
                 f"[yellow]Kept restock item #{item_id} pending with "
                 f"{_format_quantity(remaining_quantity, quantity_unit)} remaining.[/yellow]"
             )
+            _add_purchased_restock_to_stock(row, purchased_quantity, Path(database))
         else:
             mark_restock_item_done(item_id, Path(database))
             console.print(f"[green]Marked restock item #{item_id} as done.[/green]")
+            _add_purchased_restock_to_stock(row, purchased_quantity, Path(database))
 
 
 @restock_app.command(name="delete")

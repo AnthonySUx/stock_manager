@@ -242,8 +242,10 @@ python3 -m stock_manager list -d stock.db
 
 ```bash
 python3 -m stock_manager search milk
+python3 -m stock_manager search milk --category dairy
 python3 -m stock_manager search milk --owner Anthony
 python3 -m stock_manager search milk --location fridge
+python3 -m stock_manager search milk --status active
 python3 -m stock_manager search milk --database stock.db
 python3 -m stock_manager search milk -d stock.db
 ```
@@ -278,6 +280,8 @@ python3 -m stock_manager restock add -d stock.db
 
 If the purchased quantity is lower than the planned quantity, the command asks whether to keep the unpurchased remainder. If the user keeps the remainder, the current restock item is updated to the remaining quantity and stay `pending`. If the user does not keep the remainder, the item is marked as `done`.
 
+If the purchased quantity is greater than zero, `restock done` asks whether to add the purchased quantity to the normal stock list. When adding it to stock, the command reuses the restock item's name, category, quantity unit, quantity value, and notes as defaults. If the restock item came from an original stock item, owner and location should also default to the original stock item values. If the original stock item cannot be found, owner and location are entered manually.
+
 ```bash
 python3 -m stock_manager restock done
 python3 -m stock_manager restock done --database stock.db
@@ -295,6 +299,19 @@ python3 -m stock_manager restock delete -d stock.db
 ### Planned Command Design
 
 The following commands are planned but not implemented yet.
+
+The stock command group should later support stock lifecycle actions.
+
+```bash
+python3 -m stock_manager consume
+python3 -m stock_manager delete
+```
+
+`consume` should support partial and full consumption. When an item reaches zero quantity, it should be marked as `consumed` and the user should be asked whether to add it to the restock list.
+
+`delete` should support manually deleting stock items after confirmation. After deletion, the user should be asked whether to add the deleted item to the restock list.
+
+When adding an item to the restock list from `consume` or `delete`, the command should reuse the original stock item as defaults but allow the user to edit the restock details before saving. Editable fields should include name, category, quantity value, quantity unit, and notes. The default flow should only require the user to confirm or adjust the restock quantity, while an edit option can expose the full details.
 
 The clean command group should later support removing old records that are no longer useful in daily views.
 
