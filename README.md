@@ -200,6 +200,8 @@ python3 -m stock_manager --version
 python3 -m stock_manager init
 python3 -m stock_manager add
 python3 -m stock_manager list
+python3 -m stock_manager consume
+python3 -m stock_manager delete
 python3 -m stock_manager search
 python3 -m stock_manager remind
 python3 -m stock_manager restock list
@@ -236,6 +238,26 @@ python3 -m stock_manager list --location fridge
 python3 -m stock_manager list --status active
 python3 -m stock_manager list --database stock.db
 python3 -m stock_manager list -d stock.db
+```
+
+`consume` is interactive. The user selects one or more stock items, enters the consumed quantity, and the command updates the remaining quantity. If an item reaches zero quantity, it is marked as `consumed` and the user is asked whether to add it to the restocking list.
+
+When adding a consumed item to the restocking list, the command reuses the original stock item as defaults. The user can adjust the restock quantity directly, or choose to edit name, category, quantity unit, and notes before saving.
+
+```bash
+python3 -m stock_manager consume
+python3 -m stock_manager consume --database stock.db
+python3 -m stock_manager consume -d stock.db
+```
+
+`delete` is interactive. The user selects one or more stock items from the list, then confirms deletion. 
+
+After deleting a stock item, the command asks whether to add it to the restocking list. The command reuses the deleted stock item's details as defaults. The user can adjust the restock quantity directly, or choose to edit name, category, quantity unit, and notes before saving.
+
+```bash
+python3 -m stock_manager delete
+python3 -m stock_manager delete --database stock.db
+python3 -m stock_manager delete -d stock.db
 ```
 
 `search` refreshes item statuses automatically, then searches stock items by keyword and supports filters.
@@ -300,18 +322,16 @@ python3 -m stock_manager restock delete -d stock.db
 
 The following commands are planned but not implemented yet.
 
-The stock command group should later support stock lifecycle actions.
+The edit commands should support correcting existing stock and restock records.
 
 ```bash
-python3 -m stock_manager consume
-python3 -m stock_manager delete
+python3 -m stock_manager edit
+python3 -m stock_manager restock edit
 ```
 
-`consume` should support partial and full consumption. When an item reaches zero quantity, it should be marked as `consumed` and the user should be asked whether to add it to the restock list.
+`edit` should let the user select one stock item and update its editable fields. Pressing Enter to keep the current value. Editable stock fields should include name, category, owner, purchase date, quantity, quantity unit, location, expiration dates, status, and notes. Quantity and expiration changes should keep status consistent with the normal status rules.
 
-`delete` should support manually deleting stock items after confirmation. After deletion, the user should be asked whether to add the deleted item to the restock list.
-
-When adding an item to the restock list from `consume` or `delete`, the command should reuse the original stock item as defaults but allow the user to edit the restock details before saving. Editable fields should include name, category, quantity value, quantity unit, and notes. The default flow should only require the user to confirm or adjust the restock quantity, while an edit option can expose the full details.
+`restock edit` should let the user select one restock item and update name, category, quantity, quantity unit, status, and notes. If a restock item is changed to `done`, the command should set a done time. If it is changed back to `pending`, the command should clear the done time.
 
 The clean command group should later support removing old records that are no longer useful in daily views.
 
@@ -329,12 +349,6 @@ Cleanup commands are planned because old `done`, `consumed`, and historical reco
 `clean stock` should support manually cleaning consumed stock history by default. Expired stock items should only be removed when the user explicitly passes `--expired` or `--all`. All cleanup commands should require confirmation by default.
 
 Single stock item deletion should belong to the normal stock delete command, not to cleanup.
-
-Reminder and restock are intentionally separate:
-
-- `remind` is a short reminder view for expired and expiring-soon stock.
-- `restock` is the detailed restock-list management area.
-- `remind` may point users to `restock`, but it should not replace the restock management commands.
 
 ### Planned Automation
 

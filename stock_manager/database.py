@@ -1,6 +1,6 @@
 """SQLite database setup for Stock Manager."""
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 import sqlite3
 from typing import Any
@@ -76,6 +76,11 @@ def connect_database(database_path: Path = DEFAULT_DATABASE_PATH) -> sqlite3.Con
     connection = sqlite3.connect(resolved_path)
     connection.execute("PRAGMA foreign_keys = ON")
     return connection
+
+
+def _current_local_timestamp() -> str:
+    """Return the local timestamp used for CLI-facing history fields."""
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def initialize_database(database_path: Path = DEFAULT_DATABASE_PATH) -> Path:
@@ -185,18 +190,22 @@ def add_restock_item(item: dict[str, Any], database_path: Path = DEFAULT_DATABAS
                 category,
                 quantity_value,
                 quantity_unit,
+                source_item_id,
                 status,
-                notes
+                notes,
+                created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 item["name"],
                 item["category"],
                 item["quantity_value"],
                 item["quantity_unit"],
+                item.get("source_item_id"),
                 item["status"],
                 item["notes"],
+                _current_local_timestamp(),
             ),
         )
 
@@ -222,6 +231,72 @@ def _get_expiration_warning_days(connection: sqlite3.Connection) -> int:
         return int(DEFAULT_REMINDER_DAYS)
 
     return max(warning_days, 0)
+
+
+def update_item_quantity(
+    item_id: int,
+    quantity_value: float,
+    database_path: Path = DEFAULT_DATABASE_PATH,
+) -> bool:
+    """Update one stock item's quantity and status."""
+    resolved_path = initialize_database(database_path)
+    today = date.today()
+
+    with connect_database(resolved_path) as connection:
+        row = connection.execute(
+            """
+            SELECT current_expiration_date
+            FROM items
+            WHERE id = ?
+            """,
+            (item_id,),
+        ).fetchone()
+        if row is None:
+            return False
+
+        warning_days = _get_expiration_warning_days(connection)
+        new_status = _calculate_status(
+            quantity_value,
+            row[0],
+            warning_days,
+            today,
+        )
+        cursor = connection.execute(
+            """
+            UPDATE items
+            SET quantity_value = ?,
+                status = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (quantity_value, new_status, item_id),
+        )
+
+    return cursor.rowcount > 0
+
+
+def delete_item(item_id: int, database_path: Path = DEFAULT_DATABASE_PATH) -> bool:
+    """Delete one stock item and clear restock references to it."""
+    resolved_path = initialize_database(database_path)
+
+    with connect_database(resolved_path) as connection:
+        connection.execute(
+            """
+            UPDATE restock_items
+            SET source_item_id = NULL
+            WHERE source_item_id = ?
+            """,
+            (item_id,),
+        )
+        cursor = connection.execute(
+            """
+            DELETE FROM items
+            WHERE id = ?
+            """,
+            (item_id,),
+        )
+
+    return cursor.rowcount > 0
 
 
 def _calculate_status(
@@ -484,10 +559,10 @@ def mark_restock_item_done(item_id: int, database_path: Path = DEFAULT_DATABASE_
         cursor = connection.execute(
             """
             UPDATE restock_items
-            SET status = 'done', done_at = CURRENT_TIMESTAMP
+            SET status = 'done', done_at = ?
             WHERE id = ? AND status != 'done'
             """,
-            (item_id,),
+            (_current_local_timestamp(), item_id),
         )
 
     return cursor.rowcount > 0

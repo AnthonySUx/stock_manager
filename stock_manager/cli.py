@@ -16,6 +16,7 @@ from stock_manager.database import (
     DEFAULT_DATABASE_PATH,
     add_item,
     add_restock_item,
+    delete_item,
     delete_restock_item,
     get_item,
     initialize_database,
@@ -23,6 +24,7 @@ from stock_manager.database import (
     list_restock_items as fetch_restock_items,
     mark_restock_item_done,
     search_items as fetch_search_items,
+    update_item_quantity,
     update_restock_item_quantity,
 )
 
@@ -353,6 +355,82 @@ def _parse_restock_ids(value: str, valid_ids: set[int], missing_message: str) ->
     return selected_ids
 
 
+def _parse_stock_ids(value: str, valid_ids: set[int], missing_message: str) -> list[int] | None:
+    """Parse a comma-separated stock id selection."""
+    selected_ids: list[int] = []
+    for raw_id in value.split(","):
+        raw_id = raw_id.strip()
+        if not raw_id:
+            continue
+
+        try:
+            item_id = int(raw_id)
+        except ValueError:
+            console.print(f"[red]Invalid stock item id:[/red] {raw_id}")
+            return None
+
+        if item_id not in valid_ids:
+            console.print(f"[red]{missing_message.format(item_id=item_id)}[/red]")
+            return None
+
+        if item_id not in selected_ids:
+            selected_ids.append(item_id)
+
+    if not selected_ids:
+        console.print("[red]Select at least one stock item id.[/red]")
+        return None
+
+    return selected_ids
+
+
+def _add_stock_item_to_restock(
+    row: Any,
+    default_quantity: float,
+    database: Path,
+    *,
+    include_source: bool = True,
+) -> None:
+    """Prompt for restock details and create a restock item from a stock item."""
+    if default_quantity <= 0:
+        default_quantity = 1
+
+    if not Confirm.ask(f"Add {row['name']} to restock list?", default=True):
+        return
+
+    restock_quantity = _prompt_nonnegative_quantity(
+        f"Restock quantity for {row['name']} [{_format_quantity(default_quantity, row['quantity_unit'])}]",
+        default_quantity,
+    )
+    if restock_quantity <= 0:
+        console.print("[yellow]Restock item was not added because quantity is 0.[/yellow]")
+        return
+
+    name = row["name"]
+    category = row["category"]
+    quantity_unit = row["quantity_unit"]
+    notes = row["notes"]
+
+    if Confirm.ask("Edit restock details?", default=False):
+        name = _prompt_required_with_default("Name", name)
+        category = _prompt_required_with_default("Category", category)
+        quantity_unit = _prompt_required_with_default("Quantity unit", quantity_unit)
+        notes = _prompt_optional_with_default("Notes", notes)
+
+    restock_id = add_restock_item(
+        {
+            "name": name,
+            "category": category,
+            "quantity_value": restock_quantity,
+            "quantity_unit": quantity_unit,
+            "source_item_id": int(row["id"]) if include_source else None,
+            "status": "pending",
+            "notes": notes,
+        },
+        database,
+    )
+    console.print(f"[green]Added restock item #{restock_id}:[/green] {name}")
+
+
 def _add_purchased_restock_to_stock(row: Any, purchased_quantity: float, database: Path) -> None:
     """Prompt for stock-specific fields and add a purchased restock item to stock."""
     quantity_unit = row["quantity_unit"]
@@ -512,6 +590,121 @@ def list_items(
         return
 
     _show_items_table(rows, "Stock Items")
+
+
+@app.command()
+def consume(
+    database: str = typer.Option(
+        str(DEFAULT_DATABASE_PATH),
+        "--database",
+        "-d",
+        help="Path to the SQLite database file.",
+    ),
+) -> None:
+    """Interactively consume stock items."""
+    rows = fetch_items(database_path=Path(database))
+    consumable_rows = [
+        row
+        for row in rows
+        if row["status"] != "consumed" and float(row["quantity_value"]) > 0
+    ]
+
+    if not consumable_rows:
+        console.print("[yellow]No consumable stock items found.[/yellow]")
+        return
+
+    _show_items_table(consumable_rows, "Consumable Stock Items")
+    rows_by_id = {int(row["id"]): row for row in consumable_rows}
+
+    while True:
+        selected = Prompt.ask(
+            f"[bold red][Required][/bold red] [bold {PURPLE}]Stock item IDs[/bold {PURPLE}] "
+            "[dim]comma-separated[/dim]"
+        )
+        selected_ids = _parse_stock_ids(
+            selected,
+            set(rows_by_id),
+            "Stock item #{item_id} is not consumable or does not exist.",
+        )
+        if selected_ids is not None:
+            break
+
+    for item_id in selected_ids:
+        row = rows_by_id[item_id]
+        current_quantity = float(row["quantity_value"])
+        quantity_unit = row["quantity_unit"]
+        consumed_quantity = _prompt_nonnegative_quantity(
+            f"Consumed quantity for {row['name']} [{_format_quantity(current_quantity, quantity_unit)}]",
+            current_quantity,
+        )
+
+        if consumed_quantity <= 0:
+            console.print(f"[yellow]Skipped stock item #{item_id}: quantity is 0.[/yellow]")
+            continue
+
+        if consumed_quantity >= current_quantity:
+            update_item_quantity(item_id, 0, Path(database))
+            console.print(f"[green]Marked stock item #{item_id} as consumed:[/green] {row['name']}")
+            _add_stock_item_to_restock(row, current_quantity, Path(database))
+            continue
+
+        remaining_quantity = current_quantity - consumed_quantity
+        update_item_quantity(item_id, remaining_quantity, Path(database))
+        console.print(
+            f"[green]Updated stock item #{item_id}:[/green] "
+            f"{_format_quantity(remaining_quantity, quantity_unit)} remaining"
+        )
+
+
+@app.command(name="delete")
+def delete_stock(
+    database: str = typer.Option(
+        str(DEFAULT_DATABASE_PATH),
+        "--database",
+        "-d",
+        help="Path to the SQLite database file.",
+    ),
+) -> None:
+    """Interactively delete stock items."""
+    rows = fetch_items(database_path=Path(database))
+
+    if not rows:
+        console.print("[yellow]No stock items found.[/yellow]")
+        return
+
+    _show_items_table(rows, "Stock Items")
+    rows_by_id = {int(row["id"]): row for row in rows}
+
+    while True:
+        selected = Prompt.ask(
+            f"[bold red][Required][/bold red] [bold {PURPLE}]Stock item IDs[/bold {PURPLE}] "
+            "[dim]comma-separated[/dim]"
+        )
+        selected_ids = _parse_stock_ids(
+            selected,
+            set(rows_by_id),
+            "Stock item #{item_id} does not exist.",
+        )
+        if selected_ids is not None:
+            break
+
+    names = ", ".join(f"#{item_id} {rows_by_id[item_id]['name']}" for item_id in selected_ids)
+    if not Confirm.ask(f"Delete stock item(s): {names}?", default=False):
+        console.print("[yellow]Delete cancelled.[/yellow]")
+        return
+
+    for item_id in selected_ids:
+        row = rows_by_id[item_id]
+        if delete_item(item_id, Path(database)):
+            console.print(f"[green]Deleted stock item #{item_id}:[/green] {row['name']}")
+            _add_stock_item_to_restock(
+                row,
+                float(row["quantity_value"]),
+                Path(database),
+                include_source=False,
+            )
+        else:
+            console.print(f"[red]Stock item #{item_id} could not be deleted.[/red]")
 
 
 @app.command()
