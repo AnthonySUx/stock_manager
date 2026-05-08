@@ -214,12 +214,13 @@ python3 -m stock_manager restock delete
 
 ### Command Options
 
-`init` initializes the local SQLite database.
+`init` initializes a SQLite database file. By default it creates or updates `stock.db` in the current working directory. The `--database` / `-d` option can be used to create or initialize a different database file; later commands must use the same database path to work with that file (otherwise `stock.db` is the default).
 
 ```bash
 python3 -m stock_manager init
 python3 -m stock_manager init --database stock.db
 python3 -m stock_manager init -d stock.db
+python3 -m stock_manager init -d home_stock.db
 ```
 
 `add` adds one stock item through interactive prompts. Purchase date can be left empty to use today's date.
@@ -343,6 +344,44 @@ python3 -m stock_manager restock delete -d stock.db
 ### Planned Command Design
 
 The following commands are planned but not implemented yet.
+
+The settings command should support viewing and updating user preferences stored in the database. It should be interactive: show a settings table, let the user select one or more setting numbers, then prompt only for the selected settings.
+
+```bash
+python3 -m stock_manager settings
+```
+
+Planned settings include:
+
+- `default_database`: default SQLite database path to use when `--database` is not provided.
+- `expiration_reminder_days`: number of days before expiration that should count as `expiring soon`.
+- `shopping_weekday`: weekly shopping day used for shopping-day reminder logic.
+- `email_enabled`: whether email notifications are enabled.
+- `email_to`: destination email address for future email alerts.
+- `notification_enabled`: whether local system notifications are enabled.
+- `clean_done_restock_after_days`: retention period for old done restock items.
+- `clean_consumed_stock_after_days`: retention period for old consumed stock items.
+
+Example interaction:
+
+```text
+Settings
+1. default_database              stock.db
+2. expiration_reminder_days      2
+3. shopping_weekday              -
+4. email_enabled                 false
+5. email_to                      -
+6. notification_enabled          true
+7. clean_done_restock_after_days -
+8. clean_consumed_stock_after_days -
+
+Settings to edit comma-separated: 1,2
+Default database [stock.db]:
+Expiration reminder days [2]:
+Save changes? [y/n]
+```
+
+The initial settings command should be manual and local. It should not start background automation by itself.
 
 The clean command group should later support removing old records that are no longer useful in daily views.
 
