@@ -168,7 +168,9 @@ def get_item(item_id: int, database_path: Path = DEFAULT_DATABASE_PATH) -> sqlit
                 opened_date,
                 current_expiration_date,
                 status,
-                notes
+                notes,
+                created_at,
+                updated_at
             FROM items
             WHERE id = ?
             """,
@@ -275,6 +277,70 @@ def update_item_quantity(
     return cursor.rowcount > 0
 
 
+def calculate_item_status(
+    quantity_value: float,
+    current_expiration_date: str,
+    database_path: Path = DEFAULT_DATABASE_PATH,
+) -> str:
+    """Calculate a stock status using the current database settings."""
+    resolved_path = initialize_database(database_path)
+
+    with connect_database(resolved_path) as connection:
+        warning_days = _get_expiration_warning_days(connection)
+
+    return _calculate_status(
+        quantity_value,
+        current_expiration_date,
+        warning_days,
+        date.today(),
+    )
+
+
+def update_item(item_id: int, item: dict[str, Any], database_path: Path = DEFAULT_DATABASE_PATH) -> bool:
+    """Update one stock item with editable fields."""
+    resolved_path = initialize_database(database_path)
+
+    with connect_database(resolved_path) as connection:
+        cursor = connection.execute(
+            """
+            UPDATE items
+            SET name = ?,
+                category = ?,
+                owner = ?,
+                purchase_date = ?,
+                quantity_value = ?,
+                quantity_unit = ?,
+                location = ?,
+                unopened_expiration_date = ?,
+                opened_expiration_date = ?,
+                opened_date = ?,
+                current_expiration_date = ?,
+                status = ?,
+                notes = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (
+                item["name"],
+                item["category"],
+                item["owner"],
+                item["purchase_date"],
+                item["quantity_value"],
+                item["quantity_unit"],
+                item["location"],
+                item["unopened_expiration_date"],
+                item["opened_expiration_date"],
+                item["opened_date"],
+                item["current_expiration_date"],
+                item["status"],
+                item["notes"],
+                item_id,
+            ),
+        )
+
+    return cursor.rowcount > 0
+
+
 def delete_item(item_id: int, database_path: Path = DEFAULT_DATABASE_PATH) -> bool:
     """Delete one stock item and clear restock references to it."""
     resolved_path = initialize_database(database_path)
@@ -294,6 +360,59 @@ def delete_item(item_id: int, database_path: Path = DEFAULT_DATABASE_PATH) -> bo
             WHERE id = ?
             """,
             (item_id,),
+        )
+
+    return cursor.rowcount > 0
+
+
+def update_restock_item(
+    item_id: int,
+    item: dict[str, Any],
+    database_path: Path = DEFAULT_DATABASE_PATH,
+) -> bool:
+    """Update one restock item with editable fields."""
+    resolved_path = initialize_database(database_path)
+
+    with connect_database(resolved_path) as connection:
+        existing = connection.execute(
+            """
+            SELECT status, done_at
+            FROM restock_items
+            WHERE id = ?
+            """,
+            (item_id,),
+        ).fetchone()
+        if existing is None:
+            return False
+
+        done_at = existing[1]
+        if item["status"] == "done" and done_at is None:
+            done_at = _current_local_timestamp()
+        if item["status"] == "pending":
+            done_at = None
+
+        cursor = connection.execute(
+            """
+            UPDATE restock_items
+            SET name = ?,
+                category = ?,
+                quantity_value = ?,
+                quantity_unit = ?,
+                status = ?,
+                notes = ?,
+                done_at = ?
+            WHERE id = ?
+            """,
+            (
+                item["name"],
+                item["category"],
+                item["quantity_value"],
+                item["quantity_unit"],
+                item["status"],
+                item["notes"],
+                done_at,
+                item_id,
+            ),
         )
 
     return cursor.rowcount > 0

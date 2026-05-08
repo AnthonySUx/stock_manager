@@ -8,6 +8,7 @@ import typer
 import typer.rich_utils
 from rich import box
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
@@ -16,15 +17,19 @@ from stock_manager.database import (
     DEFAULT_DATABASE_PATH,
     add_item,
     add_restock_item,
+    calculate_item_status,
     delete_item,
     delete_restock_item,
     get_item,
+    get_restock_item,
     initialize_database,
     list_items as fetch_items,
     list_restock_items as fetch_restock_items,
     mark_restock_item_done,
     search_items as fetch_search_items,
+    update_item,
     update_item_quantity,
+    update_restock_item,
     update_restock_item_quantity,
 )
 
@@ -82,7 +87,10 @@ def _prompt_required_with_default(label: str, default: Optional[str]) -> str:
     if not default:
         return _prompt_required(label)
 
-    prompt = f"[bold red][Required][/bold red] [bold {PURPLE}]{label}[/bold {PURPLE}] [dim][{default}][/dim]"
+    prompt = (
+        f"[bold red][Required][/bold red] [bold {PURPLE}]{label}[/bold {PURPLE}] "
+        f"[dim]{escape(f'[{default}]')}[/dim]"
+    )
     while True:
         value = Prompt.ask(prompt, default=default, show_default=False).strip()
         if value:
@@ -109,7 +117,8 @@ def _prompt_optional_with_default(label: str, default: Optional[str]) -> Optiona
         return _prompt_optional(label)
 
     value = Prompt.ask(
-        f"[bold green][Optional][/bold green] [bold {PURPLE}]{label}[/bold {PURPLE}] [dim][{default}][/dim]",
+        f"[bold green][Optional][/bold green] [bold {PURPLE}]{label}[/bold {PURPLE}] "
+        f"[dim]{escape(f'[{default}]')}[/dim]",
         default=default,
         show_default=False,
     ).strip()
@@ -231,6 +240,84 @@ def _prompt_nonnegative_quantity(label: str, default: float) -> float:
         return quantity
 
 
+def _prompt_edit_required(label: str, current: Any) -> str:
+    """Prompt for an editable required value, keeping current on empty input."""
+    return _prompt_required_with_default(label, str(current))
+
+
+def _prompt_edit_optional(label: str, current: Any) -> Optional[str]:
+    """Prompt for an editable optional value, keeping current on empty input."""
+    current_text = "" if current is None else str(current)
+    value = Prompt.ask(
+        f"[bold green][Optional][/bold green] [bold {PURPLE}]{label}[/bold {PURPLE}] "
+        f"[dim]{escape(f'[{_format_optional(current_text)} | type none to clear]')}[/dim]",
+        default=current_text,
+        show_default=False,
+    ).strip()
+    if value.lower() == "none":
+        return None
+    return value or None
+
+
+def _prompt_edit_date(label: str, current: str, *, allow_infinite: bool) -> str:
+    """Prompt for an editable required date value."""
+    guidance = "YYYY-MM-DD or infinite" if allow_infinite else "YYYY-MM-DD"
+    while True:
+        value = _prompt_required_with_default(f"{label} | [dim]{guidance}[/dim]", current)
+        normalized = value.strip().lower()
+        if allow_infinite and normalized == "infinite":
+            return "infinite"
+
+        try:
+            date.fromisoformat(normalized)
+        except ValueError:
+            console.print(f"[red]Use {guidance}.[/red]")
+            continue
+
+        return normalized
+
+
+def _prompt_edit_optional_date(label: str, current: Any) -> Optional[str]:
+    """Prompt for an editable optional date value."""
+    while True:
+        value = _prompt_edit_optional(f"{label} | [dim]YYYY-MM-DD[/dim]", current)
+        if value is None:
+            return None
+
+        try:
+            date.fromisoformat(value)
+        except ValueError:
+            console.print("[red]Use YYYY-MM-DD or none.[/red]")
+            continue
+
+        return value
+
+
+def _prompt_edit_nonnegative_quantity(label: str, current: float) -> float:
+    """Prompt for an editable non-negative quantity."""
+    return _prompt_nonnegative_quantity(label, current)
+
+
+def _prompt_edit_positive_quantity(label: str, current: float) -> float:
+    """Prompt for an editable positive quantity."""
+    while True:
+        quantity = _prompt_nonnegative_quantity(label, current)
+        if quantity > 0:
+            return quantity
+        console.print("[red]Quantity value must be greater than 0.[/red]")
+
+
+def _prompt_choice_with_default(label: str, current: str, allowed_values: set[str]) -> str:
+    """Prompt for a value that must be one of a fixed set."""
+    allowed_text = " / ".join(sorted(allowed_values))
+    while True:
+        value = _prompt_required_with_default(f"{label} | [dim]{allowed_text}[/dim]", current)
+        normalized = value.strip().lower()
+        if normalized in allowed_values:
+            return normalized
+        console.print(f"[red]Use one of: {allowed_text}.[/red]")
+
+
 def _format_quantity(quantity_value: float, quantity_unit: str) -> str:
     """Format quantity without a trailing .0 for whole numbers."""
     if quantity_value.is_integer():
@@ -259,6 +346,11 @@ def _format_optional(value: Any) -> str:
     return str(value)
 
 
+def _format_notes_marker(value: Any) -> str:
+    """Format whether a row has notes without showing note contents."""
+    return "Yes" if value not in (None, "") else "-"
+
+
 def _show_items_table(rows: list[Any], title: str) -> None:
     """Render stock items with the standard Stock Manager table style."""
     table = Table(
@@ -276,6 +368,7 @@ def _show_items_table(rows: list[Any], title: str) -> None:
     table.add_column("Location", overflow="fold")
     table.add_column("Expiration", overflow="fold")
     table.add_column("Status", overflow="fold")
+    table.add_column("Notes", overflow="fold")
 
     for row in rows:
         table.add_row(
@@ -287,6 +380,7 @@ def _show_items_table(rows: list[Any], title: str) -> None:
             row["location"],
             row["current_expiration_date"],
             _format_status(row["status"]),
+            _format_notes_marker(row["notes"]),
         )
 
     console.print(table)
@@ -321,10 +415,55 @@ def _show_restock_table(rows: list[Any], title: str) -> None:
             quantity,
             _format_status(row["status"]),
             row["created_at"],
-            _format_optional(row["notes"]),
+            _format_notes_marker(row["notes"]),
         )
 
     console.print(table)
+
+
+def _show_stock_detail(row: Any) -> None:
+    """Render one stock item with full detail fields."""
+    lines = [
+        f"ID: {row['id']}",
+        f"Name: {escape(row['name'])}",
+        f"Category: {escape(row['category'])}",
+        f"Owner: {escape(row['owner'])}",
+        f"Purchase date: {row['purchase_date']}",
+        f"Quantity: {_format_quantity(row['quantity_value'], row['quantity_unit'])}",
+        f"Location: {escape(row['location'])}",
+        f"Unopened expiration date: {row['unopened_expiration_date']}",
+        f"Opened expiration date: {_format_optional(row['opened_expiration_date'])}",
+        f"Opened date: {_format_optional(row['opened_date'])}",
+        f"Current expiration date: {row['current_expiration_date']}",
+        f"Status: {_format_status(row['status'])}",
+        f"Notes: {escape(_format_optional(row['notes']))}",
+    ]
+    if "created_at" in row.keys():
+        lines.append(f"Created: {row['created_at']}")
+    if "updated_at" in row.keys():
+        lines.append(f"Updated: {row['updated_at']}")
+
+    console.print(Panel("\n".join(lines), title=f"Stock Item #{row['id']}", border_style=PURPLE))
+
+
+def _show_restock_detail(row: Any) -> None:
+    """Render one restock item with full detail fields."""
+    quantity = "-"
+    if row["quantity_value"] is not None and row["quantity_unit"]:
+        quantity = _format_quantity(row["quantity_value"], row["quantity_unit"])
+
+    lines = [
+        f"ID: {row['id']}",
+        f"Name: {escape(row['name'])}",
+        f"Category: {escape(_format_optional(row['category']))}",
+        f"Quantity: {quantity}",
+        f"Source item ID: {_format_optional(row['source_item_id'])}",
+        f"Status: {_format_status(row['status'])}",
+        f"Notes: {escape(_format_optional(row['notes']))}",
+        f"Created: {row['created_at']}",
+        f"Done: {_format_optional(row['done_at'])}",
+    ]
+    console.print(Panel("\n".join(lines), title=f"Restock Item #{row['id']}", border_style=PURPLE))
 
 
 def _parse_restock_ids(value: str, valid_ids: set[int], missing_message: str) -> list[int] | None:
@@ -381,6 +520,119 @@ def _parse_stock_ids(value: str, valid_ids: set[int], missing_message: str) -> l
         return None
 
     return selected_ids
+
+
+def _parse_field_numbers(value: str, valid_fields: dict[int, str]) -> list[int] | None:
+    """Parse a comma-separated editable field selection."""
+    selected_fields: list[int] = []
+    for raw_number in value.split(","):
+        raw_number = raw_number.strip()
+        if not raw_number:
+            continue
+
+        try:
+            field_number = int(raw_number)
+        except ValueError:
+            console.print(f"[red]Invalid field number:[/red] {raw_number}")
+            return None
+
+        if field_number not in valid_fields:
+            console.print(f"[red]Field #{field_number} does not exist.[/red]")
+            return None
+
+        if field_number not in selected_fields:
+            selected_fields.append(field_number)
+
+    if not selected_fields:
+        console.print("[red]Select at least one field.[/red]")
+        return None
+
+    return selected_fields
+
+
+def _prompt_field_numbers(fields: dict[int, str]) -> list[int]:
+    """Prompt for one or more editable fields."""
+    console.print("[bold]Editable fields[/bold]")
+    for field_number, field_name in fields.items():
+        console.print(f"{field_number}. {field_name}")
+
+    while True:
+        selected = Prompt.ask(
+            f"[bold red][Required][/bold red] [bold {PURPLE}]Fields to edit[/bold {PURPLE}] "
+            "[dim]comma-separated[/dim]"
+        )
+        selected_fields = _parse_field_numbers(selected, fields)
+        if selected_fields is not None:
+            return selected_fields
+
+
+def _calculate_current_expiration_date(
+    unopened_expiration_date: str,
+    opened_expiration_date: Optional[str],
+    opened_date: Optional[str],
+) -> str:
+    """Return the expiration date currently used by status and reminders."""
+    if opened_date is not None and opened_expiration_date is not None:
+        return opened_expiration_date
+    return unopened_expiration_date
+
+
+def _maybe_show_stock_details(rows: list[Any], database: Path) -> None:
+    """Optionally show full stock item details after a list view."""
+    try:
+        show_details = Confirm.ask("View item details?", default=False)
+    except (EOFError, KeyboardInterrupt):
+        return
+    if not show_details:
+        return
+
+    rows_by_id = {int(row["id"]): row for row in rows}
+    while True:
+        selected = Prompt.ask(
+            f"[bold red][Required][/bold red] [bold {PURPLE}]Stock item IDs[/bold {PURPLE}] "
+            "[dim]comma-separated[/dim]"
+        )
+        selected_ids = _parse_stock_ids(
+            selected,
+            set(rows_by_id),
+            "Stock item #{item_id} does not exist.",
+        )
+        if selected_ids is not None:
+            break
+
+    for item_id in selected_ids:
+        row = get_item(item_id, database)
+        if row is not None:
+            _show_stock_detail(row)
+
+
+def _maybe_show_restock_details(rows: list[Any], database: Path) -> None:
+    """Optionally show full restock item details after a list view."""
+    try:
+        show_details = Confirm.ask("View restock item details?", default=False)
+    except (EOFError, KeyboardInterrupt):
+        return
+    if not show_details:
+        return
+
+    rows_by_id = {int(row["id"]): row for row in rows}
+    while True:
+        selected = Prompt.ask(
+            f"[bold red][Required][/bold red] [bold {PURPLE}]Restock item IDs[/bold {PURPLE}] "
+            "[dim]comma-separated[/dim]"
+        )
+        selected_ids = _parse_restock_ids(
+            selected,
+            set(rows_by_id),
+            "Restock item #{item_id} does not exist.",
+        )
+        if selected_ids is not None:
+            break
+
+    for item_id in selected_ids:
+        row = get_restock_item(item_id, database)
+        if row is not None:
+            _show_restock_detail(row)
 
 
 def _add_stock_item_to_restock(
@@ -590,6 +842,145 @@ def list_items(
         return
 
     _show_items_table(rows, "Stock Items")
+    _maybe_show_stock_details(rows, Path(database))
+
+
+@app.command()
+def edit(
+    database: str = typer.Option(
+        str(DEFAULT_DATABASE_PATH),
+        "--database",
+        "-d",
+        help="Path to the SQLite database file.",
+    ),
+) -> None:
+    """Interactively edit one stock item."""
+    rows = fetch_items(database_path=Path(database))
+
+    if not rows:
+        console.print("[yellow]No stock items found.[/yellow]")
+        return
+
+    _show_items_table(rows, "Stock Items")
+    rows_by_id = {int(row["id"]): row for row in rows}
+
+    while True:
+        selected = Prompt.ask(
+            f"[bold red][Required][/bold red] [bold {PURPLE}]Stock item ID[/bold {PURPLE}]"
+        )
+        selected_ids = _parse_stock_ids(
+            selected,
+            set(rows_by_id),
+            "Stock item #{item_id} does not exist.",
+        )
+        if selected_ids is None:
+            continue
+        if len(selected_ids) > 1:
+            console.print("[red]Select exactly one stock item id.[/red]")
+            continue
+        break
+
+    item_id = selected_ids[0]
+    row = get_item(item_id, Path(database))
+    if row is None:
+        console.print(f"[red]Stock item #{item_id} does not exist.[/red]")
+        return
+
+    console.print(Panel.fit(f"[bold]Edit stock item #{item_id}[/bold]", border_style=PURPLE))
+    _show_stock_detail(row)
+
+    stock_fields = {
+        1: "name",
+        2: "category",
+        3: "owner",
+        4: "purchase date",
+        5: "quantity",
+        6: "location",
+        7: "expiration",
+        8: "notes",
+    }
+    selected_fields = _prompt_field_numbers(stock_fields)
+
+    name = row["name"]
+    category = row["category"]
+    owner = row["owner"]
+    purchase_date = row["purchase_date"]
+    quantity_value = float(row["quantity_value"])
+    quantity_unit = row["quantity_unit"]
+    location = row["location"]
+    unopened_expiration_date = row["unopened_expiration_date"]
+    opened_expiration_date = row["opened_expiration_date"]
+    opened_date = row["opened_date"]
+    current_expiration_date = row["current_expiration_date"]
+    notes = row["notes"]
+
+    for field_number in selected_fields:
+        if field_number == 1:
+            name = _prompt_edit_required("Name", name)
+        elif field_number == 2:
+            category = _prompt_edit_required("Category", category)
+        elif field_number == 3:
+            owner = _prompt_edit_required("Owner", owner)
+        elif field_number == 4:
+            purchase_date = _prompt_edit_date("Purchase date", purchase_date, allow_infinite=False)
+        elif field_number == 5:
+            quantity_value = _prompt_edit_nonnegative_quantity("Quantity value", quantity_value)
+            quantity_unit = _prompt_edit_required("Quantity unit", quantity_unit)
+        elif field_number == 6:
+            location = _prompt_edit_required("Location", location)
+        elif field_number == 7:
+            unopened_expiration_date = _prompt_edit_date(
+                "Unopened expiration date",
+                unopened_expiration_date,
+                allow_infinite=True,
+            )
+            opened_expiration_date = _prompt_edit_optional_date(
+                "Opened expiration date",
+                opened_expiration_date,
+            )
+            opened_date = _prompt_edit_optional_date("Opened date", opened_date)
+            current_expiration_date = _calculate_current_expiration_date(
+                unopened_expiration_date,
+                opened_expiration_date,
+                opened_date,
+            )
+        elif field_number == 8:
+            notes = _prompt_edit_optional("Notes", notes)
+
+    status = calculate_item_status(
+        quantity_value,
+        current_expiration_date,
+        Path(database),
+    )
+
+    if not Confirm.ask(f"Save changes to stock item #{item_id} {name}?", default=True):
+        console.print("[yellow]Edit cancelled.[/yellow]")
+        return
+
+    updated = update_item(
+        item_id,
+        {
+            "name": name,
+            "category": category,
+            "owner": owner,
+            "purchase_date": purchase_date,
+            "quantity_value": quantity_value,
+            "quantity_unit": quantity_unit,
+            "location": location,
+            "unopened_expiration_date": unopened_expiration_date,
+            "opened_expiration_date": opened_expiration_date,
+            "opened_date": opened_date,
+            "current_expiration_date": current_expiration_date,
+            "status": status,
+            "notes": notes,
+        },
+        Path(database),
+    )
+
+    if updated:
+        console.print(f"[green]Updated stock item #{item_id}:[/green] {name}")
+    else:
+        console.print(f"[red]Stock item #{item_id} could not be updated.[/red]")
 
 
 @app.command()
@@ -782,6 +1173,7 @@ def list_restock(
         return
 
     _show_restock_table(rows, "Restock Items")
+    _maybe_show_restock_details(rows, Path(database))
 
 
 @restock_app.command(name="add")
@@ -898,6 +1290,99 @@ def done_restock(
             mark_restock_item_done(item_id, Path(database))
             console.print(f"[green]Marked restock item #{item_id} as done.[/green]")
             _add_purchased_restock_to_stock(row, purchased_quantity, Path(database))
+
+
+@restock_app.command(name="edit")
+def edit_restock(
+    database: str = typer.Option(
+        str(DEFAULT_DATABASE_PATH),
+        "--database",
+        "-d",
+        help="Path to the SQLite database file.",
+    ),
+) -> None:
+    """Interactively edit one restock list item."""
+    rows = fetch_restock_items(database_path=Path(database))
+
+    if not rows:
+        console.print("[yellow]No restock items found.[/yellow]")
+        return
+
+    _show_restock_table(rows, "Restock Items")
+    rows_by_id = {int(row["id"]): row for row in rows}
+
+    while True:
+        selected = Prompt.ask(
+            f"[bold red][Required][/bold red] [bold {PURPLE}]Restock item ID[/bold {PURPLE}]"
+        )
+        selected_ids = _parse_restock_ids(
+            selected,
+            set(rows_by_id),
+            "Restock item #{item_id} does not exist.",
+        )
+        if selected_ids is None:
+            continue
+        if len(selected_ids) > 1:
+            console.print("[red]Select exactly one restock item id.[/red]")
+            continue
+        break
+
+    item_id = selected_ids[0]
+    row = get_restock_item(item_id, Path(database))
+    if row is None:
+        console.print(f"[red]Restock item #{item_id} does not exist.[/red]")
+        return
+
+    console.print(Panel.fit(f"[bold]Edit restock item #{item_id}[/bold]", border_style=PURPLE))
+    _show_restock_detail(row)
+
+    restock_fields = {
+        1: "name",
+        2: "category",
+        3: "quantity",
+        4: "notes",
+    }
+    selected_fields = _prompt_field_numbers(restock_fields)
+
+    name = row["name"]
+    category = row["category"] or ""
+    quantity_value = float(row["quantity_value"]) if row["quantity_value"] is not None else 1
+    quantity_unit = row["quantity_unit"] or ""
+    status = row["status"]
+    notes = row["notes"]
+
+    for field_number in selected_fields:
+        if field_number == 1:
+            name = _prompt_edit_required("Name", name)
+        elif field_number == 2:
+            category = _prompt_edit_required("Category", category)
+        elif field_number == 3:
+            quantity_value = _prompt_edit_positive_quantity("Quantity value", quantity_value)
+            quantity_unit = _prompt_edit_required("Quantity unit", quantity_unit)
+        elif field_number == 4:
+            notes = _prompt_edit_optional("Notes", notes)
+
+    if not Confirm.ask(f"Save changes to restock item #{item_id} {name}?", default=True):
+        console.print("[yellow]Edit cancelled.[/yellow]")
+        return
+
+    updated = update_restock_item(
+        item_id,
+        {
+            "name": name,
+            "category": category,
+            "quantity_value": quantity_value,
+            "quantity_unit": quantity_unit,
+            "status": status,
+            "notes": notes,
+        },
+        Path(database),
+    )
+
+    if updated:
+        console.print(f"[green]Updated restock item #{item_id}:[/green] {name}")
+    else:
+        console.print(f"[red]Restock item #{item_id} could not be updated.[/red]")
 
 
 @restock_app.command(name="delete")

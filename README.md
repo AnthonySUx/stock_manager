@@ -200,6 +200,7 @@ python3 -m stock_manager --version
 python3 -m stock_manager init
 python3 -m stock_manager add
 python3 -m stock_manager list
+python3 -m stock_manager edit
 python3 -m stock_manager consume
 python3 -m stock_manager delete
 python3 -m stock_manager search
@@ -207,6 +208,7 @@ python3 -m stock_manager remind
 python3 -m stock_manager restock list
 python3 -m stock_manager restock add
 python3 -m stock_manager restock done
+python3 -m stock_manager restock edit
 python3 -m stock_manager restock delete
 ```
 
@@ -228,7 +230,7 @@ python3 -m stock_manager add --database stock.db
 python3 -m stock_manager add -d stock.db
 ```
 
-`list` shows stock items, refreshes item statuses automatically, and supports filters.
+`list` shows stock items, refreshes item statuses automatically, and supports filters. The table shows whether each item has notes with `Yes` or `-`. After the table, the command can optionally show full details for selected item IDs.
 
 ```bash
 python3 -m stock_manager list
@@ -238,6 +240,16 @@ python3 -m stock_manager list --location fridge
 python3 -m stock_manager list --status active
 python3 -m stock_manager list --database stock.db
 python3 -m stock_manager list -d stock.db
+```
+
+`edit` is interactive. The user selects one stock item, reviews its details, then selects one or more field numbers to edit. Pressing Enter keeps the current value. Optional fields can be cleared by typing `none`.
+
+Editable stock fields are name, category, owner, purchase date, quantity, location, expiration, and notes. Quantity edits update quantity value and quantity unit together. Expiration edits update unopened expiration date, opened expiration date, and opened date together. Current expiration date and status are calculated by the application and are not edited directly.
+
+```bash
+python3 -m stock_manager edit
+python3 -m stock_manager edit --database stock.db
+python3 -m stock_manager edit -d stock.db
 ```
 
 `consume` is interactive. The user selects one or more stock items, enters the consumed quantity, and the command updates the remaining quantity. If an item reaches zero quantity, it is marked as `consumed` and the user is asked whether to add it to the restocking list.
@@ -280,7 +292,7 @@ python3 -m stock_manager remind --database stock.db
 python3 -m stock_manager remind -d stock.db
 ```
 
-`restock list` shows restock-list items as a separate management view.
+`restock list` shows restock-list items as a separate management view. The table shows whether each restock item has notes with `Yes` or `-`. After the table, the command can optionally show full details for selected restock item IDs.
 
 ```bash
 python3 -m stock_manager restock list
@@ -310,6 +322,16 @@ python3 -m stock_manager restock done --database stock.db
 python3 -m stock_manager restock done -d stock.db
 ```
 
+`restock edit` is interactive. The user selects one restock item, reviews its details, then selects one or more field numbers to edit. Pressing Enter keeps the current value. Optional fields can be cleared by typing `none`.
+
+Editable restock fields are name, category, quantity, and notes. Quantity edits update quantity value and quantity unit together. Restock status is not edited directly; use `restock done` to mark pending items as done.
+
+```bash
+python3 -m stock_manager restock edit
+python3 -m stock_manager restock edit --database stock.db
+python3 -m stock_manager restock edit -d stock.db
+```
+
 `restock delete` is interactive. The user selects one or more restock-list items from the list, then confirms deletion.
 
 ```bash
@@ -321,17 +343,6 @@ python3 -m stock_manager restock delete -d stock.db
 ### Planned Command Design
 
 The following commands are planned but not implemented yet.
-
-The edit commands should support correcting existing stock and restock records.
-
-```bash
-python3 -m stock_manager edit
-python3 -m stock_manager restock edit
-```
-
-`edit` should let the user select one stock item and update its editable fields. Pressing Enter to keep the current value. Editable stock fields should include name, category, owner, purchase date, quantity, quantity unit, location, expiration dates, status, and notes. Quantity and expiration changes should keep status consistent with the normal status rules.
-
-`restock edit` should let the user select one restock item and update name, category, quantity, quantity unit, status, and notes. If a restock item is changed to `done`, the command should set a done time. If it is changed back to `pending`, the command should clear the done time.
 
 The clean command group should later support removing old records that are no longer useful in daily views.
 
