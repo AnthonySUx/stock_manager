@@ -198,6 +198,7 @@ Available commands:
 python3 -m stock_manager --help
 python3 -m stock_manager --version
 python3 -m stock_manager init
+python3 -m stock_manager settings
 python3 -m stock_manager add
 python3 -m stock_manager list
 python3 -m stock_manager edit
@@ -214,7 +215,7 @@ python3 -m stock_manager restock delete
 
 ### Command Options
 
-`init` initializes a SQLite database file. By default it creates or updates `stock.db` in the current working directory. The `--database` / `-d` option can be used to create or initialize a different database file; later commands must use the same database path to work with that file (otherwise `stock.db` is the default).
+`init` initializes a SQLite database file. By default it creates or updates `stock.db` in the current working directory, unless a default database has been configured with `settings`. The `--database` / `-d` option can be used to create or initialize a different database file.
 
 ```bash
 python3 -m stock_manager init
@@ -222,6 +223,19 @@ python3 -m stock_manager init --database stock.db
 python3 -m stock_manager init -d stock.db
 python3 -m stock_manager init -d home_stock.db
 ```
+
+`settings` shows the current global options and lets the user edit one or more settings by number. The settings are stored in a user-level config file `settings.json`.
+
+```bash
+python3 -m stock_manager settings
+```
+
+Current settings:
+
+- `default_database`: change the default SQLite database path.
+- `expiration_reminder_days`: change the number of days before expiration that counts as `expiring soon`. This affects status refreshes and `remind`.
+
+Settings are stored in a user-level config file, not inside a stock database file.
 
 `add` adds one stock item through interactive prompts. Purchase date can be left empty to use today's date.
 
@@ -345,44 +359,6 @@ python3 -m stock_manager restock delete -d stock.db
 
 The following commands are planned but not implemented yet.
 
-The settings command should support viewing and updating user preferences stored in the database. It should be interactive: show a settings table, let the user select one or more setting numbers, then prompt only for the selected settings.
-
-```bash
-python3 -m stock_manager settings
-```
-
-Planned settings include:
-
-- `default_database`: default SQLite database path to use when `--database` is not provided.
-- `expiration_reminder_days`: number of days before expiration that should count as `expiring soon`.
-- `shopping_weekday`: weekly shopping day used for shopping-day reminder logic.
-- `email_enabled`: whether email notifications are enabled.
-- `email_to`: destination email address for future email alerts.
-- `notification_enabled`: whether local system notifications are enabled.
-- `clean_done_restock_after_days`: retention period for old done restock items.
-- `clean_consumed_stock_after_days`: retention period for old consumed stock items.
-
-Example interaction:
-
-```text
-Settings
-1. default_database              stock.db
-2. expiration_reminder_days      2
-3. shopping_weekday              -
-4. email_enabled                 false
-5. email_to                      -
-6. notification_enabled          true
-7. clean_done_restock_after_days -
-8. clean_consumed_stock_after_days -
-
-Settings to edit comma-separated: 1,2
-Default database [stock.db]:
-Expiration reminder days [2]:
-Save changes? [y/n]
-```
-
-The initial settings command should be manual and local. It should not start background automation by itself.
-
 The clean command group should later support removing old records that are no longer useful in daily views.
 
 ```bash
@@ -407,7 +383,6 @@ The following automation features are planned but not implemented yet:
 - Background expiration reminder checks. The current `remind` command is manual.
 - macOS system notifications from inside Stock Manager.
 - Email alerts for expiration reminders.
-- A settings command for reminder days, shopping day, and notification preferences.
 - Weekly shopping-day reminder logic.
 - Automatically sending the restock list by email on the configured shopping day.
 - Automatically cleaning old done restock items after a configured retention period.

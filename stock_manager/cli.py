@@ -13,8 +13,15 @@ from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
-from stock_manager.database import (
+from stock_manager.config import (
     DEFAULT_DATABASE_PATH,
+    get_default_database_path,
+    get_expiration_reminder_days,
+    load_global_settings,
+    normalize_database_path,
+    save_global_settings,
+)
+from stock_manager.database import (
     add_item,
     add_restock_item,
     calculate_item_status,
@@ -66,6 +73,14 @@ restock_app = typer.Typer(
 )
 app.add_typer(restock_app, name="restock")
 console = Console(width=100)
+
+
+def _resolve_database_option(database: Optional[str]) -> Path:
+    """Resolve a CLI database option, falling back to the configured default."""
+    if database:
+        return Path(database)
+
+    return get_default_database_path()
 
 
 def _not_implemented(command_name: str) -> None:
@@ -318,6 +333,23 @@ def _prompt_choice_with_default(label: str, current: str, allowed_values: set[st
         console.print(f"[red]Use one of: {allowed_text}.[/red]")
 
 
+def _prompt_nonnegative_integer(label: str, current: int) -> int:
+    """Prompt for a non-negative integer value."""
+    while True:
+        value = _prompt_required_with_default(label, str(current))
+        try:
+            number = int(value)
+        except ValueError:
+            console.print("[red]Use a whole number.[/red]")
+            continue
+
+        if number < 0:
+            console.print("[red]Value cannot be negative.[/red]")
+            continue
+
+        return number
+
+
 def _format_quantity(quantity_value: float, quantity_unit: str) -> str:
     """Format quantity without a trailing .0 for whole numbers."""
     if quantity_value.is_integer():
@@ -466,6 +498,25 @@ def _show_restock_detail(row: Any) -> None:
     console.print(Panel("\n".join(lines), title=f"Restock Item #{row['id']}", border_style=PURPLE))
 
 
+def _show_settings_table() -> None:
+    """Render currently supported settings."""
+    settings = load_global_settings()
+
+    table = Table(
+        title="Settings",
+        box=box.ROUNDED,
+        border_style=PURPLE,
+        header_style=f"bold {PURPLE}",
+        title_style="bold",
+    )
+    table.add_column("No.", justify="right")
+    table.add_column("Setting", overflow="fold")
+    table.add_column("Value", overflow="fold")
+    table.add_row("1", "default_database", settings["default_database"])
+    table.add_row("2", "expiration_reminder_days", settings["expiration_reminder_days"])
+    console.print(table)
+
+
 def _parse_restock_ids(value: str, valid_ids: set[int], missing_message: str) -> list[int] | None:
     """Parse a comma-separated restock id selection."""
     selected_ids: list[int] = []
@@ -550,11 +601,12 @@ def _parse_field_numbers(value: str, valid_fields: dict[int, str]) -> list[int] 
     return selected_fields
 
 
-def _prompt_field_numbers(fields: dict[int, str]) -> list[int]:
+def _prompt_field_numbers(fields: dict[int, str], *, show_fields: bool = True) -> list[int]:
     """Prompt for one or more editable fields."""
-    console.print("[bold]Editable fields[/bold]")
-    for field_number, field_name in fields.items():
-        console.print(f"{field_number}. {field_name}")
+    if show_fields:
+        console.print("[bold]Editable fields[/bold]")
+        for field_number, field_name in fields.items():
+            console.print(f"{field_number}. {field_name}")
 
     while True:
         selected = Prompt.ask(
@@ -746,25 +798,67 @@ def _add_purchased_restock_to_stock(row: Any, purchased_quantity: float, databas
 
 @app.command()
 def init(
-    database: str = typer.Option(
-        str(DEFAULT_DATABASE_PATH),
+    database: Optional[str] = typer.Option(
+        None,
         "--database",
         "-d",
         help="Path to the SQLite database file.",
+        show_default=False,
     ),
 ) -> None:
     """Initialize the local Stock Manager database."""
-    database_path = initialize_database(Path(database))
+    database_path = initialize_database(_resolve_database_option(database))
     console.print(f"[green]Initialized database:[/green] {database_path}")
 
 
 @app.command()
+def settings() -> None:
+    """View and update Stock Manager settings."""
+    current_settings = load_global_settings()
+    _show_settings_table()
+
+    settings_fields = {
+        1: "default_database",
+        2: "expiration_reminder_days",
+    }
+    selected_fields = _prompt_field_numbers(settings_fields, show_fields=False)
+    updated_settings: dict[str, str] = {}
+    database_to_initialize: Optional[Path] = None
+
+    if 1 in selected_fields:
+        new_database = _prompt_edit_required(
+            "Default database",
+            current_settings["default_database"] or str(DEFAULT_DATABASE_PATH),
+        )
+        database_to_initialize = normalize_database_path(new_database)
+        updated_settings["default_database"] = str(database_to_initialize)
+
+    if 2 in selected_fields:
+        current_days = get_expiration_reminder_days()
+        reminder_days = _prompt_nonnegative_integer("Expiration reminder days", current_days)
+        updated_settings["expiration_reminder_days"] = str(reminder_days)
+
+    if not Confirm.ask("Save settings changes?", default=False):
+        console.print("[yellow]Settings update cancelled.[/yellow]")
+        return
+
+    save_global_settings(updated_settings)
+
+    if database_to_initialize is not None:
+        initialize_database(database_to_initialize)
+
+    console.print("[green]Updated settings.[/green]")
+    _show_settings_table()
+
+
+@app.command()
 def add(
-    database: str = typer.Option(
-        str(DEFAULT_DATABASE_PATH),
+    database: Optional[str] = typer.Option(
+        None,
         "--database",
         "-d",
         help="Path to the SQLite database file.",
+        show_default=False,
     ),
 ) -> None:
     """Add a new stock item."""
@@ -809,7 +903,7 @@ def add(
             "status": "active",
             "notes": notes,
         },
-        Path(database),
+        _resolve_database_option(database),
     )
 
     console.print(f"[green]Added item #{item_id}:[/green] {name}")
@@ -821,11 +915,12 @@ def list_items(
     owner: Optional[str] = typer.Option(None, help="Filter by purchaser or assigned user."),
     location: Optional[str] = typer.Option(None, help="Filter by storage location."),
     status: Optional[str] = typer.Option(None, help="Filter by stock status."),
-    database: str = typer.Option(
-        str(DEFAULT_DATABASE_PATH),
+    database: Optional[str] = typer.Option(
+        None,
         "--database",
         "-d",
         help="Path to the SQLite database file.",
+        show_default=False,
     ),
 ) -> None:
     """Show current stock items."""
@@ -834,7 +929,7 @@ def list_items(
         owner=owner,
         location=location,
         status=status,
-        database_path=Path(database),
+        database_path=_resolve_database_option(database),
     )
 
     if not rows:
@@ -842,20 +937,21 @@ def list_items(
         return
 
     _show_items_table(rows, "Stock Items")
-    _maybe_show_stock_details(rows, Path(database))
+    _maybe_show_stock_details(rows, _resolve_database_option(database))
 
 
 @app.command()
 def edit(
-    database: str = typer.Option(
-        str(DEFAULT_DATABASE_PATH),
+    database: Optional[str] = typer.Option(
+        None,
         "--database",
         "-d",
         help="Path to the SQLite database file.",
+        show_default=False,
     ),
 ) -> None:
     """Interactively edit one stock item."""
-    rows = fetch_items(database_path=Path(database))
+    rows = fetch_items(database_path=_resolve_database_option(database))
 
     if not rows:
         console.print("[yellow]No stock items found.[/yellow]")
@@ -881,7 +977,7 @@ def edit(
         break
 
     item_id = selected_ids[0]
-    row = get_item(item_id, Path(database))
+    row = get_item(item_id, _resolve_database_option(database))
     if row is None:
         console.print(f"[red]Stock item #{item_id} does not exist.[/red]")
         return
@@ -950,7 +1046,7 @@ def edit(
     status = calculate_item_status(
         quantity_value,
         current_expiration_date,
-        Path(database),
+        _resolve_database_option(database),
     )
 
     if not Confirm.ask(f"Save changes to stock item #{item_id} {name}?", default=True):
@@ -974,7 +1070,7 @@ def edit(
             "status": status,
             "notes": notes,
         },
-        Path(database),
+        _resolve_database_option(database),
     )
 
     if updated:
@@ -985,15 +1081,16 @@ def edit(
 
 @app.command()
 def consume(
-    database: str = typer.Option(
-        str(DEFAULT_DATABASE_PATH),
+    database: Optional[str] = typer.Option(
+        None,
         "--database",
         "-d",
         help="Path to the SQLite database file.",
+        show_default=False,
     ),
 ) -> None:
     """Interactively consume stock items."""
-    rows = fetch_items(database_path=Path(database))
+    rows = fetch_items(database_path=_resolve_database_option(database))
     consumable_rows = [
         row
         for row in rows
@@ -1034,13 +1131,13 @@ def consume(
             continue
 
         if consumed_quantity >= current_quantity:
-            update_item_quantity(item_id, 0, Path(database))
+            update_item_quantity(item_id, 0, _resolve_database_option(database))
             console.print(f"[green]Marked stock item #{item_id} as consumed:[/green] {row['name']}")
-            _add_stock_item_to_restock(row, current_quantity, Path(database))
+            _add_stock_item_to_restock(row, current_quantity, _resolve_database_option(database))
             continue
 
         remaining_quantity = current_quantity - consumed_quantity
-        update_item_quantity(item_id, remaining_quantity, Path(database))
+        update_item_quantity(item_id, remaining_quantity, _resolve_database_option(database))
         console.print(
             f"[green]Updated stock item #{item_id}:[/green] "
             f"{_format_quantity(remaining_quantity, quantity_unit)} remaining"
@@ -1049,15 +1146,16 @@ def consume(
 
 @app.command(name="delete")
 def delete_stock(
-    database: str = typer.Option(
-        str(DEFAULT_DATABASE_PATH),
+    database: Optional[str] = typer.Option(
+        None,
         "--database",
         "-d",
         help="Path to the SQLite database file.",
+        show_default=False,
     ),
 ) -> None:
     """Interactively delete stock items."""
-    rows = fetch_items(database_path=Path(database))
+    rows = fetch_items(database_path=_resolve_database_option(database))
 
     if not rows:
         console.print("[yellow]No stock items found.[/yellow]")
@@ -1086,12 +1184,12 @@ def delete_stock(
 
     for item_id in selected_ids:
         row = rows_by_id[item_id]
-        if delete_item(item_id, Path(database)):
+        if delete_item(item_id, _resolve_database_option(database)):
             console.print(f"[green]Deleted stock item #{item_id}:[/green] {row['name']}")
             _add_stock_item_to_restock(
                 row,
                 float(row["quantity_value"]),
-                Path(database),
+                _resolve_database_option(database),
                 include_source=False,
             )
         else:
@@ -1105,11 +1203,12 @@ def search(
     owner: Optional[str] = typer.Option(None, help="Filter by purchaser or assigned user."),
     location: Optional[str] = typer.Option(None, help="Filter by storage location."),
     status: Optional[str] = typer.Option(None, help="Filter by stock status."),
-    database: str = typer.Option(
-        str(DEFAULT_DATABASE_PATH),
+    database: Optional[str] = typer.Option(
+        None,
         "--database",
         "-d",
         help="Path to the SQLite database file.",
+        show_default=False,
     ),
 ) -> None:
     """Search stock items by keyword."""
@@ -1119,7 +1218,7 @@ def search(
         owner=owner,
         location=location,
         status=status,
-        database_path=Path(database),
+        database_path=_resolve_database_option(database),
     )
 
     if not rows:
@@ -1131,16 +1230,17 @@ def search(
 
 @app.command()
 def remind(
-    database: str = typer.Option(
-        str(DEFAULT_DATABASE_PATH),
+    database: Optional[str] = typer.Option(
+        None,
         "--database",
         "-d",
         help="Path to the SQLite database file.",
+        show_default=False,
     ),
 ) -> None:
     """Show expiration reminder information."""
-    expired_rows = fetch_items(status="expired", database_path=Path(database))
-    expiring_soon_rows = fetch_items(status="expiring soon", database_path=Path(database))
+    expired_rows = fetch_items(status="expired", database_path=_resolve_database_option(database))
+    expiring_soon_rows = fetch_items(status="expiring soon", database_path=_resolve_database_option(database))
 
     if not expired_rows and not expiring_soon_rows:
         console.print("[green]No expiration reminders for now.[/green]")
@@ -1158,31 +1258,33 @@ def remind(
 @restock_app.command(name="list")
 def list_restock(
     status: Optional[str] = typer.Option(None, help="Filter by restock status: pending or done."),
-    database: str = typer.Option(
-        str(DEFAULT_DATABASE_PATH),
+    database: Optional[str] = typer.Option(
+        None,
         "--database",
         "-d",
         help="Path to the SQLite database file.",
+        show_default=False,
     ),
 ) -> None:
     """Show restock list items."""
-    rows = fetch_restock_items(status=status, database_path=Path(database))
+    rows = fetch_restock_items(status=status, database_path=_resolve_database_option(database))
 
     if not rows:
         console.print("[yellow]No restock items found.[/yellow]")
         return
 
     _show_restock_table(rows, "Restock Items")
-    _maybe_show_restock_details(rows, Path(database))
+    _maybe_show_restock_details(rows, _resolve_database_option(database))
 
 
 @restock_app.command(name="add")
 def add_restock(
-    database: str = typer.Option(
-        str(DEFAULT_DATABASE_PATH),
+    database: Optional[str] = typer.Option(
+        None,
         "--database",
         "-d",
         help="Path to the SQLite database file.",
+        show_default=False,
     ),
 ) -> None:
     """Add a new restock list item."""
@@ -1208,7 +1310,7 @@ def add_restock(
             "status": "pending",
             "notes": notes,
         },
-        Path(database),
+        _resolve_database_option(database),
     )
 
     console.print(f"[green]Added restock item #{item_id}:[/green] {name}")
@@ -1216,15 +1318,16 @@ def add_restock(
 
 @restock_app.command(name="done")
 def done_restock(
-    database: str = typer.Option(
-        str(DEFAULT_DATABASE_PATH),
+    database: Optional[str] = typer.Option(
+        None,
         "--database",
         "-d",
         help="Path to the SQLite database file.",
+        show_default=False,
     ),
 ) -> None:
     """Interactively mark pending restock items as done."""
-    pending_rows = fetch_restock_items(status="pending", database_path=Path(database))
+    pending_rows = fetch_restock_items(status="pending", database_path=_resolve_database_option(database))
 
     if not pending_rows:
         console.print("[yellow]No pending restock items found.[/yellow]")
@@ -1253,7 +1356,7 @@ def done_restock(
 
         if planned_quantity is None or not quantity_unit:
             if Confirm.ask(f"Mark restock item #{item_id} {row['name']} as done?", default=True):
-                mark_restock_item_done(item_id, Path(database))
+                mark_restock_item_done(item_id, _resolve_database_option(database))
                 console.print(f"[green]Marked restock item #{item_id} as done.[/green]")
             continue
 
@@ -1264,9 +1367,9 @@ def done_restock(
         )
 
         if purchased_quantity >= planned_quantity:
-            mark_restock_item_done(item_id, Path(database))
+            mark_restock_item_done(item_id, _resolve_database_option(database))
             console.print(f"[green]Marked restock item #{item_id} as done.[/green]")
-            _add_purchased_restock_to_stock(row, purchased_quantity, Path(database))
+            _add_purchased_restock_to_stock(row, purchased_quantity, _resolve_database_option(database))
             continue
 
         remaining_quantity = planned_quantity - purchased_quantity
@@ -1280,29 +1383,30 @@ def done_restock(
         )
 
         if keep_remaining:
-            update_restock_item_quantity(item_id, remaining_quantity, Path(database))
+            update_restock_item_quantity(item_id, remaining_quantity, _resolve_database_option(database))
             console.print(
                 f"[yellow]Kept restock item #{item_id} pending with "
                 f"{_format_quantity(remaining_quantity, quantity_unit)} remaining.[/yellow]"
             )
-            _add_purchased_restock_to_stock(row, purchased_quantity, Path(database))
+            _add_purchased_restock_to_stock(row, purchased_quantity, _resolve_database_option(database))
         else:
-            mark_restock_item_done(item_id, Path(database))
+            mark_restock_item_done(item_id, _resolve_database_option(database))
             console.print(f"[green]Marked restock item #{item_id} as done.[/green]")
-            _add_purchased_restock_to_stock(row, purchased_quantity, Path(database))
+            _add_purchased_restock_to_stock(row, purchased_quantity, _resolve_database_option(database))
 
 
 @restock_app.command(name="edit")
 def edit_restock(
-    database: str = typer.Option(
-        str(DEFAULT_DATABASE_PATH),
+    database: Optional[str] = typer.Option(
+        None,
         "--database",
         "-d",
         help="Path to the SQLite database file.",
+        show_default=False,
     ),
 ) -> None:
     """Interactively edit one restock list item."""
-    rows = fetch_restock_items(database_path=Path(database))
+    rows = fetch_restock_items(database_path=_resolve_database_option(database))
 
     if not rows:
         console.print("[yellow]No restock items found.[/yellow]")
@@ -1328,7 +1432,7 @@ def edit_restock(
         break
 
     item_id = selected_ids[0]
-    row = get_restock_item(item_id, Path(database))
+    row = get_restock_item(item_id, _resolve_database_option(database))
     if row is None:
         console.print(f"[red]Restock item #{item_id} does not exist.[/red]")
         return
@@ -1376,7 +1480,7 @@ def edit_restock(
             "status": status,
             "notes": notes,
         },
-        Path(database),
+        _resolve_database_option(database),
     )
 
     if updated:
@@ -1387,15 +1491,16 @@ def edit_restock(
 
 @restock_app.command(name="delete")
 def delete_restock(
-    database: str = typer.Option(
-        str(DEFAULT_DATABASE_PATH),
+    database: Optional[str] = typer.Option(
+        None,
         "--database",
         "-d",
         help="Path to the SQLite database file.",
+        show_default=False,
     ),
 ) -> None:
     """Interactively delete restock list items."""
-    rows = fetch_restock_items(database_path=Path(database))
+    rows = fetch_restock_items(database_path=_resolve_database_option(database))
 
     if not rows:
         console.print("[yellow]No restock items found.[/yellow]")
@@ -1424,7 +1529,7 @@ def delete_restock(
 
     for item_id in selected_ids:
         row = rows_by_id[item_id]
-        delete_restock_item(item_id, Path(database))
+        delete_restock_item(item_id, _resolve_database_option(database))
         console.print(f"[green]Deleted restock item #{item_id}:[/green] {row['name']}")
 
 

@@ -5,8 +5,10 @@ from pathlib import Path
 import sqlite3
 from typing import Any
 
-DEFAULT_DATABASE_PATH = Path("stock.db")
-DEFAULT_REMINDER_DAYS = "2"
+from stock_manager.config import (
+    DEFAULT_DATABASE_PATH,
+    get_expiration_reminder_days,
+)
 
 
 SCHEMA_STATEMENTS = [
@@ -57,13 +59,6 @@ SCHEMA_STATEMENTS = [
 ]
 
 
-DEFAULT_SETTINGS = {
-    "expiration_reminder_days": DEFAULT_REMINDER_DAYS,
-    "shopping_weekday": "",
-    "email_enabled": "false",
-}
-
-
 def _resolve_database_path(database_path: Path = DEFAULT_DATABASE_PATH) -> Path:
     """Return the absolute path used for a database file."""
     return database_path.expanduser().resolve()
@@ -90,14 +85,6 @@ def initialize_database(database_path: Path = DEFAULT_DATABASE_PATH) -> Path:
     with connect_database(resolved_path) as connection:
         for statement in SCHEMA_STATEMENTS:
             connection.execute(statement)
-
-        connection.executemany(
-            """
-            INSERT OR IGNORE INTO settings (key, value)
-            VALUES (?, ?)
-            """,
-            DEFAULT_SETTINGS.items(),
-        )
 
     return resolved_path
 
@@ -214,25 +201,9 @@ def add_restock_item(item: dict[str, Any], database_path: Path = DEFAULT_DATABAS
     return int(cursor.lastrowid)
 
 
-def _get_expiration_warning_days(connection: sqlite3.Connection) -> int:
-    """Return the configured expiration warning window in days."""
-    row = connection.execute(
-        """
-        SELECT value
-        FROM settings
-        WHERE key = 'expiration_reminder_days'
-        """
-    ).fetchone()
-
-    if row is None:
-        return int(DEFAULT_REMINDER_DAYS)
-
-    try:
-        warning_days = int(row[0])
-    except ValueError:
-        return int(DEFAULT_REMINDER_DAYS)
-
-    return max(warning_days, 0)
+def _get_expiration_warning_days() -> int:
+    """Return the configured global expiration warning window in days."""
+    return get_expiration_reminder_days()
 
 
 def update_item_quantity(
@@ -256,7 +227,7 @@ def update_item_quantity(
         if row is None:
             return False
 
-        warning_days = _get_expiration_warning_days(connection)
+        warning_days = _get_expiration_warning_days()
         new_status = _calculate_status(
             quantity_value,
             row[0],
@@ -282,16 +253,11 @@ def calculate_item_status(
     current_expiration_date: str,
     database_path: Path = DEFAULT_DATABASE_PATH,
 ) -> str:
-    """Calculate a stock status using the current database settings."""
-    resolved_path = initialize_database(database_path)
-
-    with connect_database(resolved_path) as connection:
-        warning_days = _get_expiration_warning_days(connection)
-
+    """Calculate a stock status using the current global settings."""
     return _calculate_status(
         quantity_value,
         current_expiration_date,
-        warning_days,
+        _get_expiration_warning_days(),
         date.today(),
     )
 
@@ -460,7 +426,7 @@ def refresh_item_statuses(
     changed_rows = 0
 
     with connect_database(resolved_path) as connection:
-        warning_days = _get_expiration_warning_days(connection)
+        warning_days = _get_expiration_warning_days()
         rows = connection.execute(
             """
             SELECT id, quantity_value, current_expiration_date, status
