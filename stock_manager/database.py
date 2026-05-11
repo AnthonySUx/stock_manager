@@ -331,6 +331,52 @@ def delete_item(item_id: int, database_path: Path = DEFAULT_DATABASE_PATH) -> bo
     return cursor.rowcount > 0
 
 
+def delete_items_by_statuses(
+    statuses: list[str],
+    database_path: Path = DEFAULT_DATABASE_PATH,
+) -> int:
+    """Delete stock items that match the given statuses and return the count."""
+    if not statuses:
+        return 0
+
+    resolved_path = initialize_database(database_path)
+    refresh_item_statuses(resolved_path, ensure_schema=False)
+    placeholders = ", ".join("?" for _ in statuses)
+
+    with connect_database(resolved_path) as connection:
+        item_rows = connection.execute(
+            f"""
+            SELECT id
+            FROM items
+            WHERE status IN ({placeholders})
+            """,
+            statuses,
+        ).fetchall()
+        item_ids = [row[0] for row in item_rows]
+
+        if not item_ids:
+            return 0
+
+        item_placeholders = ", ".join("?" for _ in item_ids)
+        connection.execute(
+            f"""
+            UPDATE restock_items
+            SET source_item_id = NULL
+            WHERE source_item_id IN ({item_placeholders})
+            """,
+            item_ids,
+        )
+        cursor = connection.execute(
+            f"""
+            DELETE FROM items
+            WHERE id IN ({item_placeholders})
+            """,
+            item_ids,
+        )
+
+    return cursor.rowcount
+
+
 def update_restock_item(
     item_id: int,
     item: dict[str, Any],
@@ -688,3 +734,22 @@ def delete_restock_item(item_id: int, database_path: Path = DEFAULT_DATABASE_PAT
         )
 
     return cursor.rowcount > 0
+
+
+def delete_restock_items_by_status(
+    status: str,
+    database_path: Path = DEFAULT_DATABASE_PATH,
+) -> int:
+    """Delete restock items that match one status and return the count."""
+    resolved_path = initialize_database(database_path)
+
+    with connect_database(resolved_path) as connection:
+        cursor = connection.execute(
+            """
+            DELETE FROM restock_items
+            WHERE status = ?
+            """,
+            (status,),
+        )
+
+    return cursor.rowcount

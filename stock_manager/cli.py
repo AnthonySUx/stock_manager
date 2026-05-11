@@ -26,7 +26,9 @@ from stock_manager.database import (
     add_restock_item,
     calculate_item_status,
     delete_item,
+    delete_items_by_statuses,
     delete_restock_item,
+    delete_restock_items_by_status,
     get_item,
     get_restock_item,
     initialize_database,
@@ -71,7 +73,14 @@ restock_app = typer.Typer(
     no_args_is_help=True,
     rich_markup_mode="rich",
 )
+clean_app = typer.Typer(
+    help="Clean old stock and restock history.",
+    invoke_without_command=True,
+    no_args_is_help=True,
+    rich_markup_mode="rich",
+)
 app.add_typer(restock_app, name="restock")
+app.add_typer(clean_app, name="clean")
 console = Console(width=100)
 
 
@@ -1253,6 +1262,86 @@ def remind(
 
     if expiring_soon_rows:
         _show_items_table(expiring_soon_rows, "Expiring Soon")
+
+
+@clean_app.command(name="restock")
+def clean_restock(
+    database: Optional[str] = typer.Option(
+        None,
+        "--database",
+        "-d",
+        help="Path to the SQLite database file.",
+        show_default=False,
+    ),
+) -> None:
+    """Clean done restock list items."""
+    database_path = _resolve_database_option(database)
+    rows = fetch_restock_items(status="done", database_path=database_path)
+
+    if not rows:
+        console.print("[yellow]No done restock items to clean.[/yellow]")
+        return
+
+    _show_restock_table(rows, "Done Restock Items to Clean")
+
+    if not Confirm.ask(f"Delete {len(rows)} done restock item(s)?", default=False):
+        console.print("[yellow]Clean cancelled.[/yellow]")
+        return
+
+    deleted_count = delete_restock_items_by_status("done", database_path)
+    console.print(f"[green]Deleted {deleted_count} done restock item(s).[/green]")
+
+
+@clean_app.command(name="stock")
+def clean_stock(
+    expired: bool = typer.Option(
+        False,
+        "--expired",
+        help="Clean expired stock items instead of consumed items.",
+    ),
+    all_items: bool = typer.Option(
+        False,
+        "--all",
+        help="Clean both consumed and expired stock items.",
+    ),
+    database: Optional[str] = typer.Option(
+        None,
+        "--database",
+        "-d",
+        help="Path to the SQLite database file.",
+        show_default=False,
+    ),
+) -> None:
+    """Clean consumed stock history, or expired stock when explicitly requested."""
+    database_path = _resolve_database_option(database)
+    statuses = ["consumed", "expired"] if all_items else ["expired"] if expired else ["consumed"]
+    rows: list[Any] = []
+
+    for status in statuses:
+        rows.extend(fetch_items(status=status, database_path=database_path))
+
+    if not rows:
+        status_text = " or ".join(statuses)
+        console.print(f"[yellow]No {status_text} stock items to clean.[/yellow]")
+        return
+
+    title = "Stock Items to Clean"
+    if all_items:
+        title = "Consumed and Expired Stock Items to Clean"
+    elif expired:
+        title = "Expired Stock Items to Clean"
+    else:
+        title = "Consumed Stock Items to Clean"
+
+    _show_items_table(rows, title)
+    status_text = " and ".join(statuses)
+
+    if not Confirm.ask(f"Delete {len(rows)} {status_text} stock item(s)?", default=False):
+        console.print("[yellow]Clean cancelled.[/yellow]")
+        return
+
+    deleted_count = delete_items_by_statuses(statuses, database_path)
+    console.print(f"[green]Deleted {deleted_count} stock item(s).[/green]")
 
 
 @restock_app.command(name="list")

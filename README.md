@@ -206,6 +206,8 @@ python3 -m stock_manager consume
 python3 -m stock_manager delete
 python3 -m stock_manager search
 python3 -m stock_manager remind
+python3 -m stock_manager clean restock
+python3 -m stock_manager clean stock
 python3 -m stock_manager restock list
 python3 -m stock_manager restock add
 python3 -m stock_manager restock done
@@ -307,6 +309,24 @@ python3 -m stock_manager remind --database stock.db
 python3 -m stock_manager remind -d stock.db
 ```
 
+`clean restock` removes old restock history. It only cleans restock items with `done` status. The command shows the items that will be deleted and asks for confirmation.
+
+```bash
+python3 -m stock_manager clean restock
+python3 -m stock_manager clean restock --database stock.db
+python3 -m stock_manager clean restock -d stock.db
+```
+
+`clean stock` removes old stock history. By default it only cleans `consumed` stock items. To clean `expired` stock items, explicitly use `--expired`. To clean all (including `consumed` and `expired` stock items), explicitly use `--all`. The command shows the items that will be deleted and asks for confirmation.
+
+```bash
+python3 -m stock_manager clean stock
+python3 -m stock_manager clean stock --expired
+python3 -m stock_manager clean stock --all
+python3 -m stock_manager clean stock --database stock.db
+python3 -m stock_manager clean stock -d stock.db
+```
+
 `restock list` shows restock-list items as a separate management view. The table shows whether each restock item has notes with `Yes` or `-`. After the table, the command can optionally show full details for selected restock item IDs.
 
 ```bash
@@ -359,22 +379,7 @@ python3 -m stock_manager restock delete -d stock.db
 
 The following commands are planned but not implemented yet.
 
-The clean command group should later support removing old records that are no longer useful in daily views.
-
-```bash
-python3 -m stock_manager clean restock
-python3 -m stock_manager clean stock
-python3 -m stock_manager clean stock --expired
-python3 -m stock_manager clean stock --all
-```
-
-Cleanup commands are planned because old `done`, `consumed`, and historical records can make the useful list harder to scan.
-
-`clean restock` should support manually deleting old done restock items, with confirmation by default.
-
-`clean stock` should support manually cleaning consumed stock history by default. Expired stock items should only be removed when the user explicitly passes `--expired` or `--all`. All cleanup commands should require confirmation by default.
-
-Single stock item deletion should belong to the normal stock delete command, not to cleanup.
+*No planned commands right now.*
 
 ### Planned Automation
 
