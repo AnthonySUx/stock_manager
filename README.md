@@ -1,19 +1,15 @@
 # Stock Manager
 
-**Stock Manager** is a local Python application for family stock management. The objective of this project is to record purchase date, expiration date, storage location, quantity, and send notifications and restocking-list reminders accordingly.
+**Stock Manager** is a local Python CLI application for family stock management. It records purchase dates, expiration dates, storage locations, quantities, reminder information, and restocking lists.
 
-*Version 1* only provides a CLI interface.
+The current supported run style is:
 
-## Core objective
+```bash
+python3 -m stock_manager <command>
+```
 
-- Record family stock
-- Supports searching by user, category, location, and keyword.
-- Supports different expiration periods for unopened and opened products.
-- Supports food with no expiration date by saving the expiration period as infinite.
-- Supports consumption, deletion, and restocking.
-- Supports macOS system notifications.
-- Supports email notifications, making it easy to receive alerts in your mobile email app.
-- Supports sending shopping list on fixed weekly shopping days.
+*Direct `stock` shell command installation is planed but unimplemented yet.*
+
 
 ## Main Features
 
@@ -26,7 +22,6 @@ The application supports the recording of the following information:
 - Purchaser or assigned user
 - Date of purchase
 - Expiration date when unopened
-- Opened or unopened
 - Opening date
 - Expiration date after opening
 - Storage location (e.g., refrigerator, freezer, storage cabinet, etc.)
@@ -34,11 +29,11 @@ The application supports the recording of the following information:
 - Unit (e.g., pieces, blocks, grams, bags, bottles, etc.)
 - Notes
 
-For products without an expiration date, the user should still enter an expiration value, but the value should be saved as infinite.
+For products without an expiration date, enter `infinite`.
 
 ### 2. Stock Overview
 
-The application must support viewing current available stock and display:
+The application supports viewing current stock and displays:
 
 - Name
 - Category
@@ -47,7 +42,7 @@ The application must support viewing current available stock and display:
 - Storage location
 - Current effective expiration date
 - Status
-- Note
+- Whether notes exist
 
 Stock status includes:
 
@@ -56,132 +51,104 @@ Stock status includes:
 - `expiring soon`
 - `expired`
 
-### 3. Consume and Delete
+### 3. Search and Filter
 
-The application supports opening, partial consumption, and full consumption.
-
-Rule:
-
-* After opening, ask for the date of opening and the expiration date after opening.
-* Decrease the stock quantity when a portion is consumed.
-* Set the status to `consumed` when the quantity reaches zero.
-* When an item is deleted, confirm the command and remove the item from the stock records.
-* After an item is fully consumed or deleted, ask whether to add it to the restocking list.
-
-### 4. Validation of Required Information
-
-When adding or editing inventory, the following fields must be filled in:
-
-* Opened or unopened
-
-If opened: 
-
+`search`:
 - Name
-- Category (e.g., vegetable, meat, fruit, medicine, frozen food, pet food, etc.)
+- Category
 - Purchaser or assigned user
-- Date of purchase
-- Opening date
-- Expiration date after opening
-- Storage location (e.g., refrigerator, freezer, storage cabinet, etc.)
-- Quantity
-- Unit (e.g., pieces, blocks, grams, bags, bottles, etc.)
+- Storage location
+- Notes
+`filters`:
+- Category
+- Purchaser or assigned user
+- Storage location
+- Status
 
-If unopened:
+### 4. Edit Stock
+
+The stock edit command lets the user select one item, review details, then choose one or more fields to edit.
+
+Editable stock fields are:
 
 - Name
 - Category
 - Purchaser or assigned user
 - Date of purchase
-- Expiration date when unopened
-- Storage location
 - Quantity
-- Unit (e.g., pieces, blocks, grams, bags, bottles, etc.)
-
-If a product has no expiration date, the expiration value should be entered as infinite.
-
-If required information is missing, the CLI should immediately prompt the user to provide it, rather than saving incomplete data.
-
-### 5. Search and Filter
-
-The search scope includes:
-
-- Name
-- Category
-- Purchaser or assigned user
 - Storage location
-- Note
+- Expiration dates
+- Notes
 
-Support filtering based on the following criteria:
+Current expiration date and status are calculated by the application and are not edited directly.
 
-- Category
-- Purchaser or assigned user
-- Storage location
-- Expiring soon
-- Expired
+### 5. Consume and Delete
+
+The application supports partial and full consumption, and completely delete:
+
+`consume`
+- Decrease the stock quantity when a portion is consumed.
+- Set the status to `consumed` when quantity reaches zero.
+- Ask whether to add fully consumed items to the restocking list.
+`delete`
+- Confirm before deleting stock items.
+- After an item is deleted, ask whether to add it to the restocking list.
 
 ### 6. Restocking List
 
-In the following scenarios, ask whether to add the item to the restocking list:
+Restocking is a separate management area, providing an independent list.`restock`supports:
 
-- The food has expired
-- The food has been consumed
-- The food has been manually deleted
-
-Restocking is a separate management area, not just a one-time reminder output.
-
-The restock module should provide detailed restock-list management:
-
-- View pending and completed restock items
-- Add a manual restock item
-- Mark a restock item as done
-- Delete a restock item
-- Show notes for each restock item
-
-The restock list should not be cleared automatically. Items should only be marked as done manually.
+- View pending and done restock items
+- Add manual restock items
+- Mark restock items as done
+- Track partial purchases and keep remaining quantity pending
+- Add purchased restock items to the stock list
 
 ### 7. Expiration Reminder
 
-By default, reminders for food nearing its expiration date are sent 2 days in advance.
-
-Rule:
+By default, reminders for food nearing expiration are shown 2 days in advance:
 
 - For opened food items, the expiration date after opening applies.
-- For unopened food items, the expiration date on the package applies.
+- For unopened food items, the unopened expiration date applies.
 - Items with an infinite expiration period are not included in expiration reminders.
 - Deleted and consumed food items are not included in expiration reminders.
-- The reminder module should focus on reminder information only. It should not be the detailed restock-list management view.
-- The current reminder command is manual. It does not run in the background or send notifications automatically yet.
+- Currently the reminder command is manual. It does not run in the background or send notifications automatically.
 
-### 8. Weekly Shopping Day Reminder
+### 8. Settings
 
-The application supports setting a fixed weekly shopping day.
+`settings` manages global user-level settings. Currently, it supports editing:
 
-When the reminder command is executed on a shopping day, it may show a short shopping-day notice and point the user to the restock command for details. Detailed restock-list output belongs to the restock module.
+- `default_database`
+- `expiration_reminder_days`
+
+Settings are stored in a user-level `settings.json` file, not inside a stock database file.
 
 ### 9. Cleanup
 
-The application provides a separate cleanup command for batch removal of old records that are no longer useful in daily views.
+The application supports batch removal of records that are no longer useful in daily views:
 
-Cleanup should support:
-
-- Removing old done restock items
+- Removing done restock items
 - Removing consumed stock items by default
 - Removing expired stock items only when explicitly requested
-- Retention rules such as older-than N days
 - Confirmation before deleting records
 
-*`clean stock` default to consumed items only. Expired items should require an explicit option because an expired item may still physically exist at home and require user action.*
+`clean stock` defaults to consumed items only. Expired items require `--expired` or `--all` because an expired item may still physically exist at home and require user action.
 
-### 10. Notification Method
+## Planned Features
 
-The first version supports two notification methods:
+The following features are planned but not implemented yet:
 
-- macOS system notifications
+- Background expiration reminder checks
+- macOS system notifications from inside Stock Manager
 - Email alerts
+- Weekly shopping-day reminder
+- Automatically sending the restock list by email on the configured shopping day
+- Automatically cleaning old done restock items after a configured retention period
+- Automatically cleaning old consumed inventory items after a configured retention period
 
-macOS notifications are enabled by default.
+Expired items should not be automatically deleted by default.
 
-*Email alerts are an optional feature. If no email address is configured, the application should not stop running; it should simply display a message in the CLI indicating that email alerts are not configured.*
+*Current automatic behavior is limited to command-triggered status refreshes. `list`, `search`, and `remind` refresh item statuses when they run, but Stock Manager does not run by itself in the background yet.*
 
 
 ## Current Usable Commands
@@ -374,25 +341,3 @@ python3 -m stock_manager restock delete
 python3 -m stock_manager restock delete --database stock.db
 python3 -m stock_manager restock delete -d stock.db
 ```
-
-### Planned Command Design
-
-The following commands are planned but not implemented yet.
-
-*No planned commands right now.*
-
-### Planned Automation
-
-The following automation features are planned but not implemented yet:
-
-- Background expiration reminder checks. The current `remind` command is manual.
-- macOS system notifications from inside Stock Manager.
-- Email alerts for expiration reminders.
-- Weekly shopping-day reminder logic.
-- Automatically sending the restock list by email on the configured shopping day.
-- Automatically cleaning old done restock items after a configured retention period.
-- Automatically cleaning old consumed inventory items after a configured retention period.
-- Expired items should not be automatically deleted by default.
-- A macOS LaunchAgent or equivalent scheduler for running reminders automatically.
-
-Current automatic behavior is limited to command-triggered status refreshes. `list`, `search`, and `remind` refresh item statuses when they run, but Stock Manager does not run by itself in the background yet.

@@ -92,11 +92,6 @@ def _resolve_database_option(database: Optional[str]) -> Path:
     return get_default_database_path()
 
 
-def _not_implemented(command_name: str) -> None:
-    """Show a consistent placeholder message for planned commands."""
-    console.print(f"[yellow]{command_name} is not implemented yet.[/yellow]")
-
-
 def _prompt_required(label: str) -> str:
     """Prompt until the user enters a non-empty value."""
     while True:
