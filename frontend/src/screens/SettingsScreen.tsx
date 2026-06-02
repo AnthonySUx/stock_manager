@@ -27,7 +27,7 @@ export default function SettingsScreen() {
       setReminderDays(res.data.expiration_reminder_days);
       setDatabasePath(res.data.default_database);
     } catch {
-      Alert.alert('Error', 'Failed to load settings');
+      Alert.alert('错误', '加载设置失败');
     } finally {
       setLoading(false);
     }
@@ -48,9 +48,9 @@ export default function SettingsScreen() {
         default_database: databasePath || undefined,
       });
       setSettings(res.data);
-      Alert.alert('Saved', 'Settings updated successfully');
+      Alert.alert('已保存', '设置更新成功');
     } catch (err: any) {
-      Alert.alert('Error', err?.response?.data?.detail || 'Failed to save');
+      Alert.alert('错误', err?.response?.data?.detail || '保存失败');
     } finally {
       setSaving(false);
     }
@@ -65,12 +65,12 @@ export default function SettingsScreen() {
   return (
     <ScrollView style={styles.container}>
       <View style={styles.card}>
-        <Text style={styles.title}>Settings</Text>
+        <Text style={styles.title}>设置</Text>
 
         <View style={styles.field}>
-          <Text style={styles.label}>Expiration Reminder Days</Text>
+          <Text style={styles.label}>过期提醒天数</Text>
           <Text style={styles.hint}>
-            Days before expiration to show "expiring soon" warning
+            过期前几天显示"即将过期"警告
           </Text>
           <TextInput
             style={styles.input}
@@ -82,9 +82,9 @@ export default function SettingsScreen() {
         </View>
 
         <View style={styles.field}>
-          <Text style={styles.label}>Default Database Path</Text>
+          <Text style={styles.label}>默认数据库路径</Text>
           <Text style={styles.hint}>
-            Path to the default SQLite database (for CLI)
+            默认 SQLite 数据库路径（用于 CLI）
           </Text>
           <TextInput
             style={styles.input}
@@ -100,7 +100,7 @@ export default function SettingsScreen() {
           disabled={saving}
         >
           <Text style={styles.saveBtnText}>
-            {saving ? 'Saving...' : 'Save Settings'}
+            {saving ? '保存中...' : '保存设置'}
           </Text>
         </TouchableOpacity>
       </View>

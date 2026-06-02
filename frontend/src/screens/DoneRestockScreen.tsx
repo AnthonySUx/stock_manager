@@ -39,7 +39,7 @@ export default function DoneRestockScreen({ navigation }: Props) {
 
   const handleDone = async () => {
     if (!purchasedQty || parseFloat(purchasedQty) <= 0) {
-      Alert.alert('Error', 'Enter a valid purchased quantity');
+      Alert.alert('错误', '请输入有效购买数量');
       return;
     }
 
@@ -54,11 +54,11 @@ export default function DoneRestockScreen({ navigation }: Props) {
         opened_expiration_date: openedExp || null,
         opened_date: openedDate || null,
       });
-      Alert.alert('Done', 'Item added to stock', [
-        { text: 'OK', onPress: () => navigation.navigate('RestockList') },
+      Alert.alert('完成', '物品已加入库存', [
+        { text: '确定', onPress: () => navigation.navigate('RestockList') },
       ]);
     } catch (err: any) {
-      Alert.alert('Error', err?.response?.data?.detail || 'Failed to process');
+      Alert.alert('错误', err?.response?.data?.detail || '处理失败');
     } finally {
       setSaving(false);
     }
@@ -70,11 +70,11 @@ export default function DoneRestockScreen({ navigation }: Props) {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.title}>Mark as Done</Text>
+        <Text style={styles.title}>完成补货</Text>
         <Text style={styles.subtitle}>{restockItem.name}</Text>
 
         <View style={styles.field}>
-          <Text style={styles.label}>Purchased Quantity *</Text>
+          <Text style={styles.label}>购买数量 *</Text>
           <TextInput
             style={styles.input}
             value={purchasedQty}
@@ -84,47 +84,47 @@ export default function DoneRestockScreen({ navigation }: Props) {
         </View>
 
         <View style={styles.field}>
-          <Text style={styles.label}>Owner</Text>
+          <Text style={styles.label}>所有者</Text>
           <TextInput
             style={styles.input}
             value={owner}
             onChangeText={setOwner}
-            placeholder="Who purchased?"
+            placeholder="谁购买的？"
           />
         </View>
 
         <View style={styles.field}>
-          <Text style={styles.label}>Purchase Date</Text>
+          <Text style={styles.label}>购买日期</Text>
           <TextInput
             style={styles.input}
             value={purchaseDate}
             onChangeText={setPurchaseDate}
-            placeholder="YYYY-MM-DD (default: today)"
+            placeholder="YYYY-MM-DD（默认今天）"
           />
         </View>
 
         <View style={styles.field}>
-          <Text style={styles.label}>Storage Location</Text>
+          <Text style={styles.label}>存放位置</Text>
           <TextInput
             style={styles.input}
             value={location}
             onChangeText={setLocation}
-            placeholder="e.g. refrigerator"
+            placeholder="例如 冰箱"
           />
         </View>
 
         <View style={styles.field}>
-          <Text style={styles.label}>Expiration Date (unopened)</Text>
+          <Text style={styles.label}>过期日期（未开封）</Text>
           <TextInput
             style={styles.input}
             value={unopenedExp}
             onChangeText={setUnopenedExp}
-            placeholder="YYYY-MM-DD or infinite"
+            placeholder="YYYY-MM-DD 或永久"
           />
         </View>
 
         <View style={styles.field}>
-          <Text style={styles.label}>Opened Date (optional)</Text>
+          <Text style={styles.label}>开封日期（可选）</Text>
           <TextInput
             style={styles.input}
             value={openedDate}
@@ -134,7 +134,7 @@ export default function DoneRestockScreen({ navigation }: Props) {
         </View>
 
         <View style={styles.field}>
-          <Text style={styles.label}>Opened Expiration (optional)</Text>
+          <Text style={styles.label}>开封后过期日期（可选）</Text>
           <TextInput
             style={styles.input}
             value={openedExp}
@@ -149,7 +149,7 @@ export default function DoneRestockScreen({ navigation }: Props) {
           disabled={saving}
         >
           <Text style={styles.doneBtnText}>
-            {saving ? 'Processing...' : '✅ Add to Stock & Mark Done'}
+            {saving ? '处理中...' : '✅ 加入库存并标记完成'}
           </Text>
         </TouchableOpacity>
       </ScrollView>

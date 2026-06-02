@@ -27,7 +27,7 @@ export default function AddRestockScreen({ navigation }: Props) {
 
   const handleSave = async () => {
     if (!name) {
-      Alert.alert('Error', 'Name is required');
+      Alert.alert('错误', '名称为必填项');
       return;
     }
 
@@ -40,11 +40,11 @@ export default function AddRestockScreen({ navigation }: Props) {
         quantity_unit: quantityUnit || undefined,
         notes: notes || undefined,
       });
-      Alert.alert('Success', 'Restock item added', [
-        { text: 'OK', onPress: () => navigation.goBack() },
+      Alert.alert('成功', '补货物品已添加', [
+        { text: '确定', onPress: () => navigation.goBack() },
       ]);
     } catch (err: any) {
-      Alert.alert('Error', err?.response?.data?.detail || 'Failed to add');
+      Alert.alert('错误', err?.response?.data?.detail || '添加失败');
     } finally {
       setSaving(false);
     }
@@ -56,57 +56,57 @@ export default function AddRestockScreen({ navigation }: Props) {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.title}>Add to Restock List</Text>
+        <Text style={styles.title}>新增补货物品</Text>
 
         <View style={styles.field}>
-          <Text style={styles.label}>Name *</Text>
+          <Text style={styles.label}>名称 *</Text>
           <TextInput
             style={styles.input}
             value={name}
             onChangeText={setName}
-            placeholder="Item name"
+            placeholder="物品名称"
           />
         </View>
 
         <View style={styles.field}>
-          <Text style={styles.label}>Category</Text>
+          <Text style={styles.label}>分类</Text>
           <TextInput
             style={styles.input}
             value={category}
             onChangeText={setCategory}
-            placeholder="e.g. vegetable, meat"
+            placeholder="例如 蔬菜、肉类"
           />
         </View>
 
         <View style={styles.fieldRow}>
           <View style={[styles.field, { flex: 1 }]}>
-            <Text style={styles.label}>Quantity</Text>
+            <Text style={styles.label}>数量</Text>
             <TextInput
               style={styles.input}
               value={quantityValue}
               onChangeText={setQuantityValue}
               keyboardType="decimal-pad"
-              placeholder="e.g. 1"
+              placeholder="例如 1"
             />
           </View>
           <View style={[styles.field, { flex: 1, marginLeft: 8 }]}>
-            <Text style={styles.label}>Unit</Text>
+            <Text style={styles.label}>单位</Text>
             <TextInput
               style={styles.input}
               value={quantityUnit}
               onChangeText={setQuantityUnit}
-              placeholder="e.g. kg, pcs"
+              placeholder="例如 千克、个"
             />
           </View>
         </View>
 
         <View style={styles.field}>
-          <Text style={styles.label}>Notes</Text>
+          <Text style={styles.label}>备注</Text>
           <TextInput
             style={[styles.input, styles.multiline]}
             value={notes}
             onChangeText={setNotes}
-            placeholder="Optional notes"
+            placeholder="可选备注"
             multiline
           />
         </View>
@@ -117,7 +117,7 @@ export default function AddRestockScreen({ navigation }: Props) {
           disabled={saving}
         >
           <Text style={styles.saveBtnText}>
-            {saving ? 'Saving...' : 'Add to Restock List'}
+            {saving ? '保存中...' : '加入补货清单'}
           </Text>
         </TouchableOpacity>
       </ScrollView>

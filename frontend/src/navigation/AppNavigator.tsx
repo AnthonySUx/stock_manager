@@ -29,27 +29,27 @@ function InventoryStack() {
       <Stack.Screen
         name="ItemList"
         component={ItemListScreen}
-        options={{ title: 'Stock Items' }}
+        options={{ title: '库存物品' }}
       />
       <Stack.Screen
         name="AddItem"
         component={AddItemScreen}
-        options={{ title: 'Add Item' }}
+        options={{ title: '新增物品' }}
       />
       <Stack.Screen
         name="ItemDetail"
         component={ItemDetailScreen}
-        options={{ title: 'Item Details' }}
+        options={{ title: '物品详情' }}
       />
       <Stack.Screen
         name="EditItem"
         component={EditItemScreen}
-        options={{ title: 'Edit Item' }}
+        options={{ title: '编辑物品' }}
       />
       <Stack.Screen
         name="ConsumeItem"
         component={ConsumeItemScreen}
-        options={{ title: 'Consume' }}
+        options={{ title: '消耗' }}
       />
     </Stack.Navigator>
   );
@@ -67,17 +67,17 @@ function RestockStack() {
       <Stack.Screen
         name="RestockList"
         component={RestockListScreen}
-        options={{ title: 'Restock List' }}
+        options={{ title: '补货列表' }}
       />
       <Stack.Screen
         name="AddRestock"
         component={AddRestockScreen}
-        options={{ title: 'Add Restock Item' }}
+        options={{ title: '新增补货' }}
       />
       <Stack.Screen
         name="DoneRestock"
         component={DoneRestockScreen}
-        options={{ title: 'Mark as Done' }}
+        options={{ title: '完成补货' }}
       />
     </Stack.Navigator>
   );
@@ -95,12 +95,12 @@ function RemindersStack() {
       <Stack.Screen
         name="Reminders"
         component={RemindersScreen}
-        options={{ title: 'Reminders' }}
+        options={{ title: '提醒' }}
       />
       <Stack.Screen
         name="ItemDetail"
         component={ItemDetailScreen}
-        options={{ title: 'Item Details' }}
+        options={{ title: '物品详情' }}
       />
     </Stack.Navigator>
   );
@@ -118,7 +118,7 @@ function SettingsStack() {
       <Stack.Screen
         name="Settings"
         component={SettingsScreen}
-        options={{ title: 'Settings' }}
+        options={{ title: '设置' }}
       />
     </Stack.Navigator>
   );
@@ -143,22 +143,22 @@ export default function AppNavigator() {
         <Tab.Screen
           name="InventoryTab"
           component={InventoryStack}
-          options={{ tabBarLabel: 'Stock' }}
+          options={{ tabBarLabel: '库存' }}
         />
         <Tab.Screen
           name="RestockTab"
           component={RestockStack}
-          options={{ tabBarLabel: 'Restock' }}
+          options={{ tabBarLabel: '补货' }}
         />
         <Tab.Screen
           name="RemindersTab"
           component={RemindersStack}
-          options={{ tabBarLabel: 'Reminders' }}
+          options={{ tabBarLabel: '提醒' }}
         />
         <Tab.Screen
           name="SettingsTab"
           component={SettingsStack}
-          options={{ tabBarLabel: 'Settings' }}
+          options={{ tabBarLabel: '设置' }}
         />
       </Tab.Navigator>
     </NavigationContainer>

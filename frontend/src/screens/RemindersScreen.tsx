@@ -28,7 +28,7 @@ export default function RemindersScreen({ navigation }: Props) {
       const res = await api.get('/items/reminders');
       setItems(res.data);
     } catch {
-      Alert.alert('Error', 'Failed to load reminders');
+      Alert.alert('错误', '加载提醒失败');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -67,7 +67,7 @@ export default function RemindersScreen({ navigation }: Props) {
           </Text>
         </View>
         <Text style={styles.itemDetail}>
-          Expires: {item.current_expiration_date}
+          过期: {item.current_expiration_date}
         </Text>
         <Text style={styles.itemDetail}>
           {item.location} · {item.quantity_value} {item.quantity_unit}
@@ -94,9 +94,9 @@ export default function RemindersScreen({ navigation }: Props) {
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyIcon}>✅</Text>
-            <Text style={styles.emptyTitle}>All Clear!</Text>
+            <Text style={styles.emptyTitle}>一切正常！</Text>
             <Text style={styles.emptySubtitle}>
-              No items expiring soon or expired.
+              暂无即将过期或已过期的物品。
             </Text>
           </View>
         }

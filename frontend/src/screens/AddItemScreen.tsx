@@ -18,15 +18,15 @@ type Props = {
 };
 
 const CATEGORIES = [
-  'vegetable', 'meat', 'fruit', 'medicine', 'frozen food', 'pet food',
-  'dairy', 'beverage', 'condiment', 'snack', 'grain', 'other',
+  '蔬菜', '肉类', '水果', '药品', '冷冻食品', '宠物食品',
+  '乳制品', '饮料', '调味品', '零食', '谷物', '其他',
 ];
 
 const LOCATIONS = [
-  'refrigerator', 'freezer', 'storage cabinet', 'pantry', 'counter', 'other',
+  '冰箱', '冷冻室', '储物柜', '食品储藏室', '柜台', '其他',
 ];
 
-const UNITS = ['pcs', 'g', 'kg', 'ml', 'l', 'bags', 'bottles', 'boxes', 'cans', 'pack'];
+const UNITS = ['个', '克', '千克', '毫升', '升', '袋', '瓶', '盒', '罐', '包'];
 
 export default function AddItemScreen({ navigation }: Props) {
   const [name, setName] = useState('');
@@ -34,7 +34,7 @@ export default function AddItemScreen({ navigation }: Props) {
   const [owner, setOwner] = useState('');
   const [purchaseDate, setPurchaseDate] = useState('');
   const [quantityValue, setQuantityValue] = useState('');
-  const [quantityUnit, setQuantityUnit] = useState('pcs');
+  const [quantityUnit, setQuantityUnit] = useState('个');
   const [location, setLocation] = useState('');
   const [unopenedExp, setUnopenedExp] = useState('');
   const [openedExp, setOpenedExp] = useState('');
@@ -44,7 +44,7 @@ export default function AddItemScreen({ navigation }: Props) {
 
   const handleSave = async () => {
     if (!name || !category || !owner || !quantityValue || !location || !unopenedExp) {
-      Alert.alert('Error', 'Please fill all required fields');
+      Alert.alert('错误', '请填写所有必填字段');
       return;
     }
 
@@ -66,11 +66,11 @@ export default function AddItemScreen({ navigation }: Props) {
         current_expiration_date: currentExp,
         notes: notes || null,
       });
-      Alert.alert('Success', 'Item added', [
-        { text: 'OK', onPress: () => navigation.goBack() },
+      Alert.alert('成功', '物品已添加', [
+        { text: '确定', onPress: () => navigation.goBack() },
       ]);
     } catch (err: any) {
-      Alert.alert('Error', err?.response?.data?.detail || 'Failed to add item');
+      Alert.alert('错误', err?.response?.data?.detail || '添加物品失败');
     } finally {
       setSaving(false);
     }
@@ -109,58 +109,58 @@ export default function AddItemScreen({ navigation }: Props) {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.title}>Add Stock Item</Text>
+        <Text style={styles.title}>新增库存物品</Text>
 
         {/* Name */}
         <View style={styles.field}>
-          <Text style={styles.label}>Name *</Text>
+          <Text style={styles.label}>名称 *</Text>
           <TextInput
             style={styles.input}
             value={name}
             onChangeText={setName}
-            placeholder="Item name"
+            placeholder="物品名称"
           />
         </View>
 
         {/* Category */}
-        {renderChips('Category', CATEGORIES, category, setCategory, true)}
+        {renderChips('分类', CATEGORIES, category, setCategory, true)}
 
         {/* Owner */}
         <View style={styles.field}>
-          <Text style={styles.label}>Owner *</Text>
+          <Text style={styles.label}>所有者 *</Text>
           <TextInput
             style={styles.input}
             value={owner}
             onChangeText={setOwner}
-            placeholder="Who bought this?"
+            placeholder="谁购买的？"
           />
         </View>
 
         {/* Purchase Date */}
         <View style={styles.field}>
-          <Text style={styles.label}>Purchase Date</Text>
+          <Text style={styles.label}>购买日期</Text>
           <TextInput
             style={styles.input}
             value={purchaseDate}
             onChangeText={setPurchaseDate}
-            placeholder="YYYY-MM-DD (default: today)"
+            placeholder="YYYY-MM-DD（默认今天）"
           />
         </View>
 
         {/* Quantity */}
         <View style={styles.fieldRow}>
           <View style={[styles.field, { flex: 1 }]}>
-            <Text style={styles.label}>Quantity *</Text>
+            <Text style={styles.label}>数量 *</Text>
             <TextInput
               style={styles.input}
               value={quantityValue}
               onChangeText={setQuantityValue}
-              placeholder="e.g. 2"
+              placeholder="例如 2"
               keyboardType="decimal-pad"
             />
           </View>
           <View style={[styles.field, { flex: 1, marginLeft: 8 }]}>
-            <Text style={styles.label}>Unit</Text>
+            <Text style={styles.label}>单位</Text>
             <View style={styles.chipRow}>
               {UNITS.map((opt) => (
                 <TouchableOpacity
@@ -178,21 +178,21 @@ export default function AddItemScreen({ navigation }: Props) {
         </View>
 
         {/* Location */}
-        {renderChips('Location', LOCATIONS, location, setLocation, true)}
+        {renderChips('存放位置', LOCATIONS, location, setLocation, true)}
 
         {/* Expiration Dates */}
         <View style={styles.field}>
-          <Text style={styles.label}>Unopened Expiration Date *</Text>
+          <Text style={styles.label}>未开封过期日期 *</Text>
           <TextInput
             style={styles.input}
             value={unopenedExp}
             onChangeText={setUnopenedExp}
-            placeholder="YYYY-MM-DD or infinite"
+            placeholder="YYYY-MM-DD 或永久"
           />
         </View>
 
         <View style={styles.field}>
-          <Text style={styles.label}>Opened Date (optional)</Text>
+          <Text style={styles.label}>开封日期（可选）</Text>
           <TextInput
             style={styles.input}
             value={openedDate}
@@ -202,23 +202,23 @@ export default function AddItemScreen({ navigation }: Props) {
         </View>
 
         <View style={styles.field}>
-          <Text style={styles.label}>Opened Expiration (optional)</Text>
+          <Text style={styles.label}>开封后过期日期（可选）</Text>
           <TextInput
             style={styles.input}
             value={openedExp}
             onChangeText={setOpenedExp}
-            placeholder="YYYY-MM-DD or infinite"
+            placeholder="YYYY-MM-DD 或永久"
           />
         </View>
 
         {/* Notes */}
         <View style={styles.field}>
-          <Text style={styles.label}>Notes</Text>
+          <Text style={styles.label}>备注</Text>
           <TextInput
             style={[styles.input, styles.multiline]}
             value={notes}
             onChangeText={setNotes}
-            placeholder="Optional notes"
+            placeholder="可选备注"
             multiline
           />
         </View>
@@ -229,7 +229,7 @@ export default function AddItemScreen({ navigation }: Props) {
           disabled={saving}
         >
           <Text style={styles.saveBtnText}>
-            {saving ? 'Saving...' : 'Save Item'}
+            {saving ? '保存中...' : '保存物品'}
           </Text>
         </TouchableOpacity>
       </ScrollView>

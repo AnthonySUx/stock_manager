@@ -38,7 +38,7 @@ export default function ConsumeItemScreen({ navigation }: Props) {
       setItem(res.data);
       setQuantity(String(res.data.quantity_value));
     } catch {
-      Alert.alert('Error', 'Item not found');
+      Alert.alert('错误', '未找到物品');
       navigation.goBack();
     } finally {
       setLoading(false);
@@ -48,7 +48,7 @@ export default function ConsumeItemScreen({ navigation }: Props) {
   const handleConsume = async () => {
     const qty = parseFloat(quantity);
     if (!qty || qty <= 0) {
-      Alert.alert('Error', 'Enter a valid quantity');
+      Alert.alert('错误', '请输入有效数量');
       return;
     }
 
@@ -58,11 +58,11 @@ export default function ConsumeItemScreen({ navigation }: Props) {
         quantity: qty,
         add_to_restock: addToRestock,
       });
-      Alert.alert('Done', 'Item consumed successfully', [
-        { text: 'OK', onPress: () => navigation.goBack() },
+      Alert.alert('完成', '物品消耗成功', [
+        { text: '确定', onPress: () => navigation.goBack() },
       ]);
     } catch (err: any) {
-      Alert.alert('Error', err?.response?.data?.detail || 'Failed to consume');
+      Alert.alert('错误', err?.response?.data?.detail || '消耗失败');
     } finally {
       setConsuming(false);
     }
@@ -84,7 +84,7 @@ export default function ConsumeItemScreen({ navigation }: Props) {
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.label}>Quantity to consume</Text>
+        <Text style={styles.label}>消耗数量</Text>
         <TextInput
           style={styles.input}
           value={quantity}
@@ -94,7 +94,7 @@ export default function ConsumeItemScreen({ navigation }: Props) {
         />
 
         <View style={styles.switchRow}>
-          <Text style={styles.switchLabel}>Add to restock list when empty</Text>
+          <Text style={styles.switchLabel}>清空时加入补货清单</Text>
           <Switch
             value={addToRestock}
             onValueChange={setAddToRestock}
@@ -109,7 +109,7 @@ export default function ConsumeItemScreen({ navigation }: Props) {
           disabled={consuming}
         >
           <Text style={styles.consumeBtnText}>
-            {consuming ? 'Consuming...' : '✅ Consume'}
+            {consuming ? '消耗中...' : '✅ 消耗'}
           </Text>
         </TouchableOpacity>
       </View>

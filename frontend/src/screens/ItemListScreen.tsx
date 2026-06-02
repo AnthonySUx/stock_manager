@@ -37,7 +37,7 @@ export default function ItemListScreen({ navigation }: Props) {
       const res = await api.get('/items', { params });
       setItems(res.data);
     } catch (err: any) {
-      Alert.alert('Error', 'Failed to load items');
+      Alert.alert('错误', '加载物品失败');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -71,28 +71,28 @@ export default function ItemListScreen({ navigation }: Props) {
     >
       <View style={styles.itemHeader}>
         <Text style={styles.itemName}>{item.name}</Text>
-        <Text style={getStatusStyle(item.status)}>{item.status}</Text>
+        <Text style={getStatusStyle(item.status)}>{item.status === 'active' ? '有效' : item.status === 'expiring soon' ? '即将过期' : item.status === 'expired' ? '已过期' : item.status === 'consumed' ? '已消耗' : item.status}</Text>
       </View>
       <Text style={styles.itemSubtitle}>
         {item.category} · {item.owner}
       </Text>
       <View style={styles.itemDetails}>
         <Text style={styles.itemDetail}>
-          Qty: {formatQuantity(item)}
+          数量: {formatQuantity(item)}
         </Text>
         <Text style={styles.itemDetail}>📍 {item.location}</Text>
       </View>
       <Text style={styles.itemDetail}>
-        Exp: {item.current_expiration_date}
+        过期: {item.current_expiration_date}
       </Text>
     </TouchableOpacity>
   );
 
   const FILTERS: { label: string; value: string | null }[] = [
-    { label: 'All', value: null },
-    { label: 'Active', value: 'active' },
-    { label: 'Expiring', value: 'expiring soon' },
-    { label: 'Expired', value: 'expired' },
+    { label: '全部', value: null },
+    { label: '有效', value: 'active' },
+    { label: '即将过期', value: 'expiring soon' },
+    { label: '已过期', value: 'expired' },
   ];
 
   return (
@@ -130,7 +130,7 @@ export default function ItemListScreen({ navigation }: Props) {
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
           ListEmptyComponent={
-            <Text style={styles.empty}>No items found</Text>
+            <Text style={styles.empty}>暂无物品</Text>
           }
           contentContainerStyle={items.length === 0 ? styles.emptyContainer : undefined}
         />

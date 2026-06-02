@@ -21,12 +21,12 @@ type Props = {
 };
 
 const CATEGORIES = [
-  'vegetable', 'meat', 'fruit', 'medicine', 'frozen food', 'pet food',
-  'dairy', 'beverage', 'condiment', 'snack', 'grain', 'other',
+  '蔬菜', '肉类', '水果', '药品', '冷冻食品', '宠物食品',
+  '乳制品', '饮料', '调味品', '零食', '谷物', '其他',
 ];
 
 const LOCATIONS = [
-  'refrigerator', 'freezer', 'storage cabinet', 'pantry', 'counter', 'other',
+  '冰箱', '冷冻室', '储物柜', '食品储藏室', '柜台', '其他',
 ];
 
 export default function EditItemScreen({ navigation }: Props) {
@@ -69,7 +69,7 @@ export default function EditItemScreen({ navigation }: Props) {
       setOpenedDate(i.opened_date || '');
       setNotes(i.notes || '');
     } catch {
-      Alert.alert('Error', 'Failed to load item');
+      Alert.alert('错误', '加载物品失败');
       navigation.goBack();
     } finally {
       setLoading(false);
@@ -92,11 +92,11 @@ export default function EditItemScreen({ navigation }: Props) {
         opened_date: openedDate || null,
         notes: notes || null,
       });
-      Alert.alert('Updated', 'Item has been updated', [
-        { text: 'OK', onPress: () => navigation.goBack() },
+      Alert.alert('已更新', '物品已更新', [
+        { text: '确定', onPress: () => navigation.goBack() },
       ]);
     } catch (err: any) {
-      Alert.alert('Error', err?.response?.data?.detail || 'Failed to update');
+      Alert.alert('错误', err?.response?.data?.detail || '更新失败');
     } finally {
       setSaving(false);
     }
@@ -132,25 +132,25 @@ export default function EditItemScreen({ navigation }: Props) {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.title}>Edit Item</Text>
+        <Text style={styles.title}>编辑物品</Text>
 
         <View style={styles.field}>
-          <Text style={styles.label}>Name</Text>
+          <Text style={styles.label}>名称</Text>
           <TextInput style={styles.input} value={name} onChangeText={setName} />
         </View>
 
         <View style={styles.field}>
-          <Text style={styles.label}>Category</Text>
+          <Text style={styles.label}>分类</Text>
           {renderChips(CATEGORIES, category, setCategory)}
         </View>
 
         <View style={styles.field}>
-          <Text style={styles.label}>Owner</Text>
+          <Text style={styles.label}>所有者</Text>
           <TextInput style={styles.input} value={owner} onChangeText={setOwner} />
         </View>
 
         <View style={styles.field}>
-          <Text style={styles.label}>Purchase Date</Text>
+          <Text style={styles.label}>购买日期</Text>
           <TextInput
             style={styles.input}
             value={purchaseDate}
@@ -161,7 +161,7 @@ export default function EditItemScreen({ navigation }: Props) {
 
         <View style={styles.fieldRow}>
           <View style={[styles.field, { flex: 1 }]}>
-            <Text style={styles.label}>Quantity</Text>
+            <Text style={styles.label}>数量</Text>
             <TextInput
               style={styles.input}
               value={quantityValue}
@@ -170,7 +170,7 @@ export default function EditItemScreen({ navigation }: Props) {
             />
           </View>
           <View style={[styles.field, { flex: 1, marginLeft: 8 }]}>
-            <Text style={styles.label}>Unit</Text>
+            <Text style={styles.label}>单位</Text>
             <TextInput
               style={styles.input}
               value={quantityUnit}
@@ -180,12 +180,12 @@ export default function EditItemScreen({ navigation }: Props) {
         </View>
 
         <View style={styles.field}>
-          <Text style={styles.label}>Location</Text>
+          <Text style={styles.label}>存放位置</Text>
           {renderChips(LOCATIONS, location, setLocation)}
         </View>
 
         <View style={styles.field}>
-          <Text style={styles.label}>Unopened Expiration</Text>
+          <Text style={styles.label}>未开封过期日期</Text>
           <TextInput
             style={styles.input}
             value={unopenedExp}
@@ -194,7 +194,7 @@ export default function EditItemScreen({ navigation }: Props) {
         </View>
 
         <View style={styles.field}>
-          <Text style={styles.label}>Opened Date</Text>
+          <Text style={styles.label}>开封日期</Text>
           <TextInput
             style={styles.input}
             value={openedDate}
@@ -203,7 +203,7 @@ export default function EditItemScreen({ navigation }: Props) {
         </View>
 
         <View style={styles.field}>
-          <Text style={styles.label}>Opened Expiration</Text>
+          <Text style={styles.label}>开封后过期日期</Text>
           <TextInput
             style={styles.input}
             value={openedExp}
@@ -212,7 +212,7 @@ export default function EditItemScreen({ navigation }: Props) {
         </View>
 
         <View style={styles.field}>
-          <Text style={styles.label}>Notes</Text>
+          <Text style={styles.label}>备注</Text>
           <TextInput
             style={[styles.input, styles.multiline]}
             value={notes}
@@ -227,7 +227,7 @@ export default function EditItemScreen({ navigation }: Props) {
           disabled={saving}
         >
           <Text style={styles.saveBtnText}>
-            {saving ? 'Saving...' : 'Save Changes'}
+            {saving ? '保存中...' : '保存修改'}
           </Text>
         </TouchableOpacity>
       </ScrollView>

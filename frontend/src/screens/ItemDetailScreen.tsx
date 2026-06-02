@@ -34,7 +34,7 @@ export default function ItemDetailScreen({ navigation }: Props) {
       const res = await api.get(`/items/${id}`);
       setItem(res.data);
     } catch {
-      Alert.alert('Error', 'Item not found');
+      Alert.alert('错误', '未找到物品');
       navigation.goBack();
     } finally {
       setLoading(false);
@@ -43,21 +43,21 @@ export default function ItemDetailScreen({ navigation }: Props) {
 
   const handleDelete = () => {
     Alert.alert(
-      'Delete Item',
-      'Are you sure you want to delete this item?',
+      '删除物品',
+      '确定要删除此物品吗？',
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: '取消', style: 'cancel' },
         {
-          text: 'Delete',
+          text: '删除',
           style: 'destructive',
           onPress: async () => {
             try {
               await api.delete(`/items/${id}`);
-              Alert.alert('Deleted', 'Item has been deleted', [
-                { text: 'OK', onPress: () => navigation.goBack() },
+              Alert.alert('已删除', '物品已删除', [
+                { text: '确定', onPress: () => navigation.goBack() },
               ]);
             } catch {
-              Alert.alert('Error', 'Failed to delete item');
+              Alert.alert('错误', '删除物品失败');
             }
           },
         },
@@ -94,31 +94,31 @@ export default function ItemDetailScreen({ navigation }: Props) {
       </View>
 
       <View style={styles.card}>
-        <Row label="Category" value={item.category} />
-        <Row label="Owner" value={item.owner} />
-        <Row label="Purchase Date" value={item.purchase_date} />
+        <Row label="分类" value={item.category} />
+        <Row label="所有者" value={item.owner} />
+        <Row label="购买日期" value={item.purchase_date} />
         <Row
-          label="Quantity"
+          label="数量"
           value={`${item.quantity_value} ${item.quantity_unit}`}
         />
-        <Row label="Location" value={item.location} />
+        <Row label="存放位置" value={item.location} />
         <Row
-          label="Unopened Expiration"
+          label="未开封过期日期"
           value={item.unopened_expiration_date}
         />
         <Row
-          label="Opened Date"
+          label="开封日期"
           value={item.opened_date || '-'}
         />
         <Row
-          label="Opened Expiration"
+          label="开封后过期日期"
           value={item.opened_expiration_date || '-'}
         />
         <Row
-          label="Current Expiration"
+          label="当前过期日期"
           value={item.current_expiration_date}
         />
-        <Row label="Notes" value={item.notes || '-'} />
+        <Row label="备注" value={item.notes || '-'} />
       </View>
 
       <View style={styles.actions}>
@@ -126,15 +126,15 @@ export default function ItemDetailScreen({ navigation }: Props) {
           style={styles.editBtn}
           onPress={() => navigation.navigate('EditItem', { id })}
         >
-          <Text style={styles.editBtnText}>✏️ Edit</Text>
+          <Text style={styles.editBtnText}>✏️ 编辑</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.consumeBtn} onPress={handleConsume}>
-          <Text style={styles.consumeBtnText}>✅ Consume</Text>
+          <Text style={styles.consumeBtnText}>✅ 消耗</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.deleteBtn} onPress={handleDelete}>
-          <Text style={styles.deleteBtnText}>🗑️ Delete</Text>
+          <Text style={styles.deleteBtnText}>🗑️ 删除</Text>
         </TouchableOpacity>
       </View>
     </ScrollView>

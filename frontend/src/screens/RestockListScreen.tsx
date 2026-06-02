@@ -30,7 +30,7 @@ export default function RestockListScreen({ navigation }: Props) {
       const res = await api.get('/restock', { params });
       setItems(res.data);
     } catch {
-      Alert.alert('Error', 'Failed to load restock items');
+      Alert.alert('错误', '加载补货物品失败');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -59,17 +59,17 @@ export default function RestockListScreen({ navigation }: Props) {
   };
 
   const handleDelete = (item: RestockItem) => {
-    Alert.alert('Delete', `Delete "${item.name}" from restock list?`, [
-      { text: 'Cancel', style: 'cancel' },
+    Alert.alert('删除', `确定从补货清单中删除"${item.name}"吗？`, [
+      { text: '取消', style: 'cancel' },
       {
-        text: 'Delete',
+        text: '删除',
         style: 'destructive',
         onPress: async () => {
           try {
             await api.delete(`/restock/${item.id}`);
             fetchItems(filter);
           } catch {
-            Alert.alert('Error', 'Failed to delete');
+            Alert.alert('错误', '删除失败');
           }
         },
       },
@@ -86,20 +86,20 @@ export default function RestockListScreen({ navigation }: Props) {
             { color: item.status === 'pending' ? '#f59e0b' : '#22c55e' },
           ]}
         >
-          {item.status}
+          {item.status === 'pending' ? '待补货' : item.status === 'done' ? '已完成' : item.status}
         </Text>
       </View>
       {item.category && (
         <Text style={styles.itemDetail}>{item.category}</Text>
       )}
-      <Text style={styles.itemDetail}>Qty: {formatQuantity(item)}</Text>
+      <Text style={styles.itemDetail}>数量: {formatQuantity(item)}</Text>
       {item.status === 'pending' && (
         <View style={styles.itemActions}>
           <TouchableOpacity
             style={styles.doneBtn}
             onPress={() => handleDone(item)}
           >
-            <Text style={styles.doneBtnText}>✅ Done</Text>
+            <Text style={styles.doneBtnText}>✅ 完成</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.deleteSmallBtn}
@@ -116,9 +116,9 @@ export default function RestockListScreen({ navigation }: Props) {
     <View style={styles.container}>
       <View style={styles.filterRow}>
         {[
-          { label: 'Pending', value: 'pending' },
-          { label: 'Done', value: 'done' },
-          { label: 'All', value: null },
+          { label: '待补货', value: 'pending' },
+          { label: '已完成', value: 'done' },
+          { label: '全部', value: null },
         ].map((f) => (
           <TouchableOpacity
             key={f.label}
@@ -151,7 +151,7 @@ export default function RestockListScreen({ navigation }: Props) {
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
           ListEmptyComponent={
-            <Text style={styles.empty}>No restock items</Text>
+            <Text style={styles.empty}>暂无补货物品</Text>
           }
           contentContainerStyle={
             items.length === 0 ? styles.emptyContainer : undefined
