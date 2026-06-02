@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import api from '../api/client';
+import { neoRaised, neoInset, colors, spacing, radius } from '../theme';
 
 type Props = {
   navigation: NativeStackNavigationProp<any>;
@@ -65,6 +66,7 @@ export default function AddRestockScreen({ navigation }: Props) {
             value={name}
             onChangeText={setName}
             placeholder="物品名称"
+            placeholderTextColor={colors.textMuted}
           />
         </View>
 
@@ -75,6 +77,7 @@ export default function AddRestockScreen({ navigation }: Props) {
             value={category}
             onChangeText={setCategory}
             placeholder="例如 蔬菜、肉类"
+            placeholderTextColor={colors.textMuted}
           />
         </View>
 
@@ -87,15 +90,17 @@ export default function AddRestockScreen({ navigation }: Props) {
               onChangeText={setQuantityValue}
               keyboardType="decimal-pad"
               placeholder="例如 1"
+              placeholderTextColor={colors.textMuted}
             />
           </View>
-          <View style={[styles.field, { flex: 1, marginLeft: 8 }]}>
+          <View style={[styles.field, { flex: 1, marginLeft: spacing.sm }]}>
             <Text style={styles.label}>单位</Text>
             <TextInput
               style={styles.input}
               value={quantityUnit}
               onChangeText={setQuantityUnit}
               placeholder="例如 千克、个"
+              placeholderTextColor={colors.textMuted}
             />
           </View>
         </View>
@@ -107,6 +112,7 @@ export default function AddRestockScreen({ navigation }: Props) {
             value={notes}
             onChangeText={setNotes}
             placeholder="可选备注"
+            placeholderTextColor={colors.textMuted}
             multiline
           />
         </View>
@@ -126,30 +132,34 @@ export default function AddRestockScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8fafc' },
-  content: { padding: 16, paddingBottom: 40 },
-  title: { fontSize: 22, fontWeight: 'bold', color: '#111827', marginBottom: 16 },
-  field: { marginBottom: 14 },
+  container: { flex: 1, backgroundColor: colors.bg },
+  content: { padding: spacing.lg, paddingBottom: 40 },
+  title: { fontSize: 22, fontWeight: 'bold', color: colors.textPrimary, marginBottom: spacing.lg },
+  field: { marginBottom: spacing.lg - 2 },
   fieldRow: { flexDirection: 'row', alignItems: 'flex-start' },
-  label: { fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 4 },
+  label: { fontSize: 14, fontWeight: '600', color: colors.textPrimary, marginBottom: spacing.xs + 1 },
   input: {
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    ...neoInset,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md - 2,
     fontSize: 15,
-    color: '#111827',
+    color: colors.textPrimary,
   },
   multiline: { minHeight: 60, textAlignVertical: 'top' },
   saveBtn: {
-    backgroundColor: '#8b5cf6',
-    paddingVertical: 14,
-    borderRadius: 10,
+    backgroundColor: colors.accent,
+    paddingVertical: spacing.lg - 2,
+    borderRadius: radius.md,
     alignItems: 'center',
-    marginTop: 8,
+    marginTop: spacing.sm,
+    shadowColor: colors.shadowDark2,
+    shadowOffset: { width: 4, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    elevation: 5,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.3)',
   },
   saveBtnDisabled: { opacity: 0.6 },
-  saveBtnText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  saveBtnText: { color: colors.white, fontSize: 16, fontWeight: 'bold' },
 });

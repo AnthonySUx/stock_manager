@@ -13,6 +13,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import api from '../api/client';
 import type { Item } from '../types';
+import { neoRaised, colors, spacing, radius } from '../theme';
 
 type Props = {
   navigation: NativeStackNavigationProp<any>;
@@ -56,15 +57,21 @@ export default function RemindersScreen({ navigation }: Props) {
       >
         <View style={styles.itemHeader}>
           <Text style={styles.itemName}>{item.name}</Text>
-          <Text
+          <View
             style={[
               styles.statusBadge,
-              { backgroundColor: isExpired ? '#fef2f2' : '#fffbeb' },
-              { color: isExpired ? '#ef4444' : '#f59e0b' },
+              { backgroundColor: isExpired ? '#fde8e8' : '#fef3cd' },
             ]}
           >
-            {item.status}
-          </Text>
+            <Text
+              style={[
+                styles.statusBadgeText,
+                { color: isExpired ? colors.danger : colors.warning },
+              ]}
+            >
+              {item.status}
+            </Text>
+          </View>
         </View>
         <Text style={styles.itemDetail}>
           过期: {item.current_expiration_date}
@@ -78,7 +85,7 @@ export default function RemindersScreen({ navigation }: Props) {
 
   if (loading) {
     return (
-      <ActivityIndicator size="large" color="#8b5cf6" style={styles.loader} />
+      <ActivityIndicator size="large" color={colors.accent} style={styles.loader} />
     );
   }
 
@@ -101,7 +108,7 @@ export default function RemindersScreen({ navigation }: Props) {
           </View>
         }
         contentContainerStyle={
-          items.length === 0 ? styles.emptyFull : undefined
+          items.length === 0 ? styles.emptyFull : { paddingBottom: 20 }
         }
       />
     </View>
@@ -109,46 +116,43 @@ export default function RemindersScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8fafc' },
+  container: { flex: 1, backgroundColor: colors.bg },
   loader: { flex: 1, justifyContent: 'center' },
   item: {
-    marginHorizontal: 12,
-    marginTop: 10,
-    padding: 14,
-    borderRadius: 10,
+    ...neoRaised,
+    marginHorizontal: spacing.lg - 4,
+    marginTop: spacing.md - 2,
+    padding: spacing.lg - 2,
     borderLeftWidth: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 2,
   },
   itemWarning: {
-    backgroundColor: '#fffbeb',
-    borderLeftColor: '#f59e0b',
+    backgroundColor: '#fef9e7',
+    borderLeftColor: colors.warning,
   },
   itemExpired: {
-    backgroundColor: '#fef2f2',
-    borderLeftColor: '#ef4444',
+    backgroundColor: '#fdedec',
+    borderLeftColor: colors.danger,
+  },
+  statusBadge: {
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.full,
+    overflow: 'hidden',
+  },
+  statusBadgeText: {
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   itemHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  itemName: { fontSize: 16, fontWeight: 'bold', color: '#111827', flex: 1 },
-  statusBadge: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 10,
-    overflow: 'hidden',
-  },
-  itemDetail: { fontSize: 13, color: '#6b7280', marginTop: 4 },
+  itemName: { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary, flex: 1 },
+  itemDetail: { fontSize: 13, color: colors.textSecondary, marginTop: spacing.xs + 1 },
   emptyContainer: { alignItems: 'center', paddingTop: 60 },
   emptyFull: { flex: 1, justifyContent: 'center' },
-  emptyIcon: { fontSize: 48, marginBottom: 12 },
-  emptyTitle: { fontSize: 20, fontWeight: 'bold', color: '#111827' },
-  emptySubtitle: { fontSize: 14, color: '#6b7280', marginTop: 4 },
+  emptyIcon: { fontSize: 48, marginBottom: spacing.md },
+  emptyTitle: { fontSize: 20, fontWeight: 'bold', color: colors.textPrimary },
+  emptySubtitle: { fontSize: 14, color: colors.textSecondary, marginTop: spacing.xs },
 });

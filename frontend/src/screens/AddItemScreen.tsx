@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import api from '../api/client';
+import { neoRaised, neoInset, neoChip, colors, spacing, radius } from '../theme';
 
 type Props = {
   navigation: NativeStackNavigationProp<any>;
@@ -103,6 +104,18 @@ export default function AddItemScreen({ navigation }: Props) {
     </View>
   );
 
+  const renderUnitChip = (opt: string) => (
+    <TouchableOpacity
+      key={opt}
+      style={[styles.chip, quantityUnit === opt && styles.chipActive]}
+      onPress={() => setQuantityUnit(opt)}
+    >
+      <Text style={[styles.chipText, quantityUnit === opt && styles.chipTextActive]}>
+        {opt}
+      </Text>
+    </TouchableOpacity>
+  );
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -119,6 +132,7 @@ export default function AddItemScreen({ navigation }: Props) {
             value={name}
             onChangeText={setName}
             placeholder="物品名称"
+            placeholderTextColor={colors.textMuted}
           />
         </View>
 
@@ -133,6 +147,7 @@ export default function AddItemScreen({ navigation }: Props) {
             value={owner}
             onChangeText={setOwner}
             placeholder="谁购买的？"
+            placeholderTextColor={colors.textMuted}
           />
         </View>
 
@@ -144,6 +159,7 @@ export default function AddItemScreen({ navigation }: Props) {
             value={purchaseDate}
             onChangeText={setPurchaseDate}
             placeholder="YYYY-MM-DD（默认今天）"
+            placeholderTextColor={colors.textMuted}
           />
         </View>
 
@@ -156,23 +172,14 @@ export default function AddItemScreen({ navigation }: Props) {
               value={quantityValue}
               onChangeText={setQuantityValue}
               placeholder="例如 2"
+              placeholderTextColor={colors.textMuted}
               keyboardType="decimal-pad"
             />
           </View>
-          <View style={[styles.field, { flex: 1, marginLeft: 8 }]}>
+          <View style={[styles.field, { flex: 1, marginLeft: spacing.sm }]}>
             <Text style={styles.label}>单位</Text>
             <View style={styles.chipRow}>
-              {UNITS.map((opt) => (
-                <TouchableOpacity
-                  key={opt}
-                  style={[styles.chip, quantityUnit === opt && styles.chipActive]}
-                  onPress={() => setQuantityUnit(opt)}
-                >
-                  <Text style={[styles.chipText, quantityUnit === opt && styles.chipTextActive]}>
-                    {opt}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+              {UNITS.map(renderUnitChip)}
             </View>
           </View>
         </View>
@@ -188,6 +195,7 @@ export default function AddItemScreen({ navigation }: Props) {
             value={unopenedExp}
             onChangeText={setUnopenedExp}
             placeholder="YYYY-MM-DD 或永久"
+            placeholderTextColor={colors.textMuted}
           />
         </View>
 
@@ -198,6 +206,7 @@ export default function AddItemScreen({ navigation }: Props) {
             value={openedDate}
             onChangeText={setOpenedDate}
             placeholder="YYYY-MM-DD"
+            placeholderTextColor={colors.textMuted}
           />
         </View>
 
@@ -208,6 +217,7 @@ export default function AddItemScreen({ navigation }: Props) {
             value={openedExp}
             onChangeText={setOpenedExp}
             placeholder="YYYY-MM-DD 或永久"
+            placeholderTextColor={colors.textMuted}
           />
         </View>
 
@@ -219,6 +229,7 @@ export default function AddItemScreen({ navigation }: Props) {
             value={notes}
             onChangeText={setNotes}
             placeholder="可选备注"
+            placeholderTextColor={colors.textMuted}
             multiline
           />
         </View>
@@ -238,50 +249,48 @@ export default function AddItemScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8fafc' },
-  content: { padding: 16, paddingBottom: 40 },
-  title: { fontSize: 22, fontWeight: 'bold', color: '#111827', marginBottom: 16 },
-  field: { marginBottom: 14 },
+  container: { flex: 1, backgroundColor: colors.bg },
+  content: { padding: spacing.lg, paddingBottom: 40 },
+  title: { fontSize: 22, fontWeight: 'bold', color: colors.textPrimary, marginBottom: spacing.lg },
+  field: { marginBottom: spacing.lg - 2 },
   fieldRow: { flexDirection: 'row', alignItems: 'flex-start' },
-  label: { fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 4 },
-  required: { color: '#ef4444' },
+  label: { fontSize: 14, fontWeight: '600', color: colors.textPrimary, marginBottom: spacing.xs + 1 },
+  required: { color: colors.danger },
   input: {
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    ...neoInset,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md - 2,
     fontSize: 15,
-    color: '#111827',
+    color: colors.textPrimary,
   },
   multiline: { minHeight: 60, textAlignVertical: 'top' },
   chipRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 6,
+    gap: spacing.sm - 2,
   },
   chip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    backgroundColor: '#f3f4f6',
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
+    ...neoChip(false),
   },
   chipActive: {
-    backgroundColor: '#8b5cf6',
-    borderColor: '#8b5cf6',
+    ...neoChip(true),
   },
-  chipText: { fontSize: 13, color: '#374151' },
-  chipTextActive: { color: '#fff', fontWeight: 'bold' },
+  chipText: { fontSize: 13, color: colors.textSecondary },
+  chipTextActive: { color: colors.white, fontWeight: 'bold' },
   saveBtn: {
-    backgroundColor: '#8b5cf6',
-    paddingVertical: 14,
-    borderRadius: 10,
+    backgroundColor: colors.accent,
+    paddingVertical: spacing.lg - 2,
+    borderRadius: radius.md,
     alignItems: 'center',
-    marginTop: 8,
+    marginTop: spacing.sm,
+    shadowColor: colors.shadowDark2,
+    shadowOffset: { width: 4, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    elevation: 5,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.3)',
   },
   saveBtnDisabled: { opacity: 0.6 },
-  saveBtnText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  saveBtnText: { color: colors.white, fontSize: 16, fontWeight: 'bold' },
 });

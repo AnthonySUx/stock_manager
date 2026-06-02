@@ -12,6 +12,7 @@ import { useFocusEffect, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import api from '../api/client';
 import type { Item } from '../types';
+import { neoRaised, colors, spacing, radius } from '../theme';
 
 type Props = {
   navigation: NativeStackNavigationProp<any>;
@@ -71,7 +72,7 @@ export default function ItemDetailScreen({ navigation }: Props) {
 
   if (loading) {
     return (
-      <ActivityIndicator size="large" color="#8b5cf6" style={styles.loader} />
+      <ActivityIndicator size="large" color={colors.accent} style={styles.loader} />
     );
   }
 
@@ -79,18 +80,29 @@ export default function ItemDetailScreen({ navigation }: Props) {
 
   const statusColor =
     item.status === 'active'
-      ? '#22c55e'
+      ? '#2ecc71'
       : item.status === 'expiring soon'
-      ? '#f59e0b'
+      ? '#f39c12'
       : item.status === 'expired'
-      ? '#ef4444'
-      : '#6b7280';
+      ? '#e74c3c'
+      : '#95a5a6';
+
+  const statusBg =
+    item.status === 'active'
+      ? '#d4f5e0'
+      : item.status === 'expiring soon'
+      ? '#fef3cd'
+      : item.status === 'expired'
+      ? '#fde8e8'
+      : '#f0f0f0';
 
   return (
     <ScrollView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.name}>{item.name}</Text>
-        <Text style={[styles.status, { color: statusColor }]}>{item.status}</Text>
+        <View style={[styles.statusBadge, { backgroundColor: statusBg }]}>
+          <Text style={[styles.status, { color: statusColor }]}>{item.status}</Text>
+        </View>
       </View>
 
       <View style={styles.card}>
@@ -154,68 +166,89 @@ const rowStyles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
+    paddingVertical: spacing.md - 2,
+    borderBottomWidth: 0.5,
+    borderBottomColor: 'rgba(0,0,0,0.05)',
   },
-  label: { fontSize: 14, color: '#6b7280', flex: 1 },
-  value: { fontSize: 14, color: '#111827', flex: 1, textAlign: 'right', fontWeight: '500' },
+  label: { fontSize: 14, color: colors.textSecondary, flex: 1 },
+  value: { fontSize: 14, color: colors.textPrimary, flex: 1, textAlign: 'right', fontWeight: '500' },
 });
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8fafc' },
+  container: { flex: 1, backgroundColor: colors.bg },
   loader: { flex: 1, justifyContent: 'center' },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 16,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
+    padding: spacing.lg,
+    backgroundColor: colors.card,
+    borderBottomWidth: 0.5,
+    borderBottomColor: 'rgba(0,0,0,0.05)',
   },
-  name: { fontSize: 22, fontWeight: 'bold', color: '#111827', flex: 1 },
-  status: { fontSize: 14, fontWeight: 'bold', marginLeft: 8 },
+  name: { fontSize: 22, fontWeight: 'bold', color: colors.textPrimary, flex: 1 },
+  status: { fontSize: 13, fontWeight: 'bold' },
+  statusBadge: {
+    paddingHorizontal: spacing.md - 2,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.full,
+    marginLeft: spacing.sm,
+  },
   card: {
-    backgroundColor: '#fff',
-    margin: 16,
-    padding: 16,
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 2,
+    ...neoRaised,
+    margin: spacing.lg,
+    padding: spacing.lg,
   },
   actions: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    marginHorizontal: 16,
+    marginHorizontal: spacing.lg,
     marginBottom: 30,
-    gap: 8,
+    gap: spacing.sm,
   },
   editBtn: {
     flex: 1,
     backgroundColor: '#3b82f6',
-    paddingVertical: 12,
-    borderRadius: 8,
+    paddingVertical: spacing.md,
+    borderRadius: radius.sm,
     alignItems: 'center',
+    shadowColor: colors.shadowDark2,
+    shadowOffset: { width: 3, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    elevation: 4,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.3)',
   },
-  editBtnText: { color: '#fff', fontWeight: 'bold' },
+  editBtnText: { color: colors.white, fontWeight: 'bold' },
   consumeBtn: {
     flex: 1,
-    backgroundColor: '#22c55e',
-    paddingVertical: 12,
-    borderRadius: 8,
+    backgroundColor: '#2ecc71',
+    paddingVertical: spacing.md,
+    borderRadius: radius.sm,
     alignItems: 'center',
+    shadowColor: colors.shadowDark2,
+    shadowOffset: { width: 3, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    elevation: 4,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.3)',
   },
-  consumeBtnText: { color: '#fff', fontWeight: 'bold' },
+  consumeBtnText: { color: colors.white, fontWeight: 'bold' },
   deleteBtn: {
     flex: 1,
-    backgroundColor: '#ef4444',
-    paddingVertical: 12,
-    borderRadius: 8,
+    backgroundColor: '#e74c3c',
+    paddingVertical: spacing.md,
+    borderRadius: radius.sm,
     alignItems: 'center',
+    shadowColor: colors.shadowDark2,
+    shadowOffset: { width: 3, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    elevation: 4,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.3)',
   },
-  deleteBtnText: { color: '#fff', fontWeight: 'bold' },
+  deleteBtnText: { color: colors.white, fontWeight: 'bold' },
 });

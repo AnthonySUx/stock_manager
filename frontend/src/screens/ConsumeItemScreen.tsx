@@ -14,6 +14,7 @@ import { useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import api from '../api/client';
 import type { Item } from '../types';
+import { neoRaised, neoInset, colors, spacing, radius } from '../theme';
 
 type Props = {
   navigation: NativeStackNavigationProp<any>;
@@ -69,7 +70,7 @@ export default function ConsumeItemScreen({ navigation }: Props) {
   };
 
   if (loading) {
-    return <ActivityIndicator size="large" color="#8b5cf6" style={styles.loader} />;
+    return <ActivityIndicator size="large" color={colors.accent} style={styles.loader} />;
   }
 
   if (!item) return null;
@@ -91,6 +92,7 @@ export default function ConsumeItemScreen({ navigation }: Props) {
           onChangeText={setQuantity}
           keyboardType="decimal-pad"
           placeholder="0"
+          placeholderTextColor={colors.textMuted}
         />
 
         <View style={styles.switchRow}>
@@ -98,8 +100,8 @@ export default function ConsumeItemScreen({ navigation }: Props) {
           <Switch
             value={addToRestock}
             onValueChange={setAddToRestock}
-            trackColor={{ false: '#d1d5db', true: '#c4b5fd' }}
-            thumbColor={addToRestock ? '#8b5cf6' : '#f4f3f4'}
+            trackColor={{ false: '#d1d9e6', true: '#c4b5fd' }}
+            thumbColor={addToRestock ? colors.accent : '#f4f3f4'}
           />
         </View>
 
@@ -118,47 +120,45 @@ export default function ConsumeItemScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8fafc' },
+  container: { flex: 1, backgroundColor: colors.bg },
   loader: { flex: 1, justifyContent: 'center' },
   card: {
-    backgroundColor: '#fff',
-    margin: 16,
-    padding: 16,
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 2,
+    ...neoRaised,
+    margin: spacing.lg,
+    padding: spacing.lg,
   },
-  itemName: { fontSize: 20, fontWeight: 'bold', color: '#111827' },
-  itemQty: { fontSize: 15, color: '#6b7280', marginTop: 4 },
-  label: { fontSize: 15, fontWeight: '600', color: '#374151', marginBottom: 8 },
+  itemName: { fontSize: 20, fontWeight: 'bold', color: colors.textPrimary },
+  itemQty: { fontSize: 15, color: colors.textSecondary, marginTop: spacing.xs },
+  label: { fontSize: 15, fontWeight: '600', color: colors.textPrimary, marginBottom: spacing.sm },
   input: {
-    backgroundColor: '#f9fafb',
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    ...neoInset,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md - 2,
     fontSize: 18,
-    color: '#111827',
+    color: colors.textPrimary,
     textAlign: 'center',
   },
   switchRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 16,
+    marginTop: spacing.lg,
   },
-  switchLabel: { fontSize: 14, color: '#374151', flex: 1, marginRight: 8 },
+  switchLabel: { fontSize: 14, color: colors.textPrimary, flex: 1, marginRight: spacing.sm },
   consumeBtn: {
-    backgroundColor: '#22c55e',
-    paddingVertical: 14,
-    borderRadius: 10,
+    backgroundColor: '#2ecc71',
+    paddingVertical: spacing.lg - 2,
+    borderRadius: radius.md,
     alignItems: 'center',
-    marginTop: 16,
+    marginTop: spacing.lg,
+    shadowColor: colors.shadowDark2,
+    shadowOffset: { width: 4, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    elevation: 5,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.3)',
   },
   consumeBtnDisabled: { opacity: 0.6 },
-  consumeBtnText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  consumeBtnText: { color: colors.white, fontSize: 16, fontWeight: 'bold' },
 });

@@ -12,6 +12,7 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import api from '../api/client';
 import type { Settings } from '../types';
+import { neoRaised, neoInset, colors, spacing, radius } from '../theme';
 
 export default function SettingsScreen() {
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -58,7 +59,7 @@ export default function SettingsScreen() {
 
   if (loading) {
     return (
-      <ActivityIndicator size="large" color="#8b5cf6" style={styles.loader} />
+      <ActivityIndicator size="large" color={colors.accent} style={styles.loader} />
     );
   }
 
@@ -78,6 +79,7 @@ export default function SettingsScreen() {
             onChangeText={setReminderDays}
             keyboardType="number-pad"
             placeholder="2"
+            placeholderTextColor={colors.textMuted}
           />
         </View>
 
@@ -91,6 +93,7 @@ export default function SettingsScreen() {
             value={databasePath}
             onChangeText={setDatabasePath}
             placeholder="stock.db"
+            placeholderTextColor={colors.textMuted}
           />
         </View>
 
@@ -109,40 +112,38 @@ export default function SettingsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8fafc' },
+  container: { flex: 1, backgroundColor: colors.bg },
   loader: { flex: 1, justifyContent: 'center' },
   card: {
-    backgroundColor: '#fff',
-    margin: 16,
-    padding: 16,
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 2,
+    ...neoRaised,
+    margin: spacing.lg,
+    padding: spacing.lg,
   },
-  title: { fontSize: 22, fontWeight: 'bold', color: '#111827', marginBottom: 16 },
-  field: { marginBottom: 18 },
-  label: { fontSize: 15, fontWeight: '600', color: '#374151', marginBottom: 2 },
-  hint: { fontSize: 12, color: '#9ca3af', marginBottom: 6 },
+  title: { fontSize: 22, fontWeight: 'bold', color: colors.textPrimary, marginBottom: spacing.lg },
+  field: { marginBottom: spacing.xl },
+  label: { fontSize: 15, fontWeight: '600', color: colors.textPrimary, marginBottom: spacing.xs - 1 },
+  hint: { fontSize: 12, color: colors.textMuted, marginBottom: spacing.sm - 2 },
   input: {
-    backgroundColor: '#f9fafb',
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    ...neoInset,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md - 2,
     fontSize: 15,
-    color: '#111827',
+    color: colors.textPrimary,
   },
   saveBtn: {
-    backgroundColor: '#8b5cf6',
-    paddingVertical: 14,
-    borderRadius: 10,
+    backgroundColor: colors.accent,
+    paddingVertical: spacing.lg - 2,
+    borderRadius: radius.md,
     alignItems: 'center',
-    marginTop: 8,
+    marginTop: spacing.sm,
+    shadowColor: colors.shadowDark2,
+    shadowOffset: { width: 4, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    elevation: 5,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.3)',
   },
   saveBtnDisabled: { opacity: 0.6 },
-  saveBtnText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  saveBtnText: { color: colors.white, fontSize: 16, fontWeight: 'bold' },
 });

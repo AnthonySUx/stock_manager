@@ -13,6 +13,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import api from '../api/client';
 import type { RestockItem } from '../types';
+import { neoRaised, neoChip, colors, spacing, radius } from '../theme';
 
 type Props = {
   navigation: NativeStackNavigationProp<any>;
@@ -80,14 +81,21 @@ export default function RestockListScreen({ navigation }: Props) {
     <View style={styles.item}>
       <View style={styles.itemHeader}>
         <Text style={styles.itemName}>{item.name}</Text>
-        <Text
+        <View
           style={[
-            styles.itemStatus,
-            { color: item.status === 'pending' ? '#f59e0b' : '#22c55e' },
+            styles.statusBadge,
+            { backgroundColor: item.status === 'pending' ? '#fef3cd' : '#d4f5e0' },
           ]}
         >
-          {item.status === 'pending' ? '待补货' : item.status === 'done' ? '已完成' : item.status}
-        </Text>
+          <Text
+            style={[
+              styles.itemStatus,
+              { color: item.status === 'pending' ? '#f39c12' : '#2ecc71' },
+            ]}
+          >
+            {item.status === 'pending' ? '待补货' : item.status === 'done' ? '已完成' : item.status}
+          </Text>
+        </View>
       </View>
       {item.category && (
         <Text style={styles.itemDetail}>{item.category}</Text>
@@ -141,7 +149,7 @@ export default function RestockListScreen({ navigation }: Props) {
       </View>
 
       {loading ? (
-        <ActivityIndicator size="large" color="#8b5cf6" style={styles.loader} />
+        <ActivityIndicator size="large" color={colors.accent} style={styles.loader} />
       ) : (
         <FlatList
           data={items}
@@ -154,7 +162,7 @@ export default function RestockListScreen({ navigation }: Props) {
             <Text style={styles.empty}>暂无补货物品</Text>
           }
           contentContainerStyle={
-            items.length === 0 ? styles.emptyContainer : undefined
+            items.length === 0 ? styles.emptyContainer : { paddingBottom: 80 }
           }
         />
       )}
@@ -170,80 +178,86 @@ export default function RestockListScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8fafc' },
+  container: { flex: 1, backgroundColor: colors.bg },
   loader: { flex: 1, justifyContent: 'center' },
   filterRow: {
     flexDirection: 'row',
-    padding: 8,
-    gap: 6,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
+    padding: spacing.sm,
+    gap: spacing.sm - 2,
+    backgroundColor: colors.bg,
   },
   filterChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    backgroundColor: '#f3f4f6',
+    ...neoChip(false),
   },
-  filterChipActive: { backgroundColor: '#8b5cf6' },
-  filterChipText: { fontSize: 13, color: '#374151' },
-  filterChipTextActive: { color: '#fff', fontWeight: 'bold' },
+  filterChipActive: {
+    ...neoChip(true),
+  },
+  filterChipText: { fontSize: 13, color: colors.textSecondary },
+  filterChipTextActive: { color: colors.white, fontWeight: 'bold' },
   item: {
-    backgroundColor: '#fff',
-    marginHorizontal: 12,
-    marginTop: 10,
-    padding: 14,
-    borderRadius: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 2,
+    ...neoRaised,
+    marginHorizontal: spacing.lg - 4,
+    marginTop: spacing.md - 2,
+    padding: spacing.lg - 2,
+  },
+  statusBadge: {
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.full,
+    overflow: 'hidden',
   },
   itemHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  itemName: { fontSize: 16, fontWeight: 'bold', color: '#111827', flex: 1 },
-  itemStatus: { fontSize: 13, fontWeight: 'bold' },
-  itemDetail: { fontSize: 13, color: '#6b7280', marginTop: 3 },
+  itemName: { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary, flex: 1 },
+  itemStatus: { fontSize: 12, fontWeight: 'bold' },
+  itemDetail: { fontSize: 13, color: colors.textSecondary, marginTop: spacing.xs + 1 },
   itemActions: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
     alignItems: 'center',
-    marginTop: 8,
-    gap: 8,
+    marginTop: spacing.md - 2,
+    gap: spacing.sm,
   },
   doneBtn: {
-    backgroundColor: '#22c55e',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
+    backgroundColor: '#2ecc71',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.sm,
+    shadowColor: colors.shadowDark2,
+    shadowOffset: { width: 2, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 3,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.3)',
   },
-  doneBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
+  doneBtnText: { color: colors.white, fontWeight: 'bold', fontSize: 14 },
   deleteSmallBtn: {
-    padding: 8,
+    padding: spacing.sm,
   },
   deleteSmallBtnText: { fontSize: 18 },
-  empty: { fontSize: 16, color: '#9ca3af', textAlign: 'center' },
+  empty: { fontSize: 16, color: colors.textMuted, textAlign: 'center' },
   emptyContainer: { flex: 1, justifyContent: 'center' },
   fab: {
     position: 'absolute',
-    right: 20,
-    bottom: 20,
+    right: spacing.xl,
+    bottom: spacing.xl,
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: '#8b5cf6',
+    backgroundColor: colors.accent,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#8b5cf6',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
+    shadowColor: colors.shadowDark2,
+    shadowOffset: { width: 6, height: 6 },
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+    elevation: 8,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.3)',
   },
-  fabText: { fontSize: 28, color: '#fff', lineHeight: 30 },
+  fabText: { fontSize: 28, color: colors.white, lineHeight: 30 },
 });

@@ -14,6 +14,7 @@ import { useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import api from '../api/client';
 import type { RestockItem } from '../types';
+import { neoRaised, neoInset, colors, spacing, radius } from '../theme';
 
 type Props = {
   navigation: NativeStackNavigationProp<any>;
@@ -80,6 +81,7 @@ export default function DoneRestockScreen({ navigation }: Props) {
             value={purchasedQty}
             onChangeText={setPurchasedQty}
             keyboardType="decimal-pad"
+            placeholderTextColor={colors.textMuted}
           />
         </View>
 
@@ -90,6 +92,7 @@ export default function DoneRestockScreen({ navigation }: Props) {
             value={owner}
             onChangeText={setOwner}
             placeholder="谁购买的？"
+            placeholderTextColor={colors.textMuted}
           />
         </View>
 
@@ -100,6 +103,7 @@ export default function DoneRestockScreen({ navigation }: Props) {
             value={purchaseDate}
             onChangeText={setPurchaseDate}
             placeholder="YYYY-MM-DD（默认今天）"
+            placeholderTextColor={colors.textMuted}
           />
         </View>
 
@@ -110,6 +114,7 @@ export default function DoneRestockScreen({ navigation }: Props) {
             value={location}
             onChangeText={setLocation}
             placeholder="例如 冰箱"
+            placeholderTextColor={colors.textMuted}
           />
         </View>
 
@@ -120,6 +125,7 @@ export default function DoneRestockScreen({ navigation }: Props) {
             value={unopenedExp}
             onChangeText={setUnopenedExp}
             placeholder="YYYY-MM-DD 或永久"
+            placeholderTextColor={colors.textMuted}
           />
         </View>
 
@@ -130,6 +136,7 @@ export default function DoneRestockScreen({ navigation }: Props) {
             value={openedDate}
             onChangeText={setOpenedDate}
             placeholder="YYYY-MM-DD"
+            placeholderTextColor={colors.textMuted}
           />
         </View>
 
@@ -140,6 +147,7 @@ export default function DoneRestockScreen({ navigation }: Props) {
             value={openedExp}
             onChangeText={setOpenedExp}
             placeholder="YYYY-MM-DD"
+            placeholderTextColor={colors.textMuted}
           />
         </View>
 
@@ -158,29 +166,33 @@ export default function DoneRestockScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8fafc' },
-  content: { padding: 16, paddingBottom: 40 },
-  title: { fontSize: 22, fontWeight: 'bold', color: '#111827' },
-  subtitle: { fontSize: 16, color: '#6b7280', marginBottom: 16, marginTop: 4 },
-  field: { marginBottom: 14 },
-  label: { fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 4 },
+  container: { flex: 1, backgroundColor: colors.bg },
+  content: { padding: spacing.lg, paddingBottom: 40 },
+  title: { fontSize: 22, fontWeight: 'bold', color: colors.textPrimary },
+  subtitle: { fontSize: 16, color: colors.textSecondary, marginBottom: spacing.lg, marginTop: spacing.xs },
+  field: { marginBottom: spacing.lg - 2 },
+  label: { fontSize: 14, fontWeight: '600', color: colors.textPrimary, marginBottom: spacing.xs + 1 },
   input: {
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    ...neoInset,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md - 2,
     fontSize: 15,
-    color: '#111827',
+    color: colors.textPrimary,
   },
   doneBtn: {
-    backgroundColor: '#22c55e',
-    paddingVertical: 14,
-    borderRadius: 10,
+    backgroundColor: '#2ecc71',
+    paddingVertical: spacing.lg - 2,
+    borderRadius: radius.md,
     alignItems: 'center',
-    marginTop: 8,
+    marginTop: spacing.sm,
+    shadowColor: colors.shadowDark2,
+    shadowOffset: { width: 4, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    elevation: 5,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.3)',
   },
   doneBtnDisabled: { opacity: 0.6 },
-  doneBtnText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  doneBtnText: { color: colors.white, fontSize: 16, fontWeight: 'bold' },
 });

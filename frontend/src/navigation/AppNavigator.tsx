@@ -13,19 +13,24 @@ import AddRestockScreen from '../screens/AddRestockScreen';
 import DoneRestockScreen from '../screens/DoneRestockScreen';
 import RemindersScreen from '../screens/RemindersScreen';
 import SettingsScreen from '../screens/SettingsScreen';
+import { colors, neoRaised, radius } from '../theme';
+import { Ionicons } from '@expo/vector-icons';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
+const sharedHeaderOptions = {
+  headerStyle: {
+    backgroundColor: colors.card,
+  },
+  headerTintColor: colors.textPrimary,
+  headerTitleStyle: { fontWeight: 'bold' as const, color: colors.textPrimary },
+  headerShadowVisible: false,
+};
+
 function InventoryStack() {
   return (
-    <Stack.Navigator
-      screenOptions={{
-        headerStyle: { backgroundColor: '#8b5cf6' },
-        headerTintColor: '#fff',
-        headerTitleStyle: { fontWeight: 'bold' },
-      }}
-    >
+    <Stack.Navigator screenOptions={sharedHeaderOptions}>
       <Stack.Screen
         name="ItemList"
         component={ItemListScreen}
@@ -57,13 +62,7 @@ function InventoryStack() {
 
 function RestockStack() {
   return (
-    <Stack.Navigator
-      screenOptions={{
-        headerStyle: { backgroundColor: '#8b5cf6' },
-        headerTintColor: '#fff',
-        headerTitleStyle: { fontWeight: 'bold' },
-      }}
-    >
+    <Stack.Navigator screenOptions={sharedHeaderOptions}>
       <Stack.Screen
         name="RestockList"
         component={RestockListScreen}
@@ -85,13 +84,7 @@ function RestockStack() {
 
 function RemindersStack() {
   return (
-    <Stack.Navigator
-      screenOptions={{
-        headerStyle: { backgroundColor: '#8b5cf6' },
-        headerTintColor: '#fff',
-        headerTitleStyle: { fontWeight: 'bold' },
-      }}
-    >
+    <Stack.Navigator screenOptions={sharedHeaderOptions}>
       <Stack.Screen
         name="Reminders"
         component={RemindersScreen}
@@ -108,13 +101,7 @@ function RemindersStack() {
 
 function SettingsStack() {
   return (
-    <Stack.Navigator
-      screenOptions={{
-        headerStyle: { backgroundColor: '#8b5cf6' },
-        headerTintColor: '#fff',
-        headerTitleStyle: { fontWeight: 'bold' },
-      }}
-    >
+    <Stack.Navigator screenOptions={sharedHeaderOptions}>
       <Stack.Screen
         name="Settings"
         component={SettingsScreen}
@@ -128,17 +115,43 @@ export default function AppNavigator() {
   return (
     <NavigationContainer>
       <Tab.Navigator
-        screenOptions={{
+        screenOptions={({ route }) => ({
           headerShown: false,
-          tabBarActiveTintColor: '#8b5cf6',
-          tabBarInactiveTintColor: '#9ca3af',
-          
-          tabBarStyle: {
-            backgroundColor: '#fff',
-            borderTopColor: '#e5e7eb',
+          tabBarActiveTintColor: colors.accent,
+          tabBarInactiveTintColor: colors.textMuted,
+          tabBarIcon: ({ focused, color, size }) => {
+            let iconName: keyof typeof Ionicons.glyphMap;
+            switch (route.name) {
+              case 'InventoryTab':
+                iconName = focused ? 'cube' : 'cube-outline';
+                break;
+              case 'RestockTab':
+                iconName = focused ? 'cart' : 'cart-outline';
+                break;
+              case 'RemindersTab':
+                iconName = focused ? 'notifications' : 'notifications-outline';
+                break;
+              case 'SettingsTab':
+                iconName = focused ? 'settings' : 'settings-outline';
+                break;
+              default:
+                iconName = 'ellipse';
+            }
+            return <Ionicons name={iconName} size={size} color={color} />;
           },
-          tabBarLabelStyle: { fontSize: 12, fontWeight: '600' },
-        }}
+          tabBarStyle: {
+            ...neoRaised,
+            backgroundColor: colors.card,
+            borderTopWidth: 0,
+            borderTopLeftRadius: radius.lg,
+            borderTopRightRadius: radius.lg,
+            borderBottomLeftRadius: 0,
+            borderBottomRightRadius: 0,
+            elevation: 8,
+            shadowOpacity: 0.3,
+          },
+          tabBarLabelStyle: { fontSize: 12, fontWeight: '600' as const },
+        })}
       >
         <Tab.Screen
           name="InventoryTab"
