@@ -341,3 +341,315 @@ python3 -m stock_manager restock delete
 python3 -m stock_manager restock delete --database stock.db
 python3 -m stock_manager restock delete -d stock.db
 ```
+
+
+---
+
+# Full App Deployment Guide (New Computer)
+
+This guide covers how to set up and run Stock Manager on a brand new computer.
+
+---
+
+## 1. Prerequisites
+
+### 1.1 Homebrew (macOS)
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+### 1.2 Python 3.10+
+
+```bash
+brew install python@3.13
+python3 --version
+```
+
+### 1.3 Node.js + npm
+
+```bash
+brew install node
+node --version
+npm --version
+```
+
+### 1.4 MySQL
+
+Choose one of the following options:
+
+#### Option A: Docker MySQL (recommended)
+
+Install Docker Desktop from https://www.docker.com/products/docker-desktop/
+
+Verify:
+
+```bash
+docker --version
+docker compose version
+```
+
+#### Option B: Homebrew MySQL (alternative)
+
+```bash
+brew install mysql
+brew services start mysql
+```
+
+Then create database and user:
+
+```bash
+mysql -u root
+```
+
+```sql
+CREATE DATABASE stock_manager CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'stock_user'@'localhost' IDENTIFIED BY 'stock_password';
+GRANT ALL PRIVILEGES ON stock_manager.* TO 'stock_user'@'localhost';
+FLUSH PRIVILEGES;
+```
+
+### 1.5 Expo Go
+
+Install from App Store / Google Play.
+
+---
+
+## 2. Project Setup
+
+### 2.1 Clone the project
+
+```bash
+git clone <your-repo-url>
+cd stock_manager
+```
+
+### 2.2 Configure database connection
+
+Create a env file:
+
+```env
+DATABASE_URL=mysql+pymysql://stock_user:stock_password@127.0.0.1:3306/stock_manager
+API_HOST=0.0.0.0
+API_PORT=8000
+```
+
+### 2.3 Start MySQL
+
+If using Docker:
+
+```bash
+docker compose up -d
+```
+
+If using Homebrew:
+
+```bash
+brew services start mysql
+```
+
+---
+
+## 3. Backend (FastAPI)
+
+### 3.1 Install Python dependencies
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+### 3.2 Start the API server
+
+```bash
+uvicorn stock_manager.api.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### 3.3 Verify the backend
+
+```bash
+curl http://localhost:8000/api/health
+```
+
+Expected: `{"status":"ok","version":"0.9.0"}`
+
+### 3.4 API Documentation
+
+Open http://localhost:8000/docs in your browser.
+
+---
+
+## 4. Frontend (Expo + React Native)
+
+### 4.1 Install dependencies
+
+```bash
+cd frontend
+npm install --legacy-peer-deps
+```
+
+### 4.2 Configure API URL
+
+Edit `frontend/app.json` -> `expo.extra.apiBaseUrl`:
+
+| Environment | Value |
+|---|---|
+| iOS Simulator | `http://localhost:8000/api` |
+| Real device | `http://YOUR_MAC_IP:8000/api` |
+
+Find your Mac IP:
+
+```bash
+ipconfig getifaddr en0
+```
+
+### 4.3 Start Expo
+
+```bash
+npx expo start -c
+```
+
+### 4.4 Open in Expo Go
+
+- iOS Simulator: Press `i` in the terminal.
+- Real device: Scan the QR code.
+
+---
+
+## 5. Quick Start (Daily Use)
+
+```bash
+# Terminal 1: MySQL
+docker compose up -d
+
+# Terminal 2: Backend
+cd /path/to/stock_manager
+source .venv/bin/activate
+uvicorn stock_manager.api.main:app --reload --host 0.0.0.0 --port 8000
+
+# Terminal 3: Frontend
+cd /path/to/stock_manager/frontend
+npx expo start -c
+```
+
+---
+
+## 6. Common Problems
+
+### 6.1 `zsh: command not found: docker`
+
+Docker is not installed. Install Docker Desktop or use Homebrew MySQL.
+
+### 6.2 SDK / Expo Go version mismatch
+
+Check frontend/package.json:
+
+```json
+"expo": "~55.0.0",
+"react": "19.2.0",
+"react-native": "0.83.2"
+```
+
+Reinstall if needed:
+
+```bash
+rm -rf node_modules package-lock.json
+npm install --legacy-peer-deps
+```
+
+### 6.3 React Native codegen error (`RCTModalHostViewNativeComponent`)
+
+React Native version is too new. Install the correct version:
+
+```bash
+npm install react-native@0.83.2 --legacy-peer-deps
+```
+
+### 6.4 Port 8081 already in use
+
+Kill old process:
+
+```bash
+kill $(lsof -t -i :8081)
+```
+
+### 6.5 `failed to load items`
+
+Check:
+1. Backend is running: `curl http://localhost:8000/api/health`
+2. MySQL is running
+3. If on real device, use your Mac IP instead of localhost
+
+### 6.6 Connection refused
+
+Backend not running. Start it with uvicorn.
+
+### 6.7 Python module not found
+
+```bash
+source .venv/bin/activate
+pip install -e .
+```
+
+### 6.8 Frontend module not found
+
+```bash
+rm -rf node_modules package-lock.json
+npm install --legacy-peer-deps
+```
+
+### 6.9 TypeScript errors
+
+```bash
+cd frontend
+npx tsc --noEmit
+```
+
+### 6.10 Expo shows old code
+
+Clear cache:
+
+```bash
+npx expo start -c
+```
+
+---
+
+## 7. CLI
+
+The original CLI still works alongside the API:
+
+```bash
+python3 -m stock_manager --help
+```
+
+The CLI uses SQLite. The API uses MySQL.
+
+---
+
+## 8. Project Structure
+
+```
+stock_manager/
+  api/             # FastAPI backend
+    main.py, db.py, models.py, schemas.py, services.py
+    routers/
+      items.py, restock.py, settings.py
+  cli.py           # Original CLI
+  database.py      # SQLite layer
+  config.py
+
+docker-compose.yml # MySQL 8
+
+frontend/          # Expo + React Native app
+  App.tsx
+  app.json
+  src/
+    screens/       # All screens
+    navigation/    # Tab + Stack navigation
+    api/           # API client
+    types/         # TypeScript types
+
+scripts/           # Helper scripts
+```
