@@ -15,7 +15,7 @@ import { useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import api from '../api/client';
 import type { Item } from '../types';
-import { neoRaised, neoInset, neoChip, colors, spacing, radius } from '../theme';
+import { neoCard, neoInput, neoFilterChip, colors, spacing, radius, shadowMd } from '../theme';
 
 type Props = {
   navigation: NativeStackNavigationProp<any>;
@@ -112,7 +112,8 @@ export default function EditItemScreen({ navigation }: Props) {
       {options.map((opt) => (
         <TouchableOpacity
           key={opt}
-          style={[styles.chip, selected === opt && styles.chipActive]}
+          style={neoFilterChip(selected === opt)}
+          activeOpacity={0.7}
           onPress={() => onSelect(opt)}
         >
           <Text style={[styles.chipText, selected === opt && styles.chipTextActive]}>
@@ -241,6 +242,7 @@ export default function EditItemScreen({ navigation }: Props) {
 
         <TouchableOpacity
           style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
+          activeOpacity={0.85}
           onPress={handleSave}
           disabled={saving}
         >
@@ -257,12 +259,12 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   loader: { flex: 1, justifyContent: 'center' },
   content: { padding: spacing.lg, paddingBottom: 40 },
-  title: { fontSize: 22, fontWeight: 'bold', color: colors.textPrimary, marginBottom: spacing.lg },
-  field: { marginBottom: spacing.lg - 2 },
+  title: { fontSize: 22, fontWeight: '700', color: colors.textPrimary, marginBottom: spacing.lg },
+  field: { marginBottom: spacing.xl },
   fieldRow: { flexDirection: 'row', alignItems: 'flex-start' },
   label: { fontSize: 14, fontWeight: '600', color: colors.textPrimary, marginBottom: spacing.xs + 1 },
   input: {
-    ...neoInset,
+    ...neoInput,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md - 2,
     fontSize: 15,
@@ -270,28 +272,18 @@ const styles = StyleSheet.create({
   },
   multiline: { minHeight: 60, textAlignVertical: 'top' },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm - 2 },
-  chip: {
-    ...neoChip(false),
-  },
-  chipActive: {
-    ...neoChip(true),
-  },
   chipText: { fontSize: 13, color: colors.textSecondary },
-  chipTextActive: { color: colors.white, fontWeight: 'bold' },
+  chipTextActive: { color: colors.white, fontWeight: '600' },
   saveBtn: {
+    ...neoCard,
     backgroundColor: colors.accent,
     paddingVertical: spacing.lg - 2,
     borderRadius: radius.md,
     alignItems: 'center',
     marginTop: spacing.sm,
-    shadowColor: colors.shadowDark2,
-    shadowOffset: { width: 4, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 6,
-    elevation: 5,
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.3)',
+    borderColor: 'rgba(255,255,255,0.35)',
+    ...shadowMd,
   },
   saveBtnDisabled: { opacity: 0.6 },
-  saveBtnText: { color: colors.white, fontSize: 16, fontWeight: 'bold' },
+  saveBtnText: { color: colors.white, fontSize: 16, fontWeight: '700' },
 });

@@ -13,7 +13,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import api from '../api/client';
 import type { Item } from '../types';
-import { neoRaised, colors, spacing, radius } from '../theme';
+import { neoCard, colors, spacing, radius } from '../theme';
 
 type Props = {
   navigation: NativeStackNavigationProp<any>;
@@ -50,17 +50,22 @@ export default function RemindersScreen({ navigation }: Props) {
 
   const renderItem = ({ item }: { item: Item }) => {
     const isExpired = item.status === 'expired';
+    const borderColor = isExpired ? '#ef4444' : '#f59e0b';
+    const bgColor = isExpired ? '#fef2f2' : '#fffbeb';
+    const label = isExpired ? '已过期' : '即将过期';
+
     return (
       <TouchableOpacity
-        style={[styles.item, isExpired ? styles.itemExpired : styles.itemWarning]}
+        style={[styles.item, { backgroundColor: bgColor, borderLeftColor: borderColor }]}
+        activeOpacity={0.85}
         onPress={() => navigation.navigate('ItemDetail', { id: item.id })}
       >
         <View style={styles.itemHeader}>
-          <Text style={styles.itemName}>{item.name}</Text>
+          <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
           <View
             style={[
               styles.statusBadge,
-              { backgroundColor: isExpired ? '#fde8e8' : '#fef3cd' },
+              { backgroundColor: isExpired ? '#fde8e8' : '#fef3c7' },
             ]}
           >
             <Text
@@ -69,7 +74,7 @@ export default function RemindersScreen({ navigation }: Props) {
                 { color: isExpired ? colors.danger : colors.warning },
               ]}
             >
-              {item.status}
+              {label}
             </Text>
           </View>
         </View>
@@ -96,7 +101,12 @@ export default function RemindersScreen({ navigation }: Props) {
         keyExtractor={(item) => String(item.id)}
         renderItem={renderItem}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.textMuted}
+            colors={[colors.accent]}
+          />
         }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
@@ -119,19 +129,11 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   loader: { flex: 1, justifyContent: 'center' },
   item: {
-    ...neoRaised,
-    marginHorizontal: spacing.lg - 4,
-    marginTop: spacing.md - 2,
-    padding: spacing.lg - 2,
+    ...neoCard,
+    marginHorizontal: spacing.lg - 2,
+    marginTop: spacing.md,
+    padding: spacing.lg,
     borderLeftWidth: 4,
-  },
-  itemWarning: {
-    backgroundColor: '#fef9e7',
-    borderLeftColor: colors.warning,
-  },
-  itemExpired: {
-    backgroundColor: '#fdedec',
-    borderLeftColor: colors.danger,
   },
   statusBadge: {
     paddingHorizontal: spacing.sm + 2,
@@ -141,18 +143,18 @@ const styles = StyleSheet.create({
   },
   statusBadgeText: {
     fontSize: 12,
-    fontWeight: 'bold',
+    fontWeight: '700',
   },
   itemHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  itemName: { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary, flex: 1 },
+  itemName: { fontSize: 16, fontWeight: '700', color: colors.textPrimary, flex: 1 },
   itemDetail: { fontSize: 13, color: colors.textSecondary, marginTop: spacing.xs + 1 },
   emptyContainer: { alignItems: 'center', paddingTop: 60 },
   emptyFull: { flex: 1, justifyContent: 'center' },
   emptyIcon: { fontSize: 48, marginBottom: spacing.md },
-  emptyTitle: { fontSize: 20, fontWeight: 'bold', color: colors.textPrimary },
+  emptyTitle: { fontSize: 20, fontWeight: '700', color: colors.textPrimary },
   emptySubtitle: { fontSize: 14, color: colors.textSecondary, marginTop: spacing.xs },
 });

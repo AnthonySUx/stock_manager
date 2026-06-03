@@ -14,7 +14,7 @@ import { useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import api from '../api/client';
 import type { RestockItem } from '../types';
-import { neoRaised, neoInset, colors, spacing, radius } from '../theme';
+import { neoCard, neoInput, colors, spacing, radius, shadowMd } from '../theme';
 
 type Props = {
   navigation: NativeStackNavigationProp<any>;
@@ -153,6 +153,7 @@ export default function DoneRestockScreen({ navigation }: Props) {
 
         <TouchableOpacity
           style={[styles.doneBtn, saving && styles.doneBtnDisabled]}
+          activeOpacity={0.85}
           onPress={handleDone}
           disabled={saving}
         >
@@ -168,31 +169,27 @@ export default function DoneRestockScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   content: { padding: spacing.lg, paddingBottom: 40 },
-  title: { fontSize: 22, fontWeight: 'bold', color: colors.textPrimary },
-  subtitle: { fontSize: 16, color: colors.textSecondary, marginBottom: spacing.lg, marginTop: spacing.xs },
-  field: { marginBottom: spacing.lg - 2 },
+  title: { fontSize: 22, fontWeight: '700', color: colors.textPrimary },
+  subtitle: { fontSize: 16, color: colors.textSecondary, marginBottom: spacing.xl, marginTop: spacing.xs },
+  field: { marginBottom: spacing.xl },
   label: { fontSize: 14, fontWeight: '600', color: colors.textPrimary, marginBottom: spacing.xs + 1 },
   input: {
-    ...neoInset,
+    ...neoInput,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md - 2,
     fontSize: 15,
     color: colors.textPrimary,
   },
   doneBtn: {
-    backgroundColor: '#2ecc71',
+    ...neoCard,
+    backgroundColor: '#10b981',
     paddingVertical: spacing.lg - 2,
     borderRadius: radius.md,
     alignItems: 'center',
     marginTop: spacing.sm,
-    shadowColor: colors.shadowDark2,
-    shadowOffset: { width: 4, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 6,
-    elevation: 5,
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.3)',
+    borderColor: 'rgba(255,255,255,0.35)',
+    ...shadowMd,
   },
   doneBtnDisabled: { opacity: 0.6 },
-  doneBtnText: { color: colors.white, fontSize: 16, fontWeight: 'bold' },
+  doneBtnText: { color: colors.white, fontSize: 16, fontWeight: '700' },
 });

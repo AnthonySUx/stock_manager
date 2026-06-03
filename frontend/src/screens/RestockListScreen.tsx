@@ -13,7 +13,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import api from '../api/client';
 import type { RestockItem } from '../types';
-import { neoRaised, neoChip, colors, spacing, radius } from '../theme';
+import { neoCard, neoFilterChip, colors, spacing, radius, shadowMd, shadowXl } from '../theme';
 
 type Props = {
   navigation: NativeStackNavigationProp<any>;
@@ -80,17 +80,17 @@ export default function RestockListScreen({ navigation }: Props) {
   const renderItem = ({ item }: { item: RestockItem }) => (
     <View style={styles.item}>
       <View style={styles.itemHeader}>
-        <Text style={styles.itemName}>{item.name}</Text>
+        <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
         <View
           style={[
             styles.statusBadge,
-            { backgroundColor: item.status === 'pending' ? '#fef3cd' : '#d4f5e0' },
+            { backgroundColor: item.status === 'pending' ? '#fef3c7' : '#d1fae5' },
           ]}
         >
           <Text
             style={[
               styles.itemStatus,
-              { color: item.status === 'pending' ? '#f39c12' : '#2ecc71' },
+              { color: item.status === 'pending' ? '#f59e0b' : '#10b981' },
             ]}
           >
             {item.status === 'pending' ? '待补货' : item.status === 'done' ? '已完成' : item.status}
@@ -105,6 +105,7 @@ export default function RestockListScreen({ navigation }: Props) {
         <View style={styles.itemActions}>
           <TouchableOpacity
             style={styles.doneBtn}
+            activeOpacity={0.85}
             onPress={() => handleDone(item)}
           >
             <Text style={styles.doneBtnText}>✅ 完成</Text>
@@ -130,10 +131,8 @@ export default function RestockListScreen({ navigation }: Props) {
         ].map((f) => (
           <TouchableOpacity
             key={f.label}
-            style={[
-              styles.filterChip,
-              filter === f.value && styles.filterChipActive,
-            ]}
+            style={neoFilterChip(filter === f.value)}
+            activeOpacity={0.7}
             onPress={() => setFilter(f.value)}
           >
             <Text
@@ -156,7 +155,12 @@ export default function RestockListScreen({ navigation }: Props) {
           keyExtractor={(item) => String(item.id)}
           renderItem={renderItem}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={colors.textMuted}
+              colors={[colors.accent]}
+            />
           }
           ListEmptyComponent={
             <Text style={styles.empty}>暂无补货物品</Text>
@@ -169,6 +173,7 @@ export default function RestockListScreen({ navigation }: Props) {
 
       <TouchableOpacity
         style={styles.fab}
+        activeOpacity={0.85}
         onPress={() => navigation.navigate('AddRestock')}
       >
         <Text style={styles.fabText}>+</Text>
@@ -182,23 +187,18 @@ const styles = StyleSheet.create({
   loader: { flex: 1, justifyContent: 'center' },
   filterRow: {
     flexDirection: 'row',
-    padding: spacing.sm,
+    paddingHorizontal: spacing.lg - 2,
+    paddingVertical: spacing.md,
     gap: spacing.sm - 2,
     backgroundColor: colors.bg,
   },
-  filterChip: {
-    ...neoChip(false),
-  },
-  filterChipActive: {
-    ...neoChip(true),
-  },
   filterChipText: { fontSize: 13, color: colors.textSecondary },
-  filterChipTextActive: { color: colors.white, fontWeight: 'bold' },
+  filterChipTextActive: { color: colors.white, fontWeight: '600' },
   item: {
-    ...neoRaised,
-    marginHorizontal: spacing.lg - 4,
-    marginTop: spacing.md - 2,
-    padding: spacing.lg - 2,
+    ...neoCard,
+    marginHorizontal: spacing.lg - 2,
+    marginTop: spacing.md,
+    padding: spacing.lg,
   },
   statusBadge: {
     paddingHorizontal: spacing.sm + 2,
@@ -211,30 +211,26 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  itemName: { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary, flex: 1 },
-  itemStatus: { fontSize: 12, fontWeight: 'bold' },
+  itemName: { fontSize: 16, fontWeight: '700', color: colors.textPrimary, flex: 1 },
+  itemStatus: { fontSize: 12, fontWeight: '700' },
   itemDetail: { fontSize: 13, color: colors.textSecondary, marginTop: spacing.xs + 1 },
   itemActions: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
     alignItems: 'center',
-    marginTop: spacing.md - 2,
+    marginTop: spacing.md,
     gap: spacing.sm,
   },
   doneBtn: {
-    backgroundColor: '#2ecc71',
+    backgroundColor: '#10b981',
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
     borderRadius: radius.sm,
-    shadowColor: colors.shadowDark2,
-    shadowOffset: { width: 2, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 3,
     borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.3)',
+    borderColor: 'rgba(255,255,255,0.35)',
+    ...shadowMd,
   },
-  doneBtnText: { color: colors.white, fontWeight: 'bold', fontSize: 14 },
+  doneBtnText: { color: colors.white, fontWeight: '700', fontSize: 14 },
   deleteSmallBtn: {
     padding: spacing.sm,
   },
@@ -249,15 +245,11 @@ const styles = StyleSheet.create({
     height: 56,
     borderRadius: 28,
     backgroundColor: colors.accent,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: colors.shadowDark2,
-    shadowOffset: { width: 6, height: 6 },
-    shadowOpacity: 0.5,
-    shadowRadius: 10,
-    elevation: 8,
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
     borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.3)',
+    borderColor: 'rgba(255,255,255,0.35)',
+    ...shadowXl,
   },
-  fabText: { fontSize: 28, color: colors.white, lineHeight: 30 },
+  fabText: { fontSize: 28, color: colors.white, lineHeight: 30, marginTop: -1 },
 });

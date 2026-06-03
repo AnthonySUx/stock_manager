@@ -12,7 +12,7 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import api from '../api/client';
 import type { Settings } from '../types';
-import { neoRaised, neoInset, colors, spacing, radius } from '../theme';
+import { neoCard, neoInput, colors, spacing, radius, shadowMd } from '../theme';
 
 export default function SettingsScreen() {
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -99,6 +99,7 @@ export default function SettingsScreen() {
 
         <TouchableOpacity
           style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
+          activeOpacity={0.85}
           onPress={handleSave}
           disabled={saving}
         >
@@ -115,35 +116,31 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   loader: { flex: 1, justifyContent: 'center' },
   card: {
-    ...neoRaised,
+    ...neoCard,
     margin: spacing.lg,
     padding: spacing.lg,
   },
-  title: { fontSize: 22, fontWeight: 'bold', color: colors.textPrimary, marginBottom: spacing.lg },
+  title: { fontSize: 22, fontWeight: '700', color: colors.textPrimary, marginBottom: spacing.lg },
   field: { marginBottom: spacing.xl },
-  label: { fontSize: 15, fontWeight: '600', color: colors.textPrimary, marginBottom: spacing.xs - 1 },
-  hint: { fontSize: 12, color: colors.textMuted, marginBottom: spacing.sm - 2 },
+  label: { fontSize: 15, fontWeight: '600', color: colors.textPrimary, marginBottom: spacing.xs },
+  hint: { fontSize: 12, color: colors.textMuted, marginBottom: spacing.sm },
   input: {
-    ...neoInset,
+    ...neoInput,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md - 2,
     fontSize: 15,
     color: colors.textPrimary,
   },
   saveBtn: {
+    ...neoCard,
     backgroundColor: colors.accent,
     paddingVertical: spacing.lg - 2,
     borderRadius: radius.md,
     alignItems: 'center',
     marginTop: spacing.sm,
-    shadowColor: colors.shadowDark2,
-    shadowOffset: { width: 4, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 6,
-    elevation: 5,
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.3)',
+    borderColor: 'rgba(255,255,255,0.35)',
+    ...shadowMd,
   },
   saveBtnDisabled: { opacity: 0.6 },
-  saveBtnText: { color: colors.white, fontSize: 16, fontWeight: 'bold' },
+  saveBtnText: { color: colors.white, fontSize: 16, fontWeight: '700' },
 });

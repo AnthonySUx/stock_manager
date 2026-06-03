@@ -13,17 +13,31 @@ import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import api from '../api/client';
 import type { Item } from '../types';
-import { neoRaised, neoChip, colors, spacing, radius } from '../theme';
+import { neoCard, neoFilterChip, neoBadge, colors, spacing, radius, shadowXl } from '../theme';
 
 type Props = {
   navigation: NativeStackNavigationProp<any>;
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  active: '#2ecc71',
-  'expiring soon': '#f39c12',
-  expired: '#e74c3c',
-  consumed: '#95a5a6',
+  active: '#10b981',
+  'expiring soon': '#f59e0b',
+  expired: '#ef4444',
+  consumed: '#94a3b8',
+};
+
+const STATUS_BG: Record<string, string> = {
+  active: '#d1fae5',
+  'expiring soon': '#fef3c7',
+  expired: '#fde8e8',
+  consumed: '#f1f5f9',
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  active: '有效',
+  'expiring soon': '即将过期',
+  expired: '已过期',
+  consumed: '已消耗',
 };
 
 export default function ItemListScreen({ navigation }: Props) {
@@ -57,25 +71,20 @@ export default function ItemListScreen({ navigation }: Props) {
     fetchItems(filter);
   };
 
-  const getStatusStyle = (status: string) => ({
-    color: STATUS_COLORS[status] || '#95a5a6',
-    fontWeight: 'bold' as const,
-    fontSize: 12,
-  });
-
   const formatQuantity = (item: Item) =>
     `${item.quantity_value} ${item.quantity_unit}`;
 
   const renderItem = ({ item }: { item: Item }) => (
     <TouchableOpacity
       style={styles.item}
+      activeOpacity={0.85}
       onPress={() => navigation.navigate('ItemDetail', { id: item.id })}
     >
       <View style={styles.itemHeader}>
-        <Text style={styles.itemName}>{item.name}</Text>
-        <View style={styles.statusBadge}>
-          <Text style={getStatusStyle(item.status)}>
-            {item.status === 'active' ? '有效' : item.status === 'expiring soon' ? '即将过期' : item.status === 'expired' ? '已过期' : item.status === 'consumed' ? '已消耗' : item.status}
+        <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
+        <View style={[styles.statusBadge, { backgroundColor: STATUS_BG[item.status] || '#f1f5f9' }]}>
+          <Text style={[styles.statusText, { color: STATUS_COLORS[item.status] || '#94a3b8' }]}>
+            {STATUS_LABELS[item.status] || item.status}
           </Text>
         </View>
       </View>
@@ -107,7 +116,8 @@ export default function ItemListScreen({ navigation }: Props) {
         {FILTERS.map((f) => (
           <TouchableOpacity
             key={f.label}
-            style={[styles.filterChip, filter === f.value && styles.filterChipActive]}
+            style={neoFilterChip(filter === f.value)}
+            activeOpacity={0.7}
             onPress={() => setFilter(f.value)}
           >
             <Text
@@ -130,7 +140,12 @@ export default function ItemListScreen({ navigation }: Props) {
           keyExtractor={(item) => String(item.id)}
           renderItem={renderItem}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={colors.textMuted}
+              colors={[colors.accent]}
+            />
           }
           ListEmptyComponent={
             <Text style={styles.empty}>暂无物品</Text>
@@ -141,6 +156,7 @@ export default function ItemListScreen({ navigation }: Props) {
 
       <TouchableOpacity
         style={styles.fab}
+        activeOpacity={0.85}
         onPress={() => navigation.navigate('AddItem')}
       >
         <Text style={styles.fabText}>+</Text>
@@ -154,15 +170,10 @@ const styles = StyleSheet.create({
   loader: { flex: 1, justifyContent: 'center' },
   filterRow: {
     flexDirection: 'row',
-    padding: spacing.sm,
+    paddingHorizontal: spacing.lg - 2,
+    paddingVertical: spacing.md,
     gap: spacing.sm - 2,
     backgroundColor: colors.bg,
-  },
-  filterChip: {
-    ...neoChip(false),
-  },
-  filterChipActive: {
-    ...neoChip(true),
   },
   filterChipText: {
     fontSize: 13,
@@ -170,35 +181,34 @@ const styles = StyleSheet.create({
   },
   filterChipTextActive: {
     color: colors.white,
-    fontWeight: 'bold',
+    fontWeight: '600',
   },
   item: {
-    ...neoRaised,
-    marginHorizontal: spacing.lg - 4,
-    marginTop: spacing.md - 2,
-    padding: spacing.lg - 2,
+    ...neoCard,
+    marginHorizontal: spacing.lg - 2,
+    marginTop: spacing.md,
+    padding: spacing.lg,
   },
   statusBadge: {
-    backgroundColor: colors.white,
     paddingHorizontal: spacing.sm + 2,
     paddingVertical: spacing.xs,
     borderRadius: radius.full,
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.5)',
+    marginLeft: spacing.sm,
   },
+  statusText: { fontSize: 12, fontWeight: '700' },
   itemHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  itemName: { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary, flex: 1 },
+  itemName: { fontSize: 16, fontWeight: '700', color: colors.textPrimary, flex: 1 },
   itemSubtitle: { fontSize: 13, color: colors.textSecondary, marginTop: spacing.xs + 1 },
   itemDetails: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: spacing.sm - 2,
+    marginTop: spacing.sm,
   },
-  itemDetail: { fontSize: 13, color: colors.textSecondary, marginTop: spacing.xs - 1 },
+  itemDetail: { fontSize: 13, color: colors.textSecondary, marginTop: spacing.xs },
   empty: { fontSize: 16, color: colors.textMuted, textAlign: 'center' },
   emptyContainer: { flex: 1, justifyContent: 'center' },
   fab: {
@@ -209,15 +219,11 @@ const styles = StyleSheet.create({
     height: 56,
     borderRadius: 28,
     backgroundColor: colors.accent,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: colors.shadowDark2,
-    shadowOffset: { width: 6, height: 6 },
-    shadowOpacity: 0.5,
-    shadowRadius: 10,
-    elevation: 8,
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
     borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.3)',
+    borderColor: 'rgba(255,255,255,0.35)',
+    ...shadowXl,
   },
-  fabText: { fontSize: 28, color: colors.white, lineHeight: 30 },
+  fabText: { fontSize: 28, color: colors.white, lineHeight: 30, marginTop: -1 },
 });

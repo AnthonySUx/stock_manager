@@ -14,7 +14,7 @@ import { useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import api from '../api/client';
 import type { Item } from '../types';
-import { neoRaised, neoInset, colors, spacing, radius } from '../theme';
+import { neoCard, neoInput, colors, spacing, radius, shadowMd } from '../theme';
 
 type Props = {
   navigation: NativeStackNavigationProp<any>;
@@ -80,7 +80,7 @@ export default function ConsumeItemScreen({ navigation }: Props) {
       <View style={styles.card}>
         <Text style={styles.itemName}>{item.name}</Text>
         <Text style={styles.itemQty}>
-          Current: {item.quantity_value} {item.quantity_unit}
+          当前库存: {item.quantity_value} {item.quantity_unit}
         </Text>
       </View>
 
@@ -100,13 +100,14 @@ export default function ConsumeItemScreen({ navigation }: Props) {
           <Switch
             value={addToRestock}
             onValueChange={setAddToRestock}
-            trackColor={{ false: '#d1d9e6', true: '#c4b5fd' }}
+            trackColor={{ false: '#d5dde8', true: '#c4b5fd' }}
             thumbColor={addToRestock ? colors.accent : '#f4f3f4'}
           />
         </View>
 
         <TouchableOpacity
           style={[styles.consumeBtn, consuming && styles.consumeBtnDisabled]}
+          activeOpacity={0.85}
           onPress={handleConsume}
           disabled={consuming}
         >
@@ -123,15 +124,15 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   loader: { flex: 1, justifyContent: 'center' },
   card: {
-    ...neoRaised,
+    ...neoCard,
     margin: spacing.lg,
     padding: spacing.lg,
   },
-  itemName: { fontSize: 20, fontWeight: 'bold', color: colors.textPrimary },
+  itemName: { fontSize: 20, fontWeight: '700', color: colors.textPrimary },
   itemQty: { fontSize: 15, color: colors.textSecondary, marginTop: spacing.xs },
   label: { fontSize: 15, fontWeight: '600', color: colors.textPrimary, marginBottom: spacing.sm },
   input: {
-    ...neoInset,
+    ...neoInput,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md - 2,
     fontSize: 18,
@@ -142,23 +143,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: spacing.lg,
+    marginTop: spacing.xl,
   },
   switchLabel: { fontSize: 14, color: colors.textPrimary, flex: 1, marginRight: spacing.sm },
   consumeBtn: {
-    backgroundColor: '#2ecc71',
+    backgroundColor: '#10b981',
     paddingVertical: spacing.lg - 2,
     borderRadius: radius.md,
     alignItems: 'center',
-    marginTop: spacing.lg,
-    shadowColor: colors.shadowDark2,
-    shadowOffset: { width: 4, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 6,
-    elevation: 5,
+    marginTop: spacing.xl,
     borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.3)',
+    borderColor: 'rgba(255,255,255,0.35)',
+    ...shadowMd,
   },
   consumeBtnDisabled: { opacity: 0.6 },
-  consumeBtnText: { color: colors.white, fontSize: 16, fontWeight: 'bold' },
+  consumeBtnText: { color: colors.white, fontSize: 16, fontWeight: '700' },
 });

@@ -12,7 +12,7 @@ import { useFocusEffect, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import api from '../api/client';
 import type { Item } from '../types';
-import { neoRaised, colors, spacing, radius } from '../theme';
+import { neoCard, neoBadge, colors, spacing, radius, shadowMd } from '../theme';
 
 type Props = {
   navigation: NativeStackNavigationProp<any>;
@@ -80,28 +80,35 @@ export default function ItemDetailScreen({ navigation }: Props) {
 
   const statusColor =
     item.status === 'active'
-      ? '#2ecc71'
+      ? '#10b981'
       : item.status === 'expiring soon'
-      ? '#f39c12'
+      ? '#f59e0b'
       : item.status === 'expired'
-      ? '#e74c3c'
-      : '#95a5a6';
+      ? '#ef4444'
+      : '#94a3b8';
 
   const statusBg =
     item.status === 'active'
-      ? '#d4f5e0'
+      ? '#d1fae5'
       : item.status === 'expiring soon'
-      ? '#fef3cd'
+      ? '#fef3c7'
       : item.status === 'expired'
       ? '#fde8e8'
-      : '#f0f0f0';
+      : '#f1f5f9';
+
+  const statusLabel =
+    item.status === 'active' ? '有效'
+    : item.status === 'expiring soon' ? '即将过期'
+    : item.status === 'expired' ? '已过期'
+    : item.status === 'consumed' ? '已消耗'
+    : item.status;
 
   return (
     <ScrollView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.name}>{item.name}</Text>
         <View style={[styles.statusBadge, { backgroundColor: statusBg }]}>
-          <Text style={[styles.status, { color: statusColor }]}>{item.status}</Text>
+          <Text style={[styles.status, { color: statusColor }]}>{statusLabel}</Text>
         </View>
       </View>
 
@@ -136,16 +143,25 @@ export default function ItemDetailScreen({ navigation }: Props) {
       <View style={styles.actions}>
         <TouchableOpacity
           style={styles.editBtn}
+          activeOpacity={0.85}
           onPress={() => navigation.navigate('EditItem', { id })}
         >
           <Text style={styles.editBtnText}>✏️ 编辑</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.consumeBtn} onPress={handleConsume}>
+        <TouchableOpacity
+          style={styles.consumeBtn}
+          activeOpacity={0.85}
+          onPress={handleConsume}
+        >
           <Text style={styles.consumeBtnText}>✅ 消耗</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.deleteBtn} onPress={handleDelete}>
+        <TouchableOpacity
+          style={styles.deleteBtn}
+          activeOpacity={0.85}
+          onPress={handleDelete}
+        >
           <Text style={styles.deleteBtnText}>🗑️ 删除</Text>
         </TouchableOpacity>
       </View>
@@ -166,9 +182,9 @@ const rowStyles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: spacing.md - 2,
-    borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(0,0,0,0.05)',
+    paddingVertical: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.divider,
   },
   label: { fontSize: 14, color: colors.textSecondary, flex: 1 },
   value: { fontSize: 14, color: colors.textPrimary, flex: 1, textAlign: 'right', fontWeight: '500' },
@@ -182,12 +198,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: spacing.lg,
-    backgroundColor: colors.card,
-    borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(0,0,0,0.05)',
+    backgroundColor: colors.surface,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.divider,
   },
-  name: { fontSize: 22, fontWeight: 'bold', color: colors.textPrimary, flex: 1 },
-  status: { fontSize: 13, fontWeight: 'bold' },
+  name: { fontSize: 22, fontWeight: '700', color: colors.textPrimary, flex: 1 },
+  status: { fontSize: 13, fontWeight: '700' },
   statusBadge: {
     paddingHorizontal: spacing.md - 2,
     paddingVertical: spacing.xs,
@@ -195,7 +211,7 @@ const styles = StyleSheet.create({
     marginLeft: spacing.sm,
   },
   card: {
-    ...neoRaised,
+    ...neoCard,
     margin: spacing.lg,
     padding: spacing.lg,
   },
@@ -212,43 +228,31 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     borderRadius: radius.sm,
     alignItems: 'center',
-    shadowColor: colors.shadowDark2,
-    shadowOffset: { width: 3, height: 3 },
-    shadowOpacity: 0.3,
-    shadowRadius: 5,
-    elevation: 4,
     borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.3)',
+    borderColor: 'rgba(255,255,255,0.35)',
+    ...shadowMd,
   },
-  editBtnText: { color: colors.white, fontWeight: 'bold' },
+  editBtnText: { color: colors.white, fontWeight: '700' },
   consumeBtn: {
     flex: 1,
-    backgroundColor: '#2ecc71',
+    backgroundColor: '#10b981',
     paddingVertical: spacing.md,
     borderRadius: radius.sm,
     alignItems: 'center',
-    shadowColor: colors.shadowDark2,
-    shadowOffset: { width: 3, height: 3 },
-    shadowOpacity: 0.3,
-    shadowRadius: 5,
-    elevation: 4,
     borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.3)',
+    borderColor: 'rgba(255,255,255,0.35)',
+    ...shadowMd,
   },
-  consumeBtnText: { color: colors.white, fontWeight: 'bold' },
+  consumeBtnText: { color: colors.white, fontWeight: '700' },
   deleteBtn: {
     flex: 1,
-    backgroundColor: '#e74c3c',
+    backgroundColor: '#ef4444',
     paddingVertical: spacing.md,
     borderRadius: radius.sm,
     alignItems: 'center',
-    shadowColor: colors.shadowDark2,
-    shadowOffset: { width: 3, height: 3 },
-    shadowOpacity: 0.3,
-    shadowRadius: 5,
-    elevation: 4,
     borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.3)',
+    borderColor: 'rgba(255,255,255,0.35)',
+    ...shadowMd,
   },
-  deleteBtnText: { color: colors.white, fontWeight: 'bold' },
+  deleteBtnText: { color: colors.white, fontWeight: '700' },
 });
