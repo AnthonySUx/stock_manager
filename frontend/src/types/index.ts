@@ -102,3 +102,127 @@ export interface HealthResponse {
   status: string;
   version: string;
 }
+
+// ─── Recipe Types ──────────────────────────────────────────────
+
+export type RecipeSourceType = 'howtocook' | 'user' | 'ai_saved';
+
+export interface RecipeIngredient {
+  ingredient_name: string;
+  normalized_name?: string;
+  quantity?: string;
+  unit?: string;
+  is_optional?: boolean;
+  is_seasoning?: boolean;
+  sort_order?: number;
+}
+
+export interface RecipeStep {
+  step_number: number;
+  instruction: string;
+}
+
+export interface RecipeSummary {
+  id: number;
+  source_type: RecipeSourceType;
+  source_name: string;
+  title: string;
+  category: string | null;
+  difficulty: string | null;
+  cook_time_minutes: number | null;
+  is_user_created: boolean;
+  base_recipe_id: number | null;
+  is_favorite: boolean;
+  has_been_cooked: boolean;
+  created_at: string;
+}
+
+export interface RecipeResponse extends RecipeSummary {
+  source_url?: string;
+  source_path?: string;
+  license_name?: string;
+  description: string | null;
+  servings: string | null;
+  raw_markdown?: string;
+  ingredients: RecipeIngredient[];
+  steps: RecipeStep[];
+  updated_at?: string;
+}
+
+export interface RecipeCreate {
+  title: string;
+  category?: string | null;
+  description?: string | null;
+  difficulty?: string | null;
+  servings?: string | null;
+  cook_time_minutes?: number | null;
+  ingredients?: { ingredient_name: string; quantity?: string; unit?: string; is_optional?: boolean; is_seasoning?: boolean }[];
+  steps?: { step_number: number; instruction: string }[];
+}
+
+export interface RecipeUpdate {
+  title?: string;
+  category?: string | null;
+  description?: string | null;
+  difficulty?: string | null;
+  servings?: string | null;
+  cook_time_minutes?: number | null;
+  ingredients?: { ingredient_name: string; quantity?: string; unit?: string; is_optional?: boolean; is_seasoning?: boolean }[];
+  steps?: { step_number: number; instruction: string }[];
+}
+
+export interface RecipeRecommendation {
+  recipe_id: number;
+  title: string;
+  score: number;
+  reason: string;
+  matched_inventory_items: string[];
+  expiring_inventory_items: string[];
+  missing_ingredients: string[];
+  is_favorite: boolean;
+  is_new_suggestion: boolean;
+  source_type: RecipeSourceType;
+}
+
+export interface AIRecommendation {
+  title: string;
+  reason: string;
+  recipe_id: number;
+}
+
+export interface ConsumeSuggestionItem {
+  ingredient_name: string;
+  item_id: number;
+  item_name: string;
+  available_quantity: number;
+  suggested_quantity: number;
+  status: 'active' | 'expiring soon';
+}
+
+export interface ConsumePreview {
+  recipe_id: number;
+  title: string;
+  suggestions: ConsumeSuggestionItem[];
+  unmatched_ingredients: string[];
+}
+
+export interface CookConsumedItem {
+  item_id: number;
+  item_name: string;
+  consumed_quantity: number;
+  remaining_quantity: number;
+  status: string;
+}
+
+export interface CookResponse {
+  message: string;
+  recipe_id: number;
+  consumed_items: CookConsumedItem[];
+  notes: string | null;
+}
+
+export interface RecipeSource {
+  attribution: string;
+  repository: string;
+  license: string;
+}

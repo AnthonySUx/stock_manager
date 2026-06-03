@@ -14,6 +14,11 @@ import AddRestockScreen from '../screens/AddRestockScreen';
 import DoneRestockScreen from '../screens/DoneRestockScreen';
 import RemindersScreen from '../screens/RemindersScreen';
 import SettingsScreen from '../screens/SettingsScreen';
+import RecipeListScreen from '../screens/RecipeListScreen';
+import RecipeDetailScreen from '../screens/RecipeDetailScreen';
+import RecipeEditScreen from '../screens/RecipeEditScreen';
+import RecipeRecommendationsScreen from '../screens/RecipeRecommendationsScreen';
+import RecipeCookScreen from '../screens/RecipeCookScreen';
 import { colors, shadowSm, shadowInset, radius } from '../theme';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -124,6 +129,38 @@ function SettingsStack() {
   );
 }
 
+function RecipeStack() {
+  return (
+    <Stack.Navigator screenOptions={sharedHeaderOptions}>
+      <Stack.Screen
+        name="RecipeList"
+        component={RecipeListScreen}
+        options={{ title: '菜谱' }}
+      />
+      <Stack.Screen
+        name="RecipeDetail"
+        component={RecipeDetailScreen}
+        options={{ title: '菜谱详情' }}
+      />
+      <Stack.Screen
+        name="RecipeEdit"
+        component={RecipeEditScreen}
+        options={{ title: '编辑菜谱' }}
+      />
+      <Stack.Screen
+        name="RecipeRecommendations"
+        component={RecipeRecommendationsScreen}
+        options={{ title: '推荐菜谱' }}
+      />
+      <Stack.Screen
+        name="RecipeCook"
+        component={RecipeCookScreen}
+        options={{ title: '烹饪' }}
+      />
+    </Stack.Navigator>
+  );
+}
+
 const INDICATOR_WIDTH = 64;
 const H_PADDING = 8;
 
@@ -170,6 +207,9 @@ function AnimatedTabBar({ state, descriptors, navigation }: any) {
             break;
           case 'SettingsTab':
             iconName = focused ? 'settings' : 'settings-outline';
+            break;
+          case 'RecipeTab':
+            iconName = focused ? 'restaurant' : 'restaurant-outline';
             break;
           default:
             iconName = 'ellipse';
@@ -232,6 +272,11 @@ export default function AppNavigator() {
         <Tab.Screen
           name="SettingsTab"
           component={SettingsStack}
+          options={{}}
+        />
+        <Tab.Screen
+          name="RecipeTab"
+          component={RecipeStack}
           options={{}}
         />
       </Tab.Navigator>
