@@ -10,6 +10,11 @@ import type {
   CookResponse,
   RecipeSource,
 } from '../types';
+import mockApi from './mockRecipes';
+
+// Set to true to use mock data (no backend needed for recipe debugging)
+// Set to false to call the real backend API
+const USE_MOCK = true;
 
 export interface RecipeListParams {
   source_type?: string;
@@ -20,59 +25,103 @@ export interface RecipeListParams {
   offset?: number;
 }
 
+// Conditional wrapper: when USE_MOCK is true, delegate to mockApi
+const wrap = <T>(mockFn: () => Promise<{ data: T }>, realFn: () => Promise<{ data: T }>): Promise<{ data: T }> => {
+  return USE_MOCK ? mockFn() : realFn();
+};
+
 export const recipesApi = {
   list(params?: RecipeListParams) {
-    return api.get<RecipeSummary[]>('/recipes', { params });
+    return wrap(
+      () => mockApi.list(params),
+      () => api.get<RecipeSummary[]>('/recipes', { params })
+    );
   },
 
   get(id: number) {
-    return api.get<RecipeResponse>(`/recipes/${id}`);
+    return wrap(
+      () => mockApi.get(id),
+      () => api.get<RecipeResponse>(`/recipes/${id}`)
+    );
   },
 
   create(data: RecipeCreate) {
-    return api.post<RecipeResponse>('/recipes', data);
+    return wrap(
+      () => mockApi.create(data),
+      () => api.post<RecipeResponse>('/recipes', data)
+    );
   },
 
   update(id: number, data: RecipeUpdate) {
-    return api.patch<RecipeResponse>(`/recipes/${id}`, data);
+    return wrap(
+      () => mockApi.update(id, data),
+      () => api.patch<RecipeResponse>(`/recipes/${id}`, data)
+    );
   },
 
   delete(id: number) {
-    return api.delete(`/recipes/${id}`);
+    return wrap(
+      () => mockApi.delete(id),
+      () => api.delete(`/recipes/${id}`)
+    );
   },
 
   fork(id: number) {
-    return api.post<RecipeResponse>(`/recipes/${id}/fork`);
+    return wrap(
+      () => mockApi.fork(id),
+      () => api.post<RecipeResponse>(`/recipes/${id}/fork`)
+    );
   },
 
   addFavorite(id: number) {
-    return api.post(`/recipes/${id}/favorite`);
+    return wrap(
+      () => mockApi.addFavorite(id),
+      () => api.post(`/recipes/${id}/favorite`)
+    );
   },
 
   removeFavorite(id: number) {
-    return api.delete(`/recipes/${id}/favorite`);
+    return wrap(
+      () => mockApi.removeFavorite(id),
+      () => api.delete(`/recipes/${id}/favorite`)
+    );
   },
 
   recommendations(params?: { limit?: number; include_expired?: boolean }) {
-    return api.get<RecipeRecommendation[]>('/recipes/recommendations', { params });
+    return wrap(
+      () => mockApi.recommendations(params),
+      () => api.get<RecipeRecommendation[]>('/recipes/recommendations', { params })
+    );
   },
 
   aiToday(params?: { limit?: number }) {
-    return api.post<{ recommendations: AIRecommendation[] }>('/recipes/ai/today', null, { params });
+    return wrap(
+      () => mockApi.aiToday(params),
+      () => api.post<{ recommendations: AIRecommendation[] }>('/recipes/ai/today', null, { params })
+    );
   },
 
   sources() {
-    return api.get<RecipeSource>('/recipes/sources');
+    return wrap(
+      () => mockApi.sources(),
+      () => api.get<RecipeSource>('/recipes/sources')
+    );
   },
 
   consumePreview(id: number) {
-    return api.get<ConsumePreview>(`/recipes/${id}/consume-preview`);
+    return wrap(
+      () => mockApi.consumePreview(id),
+      () => api.get<ConsumePreview>(`/recipes/${id}/consume-preview`)
+    );
   },
 
   cook(
     id: number,
-    data: { consume_items: { item_id: number; quantity: number }[]; notes?: string | null },
+    data: { consume_items: { item_id: number; quantity: number }[]; notes?: string | null }
   ) {
-    return api.post<CookResponse>(`/recipes/${id}/cook`, data);
+    return wrap(
+      () => mockApi.cook(id, data),
+      () => api.post<CookResponse>(`/recipes/${id}/cook`, data)
+    );
   },
 };
