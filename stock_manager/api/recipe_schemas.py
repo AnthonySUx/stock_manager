@@ -61,6 +61,7 @@ class RecipeResponse(BaseModel):
     is_user_created: bool = False
     base_recipe_id: Optional[int] = None
     is_favorite: bool = False
+    has_been_cooked: bool = False
     ingredients: list[IngredientSchema] = []
     steps: list[StepSchema] = []
     created_at: Optional[datetime] = None
@@ -80,6 +81,7 @@ class RecipeSummary(BaseModel):
     is_user_created: bool = False
     base_recipe_id: Optional[int] = None
     is_favorite: bool = False
+    has_been_cooked: bool = False
     created_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
@@ -115,3 +117,56 @@ class SourceResponse(BaseModel):
     url: str
     license: str
     notice: str
+
+
+class ConsumePreviewItem(BaseModel):
+    """A single inventory item suggested for consumption."""
+    ingredient_name: str
+    item_id: int
+    item_name: str
+    available_quantity: float
+    available_unit: str
+    suggested_quantity: float = 1.0
+    unit: str = ""
+    status: str = "active"
+    current_expiration_date: Optional[str] = None
+    confidence: str = "high"
+
+
+class ConsumePreviewResponse(BaseModel):
+    """Preview of inventory items that would be consumed for a recipe."""
+    recipe_id: int
+    title: str
+    suggestions: list[ConsumePreviewItem] = []
+    unmatched_ingredients: list[str] = []
+
+
+class CookConsumeItem(BaseModel):
+    """User-confirmed inventory consumption for a cooked recipe."""
+    item_id: int
+    quantity: float = Field(..., gt=0)
+    ingredient_name: str = ""
+
+
+class CookRecipeRequest(BaseModel):
+    """Request body for marking a recipe as cooked and consuming inventory."""
+    consume_items: list[CookConsumeItem] = []
+    notes: Optional[str] = None
+
+
+class CookConsumedItem(BaseModel):
+    """Result of a single inventory consumption."""
+    item_id: int
+    item_name: str
+    consumed_quantity: float
+    remaining_quantity: float
+    status: str
+
+
+class CookRecipeResponse(BaseModel):
+    """Response after cooking a recipe and consuming inventory."""
+    message: str
+    recipe_id: int
+    title: str
+    consumed_items: list[CookConsumedItem] = []
+    notes: Optional[str] = None

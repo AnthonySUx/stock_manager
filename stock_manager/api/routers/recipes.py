@@ -8,6 +8,9 @@ from sqlalchemy.orm import Session
 from stock_manager.api.db import get_session
 from stock_manager.api.recipe_schemas import (
     AIRecipeRecommendationResponse,
+    ConsumePreviewResponse,
+    CookRecipeRequest,
+    CookRecipeResponse,
     RecipeCreate,
     RecipeRecommendation,
     RecipeRecommendationResponse,
@@ -18,12 +21,15 @@ from stock_manager.api.recipe_schemas import (
 )
 from stock_manager.api.recipe_services import (
     add_favorite,
+    cook_recipe_and_consume,
     create_recipe,
     delete_recipe,
     fork_recipe,
+    get_consume_preview,
     get_recipe,
     get_recipes,
     get_recommendations,
+    has_been_cooked,
     is_favorite,
     remove_favorite,
     update_recipe,
@@ -51,6 +57,7 @@ def _recipe_to_summary(recipe, db: Session) -> RecipeSummary:
         title=recipe.title, category=recipe.category, difficulty=recipe.difficulty,
         cook_time_minutes=recipe.cook_time_minutes, is_user_created=recipe.is_user_created,
         base_recipe_id=recipe.base_recipe_id, is_favorite=is_favorite(db, recipe.id),
+        has_been_cooked=has_been_cooked(db, recipe.id),
         created_at=recipe.created_at,
     )
 
@@ -64,6 +71,7 @@ def _recipe_to_response(recipe, db: Session) -> RecipeResponse:
         servings=recipe.servings, cook_time_minutes=recipe.cook_time_minutes,
         raw_markdown=recipe.raw_markdown, is_user_created=recipe.is_user_created,
         base_recipe_id=recipe.base_recipe_id, is_favorite=is_favorite(db, recipe.id),
+        has_been_cooked=has_been_cooked(db, recipe.id),
         ingredients=[
             {
                 "ingredient_name": ing.ingredient_name,
@@ -138,6 +146,43 @@ def ai_today_recommendations(limit: int = Query(15, ge=1, le=50),
     return AIRecipeRecommendationResponse(mode="rule_based_fallback",
         summary="AI not available.", source_notice=HOWTOCOOK_SOURCE.notice,
         recommendations=[RecipeRecommendation(**r) for r in rule_results])
+
+
+@router.get("/{recipe_id}/consume-preview", response_model=ConsumePreviewResponse)
+def consume_preview_endpoint(
+    recipe_id: int,
+    db: Session = Depends(get_session),
+):
+    """Preview which inventory items would be consumed for a recipe."""
+    from stock_manager.api.recipe_services import get_consume_preview as _preview
+    result = _preview(db, recipe_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    return result
+
+
+@router.post("/{recipe_id}/cook", response_model=CookRecipeResponse)
+def cook_recipe_endpoint(
+    recipe_id: int,
+    data: CookRecipeRequest,
+    db: Session = Depends(get_session),
+):
+    """Mark a recipe as cooked and optionally consume inventory items."""
+    from stock_manager.api.recipe_services import cook_recipe_and_consume as _cook
+    consume_dicts = [
+        {"item_id": ci.item_id, "quantity": ci.quantity, "ingredient_name": ci.ingredient_name}
+        for ci in data.consume_items
+    ]
+    result = _cook(db, recipe_id, consume_dicts, notes=data.notes)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    return CookRecipeResponse(
+        message="Recipe marked as cooked" + (" and inventory consumed" if consume_dicts else ""),
+        recipe_id=result["recipe_id"],
+        title=result["title"],
+        consumed_items=result.get("consumed_items", []),
+        notes=result.get("notes"),
+    )
 
 
 @router.get("/{recipe_id}", response_model=RecipeResponse)

@@ -56,7 +56,9 @@ def get_recipes(
     limit: int = 20,
     offset: int = 0,
 ) -> list[Recipe]:
-    """Return recipes matching filters."""
+    """Return recipes matching filters. Sorted by user relevance when query is provided."""
+    from stock_manager.api.models import RecipeUsageHistory, RecipeFavorite
+
     q = db.query(Recipe)
 
     if source_type:
@@ -74,7 +76,53 @@ def get_recipes(
             db.query(RecipeFavorite.recipe_id).subquery()
         ))
 
-    return q.order_by(Recipe.id).offset(offset).limit(limit).all()
+    results = q.all()
+
+    if not query:
+        # Default sorting: favorites and user-created first
+        fav_ids = set(r[0] for r in db.query(RecipeFavorite.recipe_id).all())
+        cooked_ids = set(r[0] for r in db.query(RecipeUsageHistory.recipe_id).filter(
+            RecipeUsageHistory.event_type == "cooked"
+        ).all())
+        results.sort(key=lambda r: (
+            r.id not in fav_ids,
+            r.id not in (fav_ids | cooked_ids),
+            not r.is_user_created,
+            r.id,
+        ))
+    else:
+        # Smart search scoring for queries
+        q_lower = query.lower().strip()
+        fav_ids = set(r[0] for r in db.query(RecipeFavorite.recipe_id).all())
+        cooked_ids = set(r[0] for r in db.query(RecipeUsageHistory.recipe_id).filter(
+            RecipeUsageHistory.event_type == "cooked"
+        ).all())
+
+        def search_score(recipe: Recipe) -> int:
+            score = 0
+            title_lower = recipe.title.lower()
+            if recipe.is_user_created:
+                score += 100
+            if recipe.id in fav_ids:
+                score += 80
+            if recipe.id in cooked_ids:
+                score += 60
+            if title_lower == q_lower:
+                score += 50
+            elif q_lower in title_lower:
+                score += 40
+            if recipe.ingredients:
+                for ing in recipe.ingredients:
+                    if q_lower in ing.ingredient_name.lower() or (ing.normalized_name and q_lower in ing.normalized_name.lower()):
+                        score += 25
+                        break
+            if recipe.description and q_lower in recipe.description.lower():
+                score += 10
+            return score
+
+        results.sort(key=search_score, reverse=True)
+
+    return results[offset:offset+limit]
 
 
 def get_recipe(db: Session, recipe_id: int) -> Optional[Recipe]:
@@ -264,6 +312,14 @@ def is_favorite(db: Session, recipe_id: int) -> bool:
     ).first() is not None
 
 
+def has_been_cooked(db: Session, recipe_id: int) -> bool:
+    """Check if a recipe has been cooked before."""
+    return db.query(RecipeUsageHistory).filter(
+        RecipeUsageHistory.recipe_id == recipe_id,
+        RecipeUsageHistory.event_type == "cooked",
+    ).first() is not None
+
+
 # ─── Usage history ──────────────────────────────────────────────
 
 
@@ -382,3 +438,149 @@ def get_recommendations(
 
     scored.sort(key=lambda x: x["score"], reverse=True)
     return scored[:limit]
+
+
+# ─── Consume Preview and Cook ─────────────────────────────────────
+
+
+def get_consume_preview(db: Session, recipe_id: int) -> Optional[dict]:
+    """Preview which inventory items would be consumed for a recipe.
+    Returns suggestions without modifying any data.
+    """
+    recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
+    if recipe is None:
+        return None
+
+    ingredients = db.query(RecipeIngredient).filter(
+        RecipeIngredient.recipe_id == recipe_id
+    ).all()
+
+    # Get active inventory
+    items = db.query(Item).filter(
+        Item.status.in_(["active", "expiring soon"])
+    ).all()
+
+    suggestions = []
+    unmatched = []
+
+    for ing in ingredients:
+        if ing.is_seasoning or ing.is_optional:
+            continue
+        ing_lower = ing.ingredient_name.strip().lower()
+        norm_lower = (ing.normalized_name or "").strip().lower()
+
+        # Find best matching inventory item
+        best_match = None
+        for item in items:
+            item_lower = item.name.strip().lower()
+            if item_lower == ing_lower or item_lower == norm_lower or norm_lower == item_lower:
+                if best_match is None:
+                    best_match = item
+                # Prefer expiring soon
+                elif item.status == "expiring soon" and best_match.status != "expiring soon":
+                    best_match = item
+                elif item.status == best_match.status and item.current_expiration_date < best_match.current_expiration_date:
+                    best_match = item
+
+        if best_match is not None:
+            try:
+                suggested_qty = float(ing.quantity) if ing.quantity else 1.0
+            except (ValueError, TypeError):
+                suggested_qty = 1.0
+
+            if suggested_qty > best_match.quantity_value:
+                suggested_qty = best_match.quantity_value
+
+            suggestions.append({
+                "ingredient_name": ing.ingredient_name,
+                "item_id": best_match.id,
+                "item_name": best_match.name,
+                "available_quantity": best_match.quantity_value,
+                "available_unit": best_match.quantity_unit,
+                "suggested_quantity": suggested_qty,
+                "unit": ing.unit or best_match.quantity_unit or "",
+                "status": best_match.status,
+                "current_expiration_date": best_match.current_expiration_date,
+                "confidence": "high",
+            })
+            items.remove(best_match)
+        else:
+            unmatched.append(ing.ingredient_name)
+
+    return {
+        "recipe_id": recipe.id,
+        "title": recipe.title,
+        "suggestions": suggestions,
+        "unmatched_ingredients": unmatched,
+    }
+
+
+def cook_recipe_and_consume(
+    db: Session,
+    recipe_id: int,
+    consume_items: list[dict],
+    notes: Optional[str] = None,
+) -> Optional[dict]:
+    """Mark a recipe as cooked and consume specified inventory items.
+
+    consume_items format: [{"item_id": int, "quantity": float, "ingredient_name": str}]
+    """
+    recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
+    if recipe is None:
+        return None
+
+    consumed = []
+    for ci in consume_items:
+        item = db.query(Item).filter(Item.id == ci["item_id"]).first()
+        if item is None:
+            continue
+
+        qty = ci["quantity"]
+        if qty <= 0:
+            continue
+        if qty > item.quantity_value:
+            qty = item.quantity_value
+
+        original_qty = item.quantity_value
+        new_qty = max(0.0, original_qty - qty)
+        item.quantity_value = new_qty
+
+        today = date.today()
+        from stock_manager.api.services import _calculate_status, _get_expiration_warning_days
+        warning_days = _get_expiration_warning_days(db)
+        new_status = _calculate_status(
+            new_qty,
+            item.current_expiration_date,
+            warning_days,
+            today,
+        )
+        item.status = new_status
+
+        consumed.append({
+            "item_id": item.id,
+            "item_name": item.name,
+            "consumed_quantity": qty,
+            "remaining_quantity": item.quantity_value,
+            "status": item.status,
+        })
+
+    # Record cooked event
+    import json as _json
+    metadata = {
+        "consumed_items": consumed,
+        "notes": notes,
+    }
+    db.add(RecipeUsageHistory(
+        recipe_id=recipe_id,
+        event_type="cooked",
+        metadata_json=_json.dumps(metadata, ensure_ascii=False),
+    ))
+
+    db.commit()
+
+    return {
+        "recipe_id": recipe.id,
+        "title": recipe.title,
+        "consumed_items": consumed,
+        "notes": notes,
+    }

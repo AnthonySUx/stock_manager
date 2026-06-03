@@ -17,9 +17,9 @@ def _load_config() -> dict:
     """Load AI configuration from environment."""
     return {
         "enabled": os.getenv("AI_RECIPE_ENABLED", "false").lower() == "true",
-        "base_url": os.getenv("AI_BASE_URL", "https://api.openai.com/v1"),
+        "base_url": os.getenv("AI_BASE_URL", "https://api.deepseek.com"),
         "api_key": os.getenv("AI_API_KEY", ""),
-        "model": os.getenv("AI_MODEL", "gpt-4o-mini"),
+        "model": os.getenv("AI_MODEL", "deepseek-chat"),
         "timeout": int(os.getenv("AI_TIMEOUT_SECONDS", "60")),
         "temperature": float(os.getenv("AI_TEMPERATURE", "0.2")),
     }
