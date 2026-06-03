@@ -122,13 +122,13 @@ def update_item_endpoint(
     db: Session = Depends(get_session),
 ):
     """Update one or more fields of a stock item."""
-    item_data = {k: v for k, v in payload.model_dump().items() if v is not None}
+    item_data = payload.model_dump(exclude_unset=True)
 
     if not item_data:
         raise HTTPException(status_code=400, detail="No fields to update")
 
     # Recalculate current_expiration_date if relevant fields changed
-    if "opened_date" in item_data or "opened_expiration_date" in item_data:
+    if any(k in item_data for k in ("opened_date", "opened_expiration_date", "unopened_expiration_date")):
         existing = get_item(db, item_id)
         if existing:
             merged = {

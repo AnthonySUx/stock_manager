@@ -80,7 +80,7 @@ export default function EditItemScreen({ navigation }: Props) {
   const handleSave = async () => {
     setSaving(true);
     try {
-      await api.patch(`/items/${id}`, {
+      const payload: Record<string, any> = {
         name: name || undefined,
         category: category || undefined,
         owner: owner || undefined,
@@ -89,10 +89,20 @@ export default function EditItemScreen({ navigation }: Props) {
         quantity_unit: quantityUnit || undefined,
         location: location || undefined,
         unopened_expiration_date: unopenedExp || undefined,
-        opened_expiration_date: openedExp || null,
-        opened_date: openedDate || null,
-        notes: notes || null,
-      });
+      };
+
+      // Only send nullable fields if they actually changed
+      if (openedExp !== (item?.opened_expiration_date || '')) {
+        payload.opened_expiration_date = openedExp || null;
+      }
+      if (openedDate !== (item?.opened_date || '')) {
+        payload.opened_date = openedDate || null;
+      }
+      if (notes !== (item?.notes || '')) {
+        payload.notes = notes || null;
+      }
+
+      await api.patch(`/items/${id}`, payload);
       Alert.alert('已更新', '物品已更新', [
         { text: '确定', onPress: () => navigation.goBack() },
       ]);

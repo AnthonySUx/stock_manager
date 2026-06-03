@@ -168,8 +168,7 @@ def update_item(db: Session, item_id: int, item_data: dict) -> Optional[Item]:
         return None
 
     for key, value in item_data.items():
-        if value is not None:
-            setattr(item, key, value)
+        setattr(item, key, value)
 
     db.commit()
     db.refresh(item)

@@ -23,9 +23,10 @@ const Tab = createBottomTabNavigator();
 const sharedHeaderOptions = {
   headerStyle: {
     backgroundColor: colors.surface,
+    height: 72,
   },
   headerTintColor: colors.textPrimary,
-  headerTitleStyle: { fontWeight: '700' as const, fontSize: 18, color: colors.textPrimary },
+  headerTitleStyle: { fontWeight: '700' as const, fontSize: 24, color: colors.textPrimary },
   headerShadowVisible: false,
   headerTitleAlign: 'center' as const,
 };
@@ -96,6 +97,16 @@ function RemindersStack() {
         name="ItemDetail"
         component={ItemDetailScreen}
         options={{ title: '物品详情' }}
+      />
+      <Stack.Screen
+        name="EditItem"
+        component={EditItemScreen}
+        options={{ title: '编辑物品' }}
+      />
+      <Stack.Screen
+        name="ConsumeItem"
+        component={ConsumeItemScreen}
+        options={{ title: '消耗' }}
       />
     </Stack.Navigator>
   );

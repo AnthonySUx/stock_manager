@@ -13,6 +13,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import api from '../api/client';
 import type { Item } from '../types';
 import { neoCard, neoBadge, colors, spacing, radius, shadowMd } from '../theme';
+import { Feather } from '@expo/vector-icons';
 
 type Props = {
   navigation: NativeStackNavigationProp<any>;
@@ -145,24 +146,30 @@ export default function ItemDetailScreen({ navigation }: Props) {
           style={styles.editBtn}
           activeOpacity={0.85}
           onPress={() => navigation.navigate('EditItem', { id })}
+          accessibilityRole="button"
+          accessibilityLabel="编辑物品"
         >
-          <Text style={styles.editBtnText}>✏️ 编辑</Text>
+          <Feather name="edit-2" size={22} color="#ffffff" />
         </TouchableOpacity>
 
         <TouchableOpacity
           style={styles.consumeBtn}
           activeOpacity={0.85}
           onPress={handleConsume}
+          accessibilityRole="button"
+          accessibilityLabel="消耗物品"
         >
-          <Text style={styles.consumeBtnText}>✅ 消耗</Text>
+          <Feather name="check-circle" size={22} color="#ffffff" />
         </TouchableOpacity>
 
         <TouchableOpacity
           style={styles.deleteBtn}
           activeOpacity={0.85}
           onPress={handleDelete}
+          accessibilityRole="button"
+          accessibilityLabel="删除物品"
         >
-          <Text style={styles.deleteBtnText}>🗑️ 删除</Text>
+          <Feather name="trash-2" size={22} color="#ffffff" />
         </TouchableOpacity>
       </View>
     </ScrollView>
@@ -217,42 +224,42 @@ const styles = StyleSheet.create({
   },
   actions: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
+    justifyContent: 'center',
     marginHorizontal: spacing.lg,
     marginBottom: 30,
-    gap: spacing.sm,
+    gap: spacing.lg,
   },
   editBtn: {
-    flex: 1,
     backgroundColor: '#3b82f6',
-    paddingVertical: spacing.md,
-    borderRadius: radius.sm,
+    width: 52,
+    height: 52,
+    borderRadius: 14,
     alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 0.5,
     borderColor: 'rgba(255,255,255,0.35)',
     ...shadowMd,
   },
-  editBtnText: { color: colors.white, fontWeight: '700' },
   consumeBtn: {
-    flex: 1,
     backgroundColor: '#10b981',
-    paddingVertical: spacing.md,
-    borderRadius: radius.sm,
+    width: 52,
+    height: 52,
+    borderRadius: 14,
     alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 0.5,
     borderColor: 'rgba(255,255,255,0.35)',
     ...shadowMd,
   },
-  consumeBtnText: { color: colors.white, fontWeight: '700' },
   deleteBtn: {
-    flex: 1,
     backgroundColor: '#ef4444',
-    paddingVertical: spacing.md,
-    borderRadius: radius.sm,
+    width: 52,
+    height: 52,
+    borderRadius: 14,
     alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 0.5,
     borderColor: 'rgba(255,255,255,0.35)',
     ...shadowMd,
   },
-  deleteBtnText: { color: colors.white, fontWeight: '700' },
 });
