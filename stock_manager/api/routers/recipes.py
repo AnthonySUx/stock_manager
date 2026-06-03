@@ -102,7 +102,7 @@ def list_sources():
 
 @router.get("", response_model=list[RecipeSummary])
 def list_recipes(
-    source_type: Optional[str] = Query(None, regex="^(howtocook|user|ai_saved)$"),
+    source_type: Optional[str] = Query(None, pattern="^(howtocook|user|ai_saved)$"),
     category: Optional[str] = None, query: Optional[str] = None,
     favorite_only: bool = False, limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0), db: Session = Depends(get_session),

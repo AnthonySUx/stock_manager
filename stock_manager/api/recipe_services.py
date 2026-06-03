@@ -73,7 +73,7 @@ def get_recipes(
         )
     if favorite_only:
         q = q.filter(Recipe.id.in_(
-            db.query(RecipeFavorite.recipe_id).subquery()
+            db.query(RecipeFavorite.recipe_id)
         ))
 
     results = q.all()
