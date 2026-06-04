@@ -11,6 +11,10 @@ from stock_manager.api.recipe_schemas import (
     ConsumePreviewResponse,
     CookRecipeRequest,
     CookRecipeResponse,
+    ExploreRequest,
+    ExploreResponse,
+    ExpandRequest,
+    ExpandResponse,
     RecipeCreate,
     RecipeRecommendation,
     RecipeRecommendationResponse,
@@ -146,6 +150,39 @@ def ai_today_recommendations(limit: int = Query(15, ge=1, le=50),
     return AIRecipeRecommendationResponse(mode="rule_based_fallback",
         summary="AI not available.", source_notice=HOWTOCOOK_SOURCE.notice,
         recommendations=[RecipeRecommendation(**r) for r in rule_results])
+
+
+
+@router.post("/explore", response_model=ExploreResponse)
+async def explore_recipes_endpoint(
+    data: ExploreRequest,
+    db: Session = Depends(get_session),
+):
+    from stock_manager.api.explore_services import explore_ideas
+    from stock_manager.api.models import Item
+
+    inventory_items = db.query(Item).filter(
+        Item.status.in_(["active", "expiring soon"])
+    ).all()
+
+    inv_dicts = [{"name": i.name, "quantity": i.quantity_value, "unit": i.quantity_unit, "status": i.status} for i in inventory_items]
+
+    structured = data.structured.model_dump() if data.structured else None
+    nat_lang = data.natural_language
+
+    import asyncio
+    result = await explore_ideas(inv_dicts, structured=structured, natural_language=nat_lang)
+    return result
+
+
+@router.post("/explore/expand", response_model=ExpandResponse)
+async def explore_expand_endpoint(
+    data: ExpandRequest,
+):
+    from stock_manager.api.explore_services import expand_to_recipe_draft
+    idea = data.idea.model_dump() if hasattr(data.idea, "model_dump") else data.idea
+    result = await expand_to_recipe_draft(idea)
+    return result
 
 
 @router.get("/{recipe_id}/consume-preview", response_model=ConsumePreviewResponse)
