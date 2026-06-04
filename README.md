@@ -118,6 +118,22 @@ By default, reminders for food nearing expiration are shown 2 days in advance:
 
 `settings` manages global user-level settings. Currently, it supports editing:
 
+
+### 9. Recipe Management
+
+The application supports recipe management as a separate feature area.
+Users can browse recipes, search recipes, favorite recipes, create their own recipes,
+and edit user-created recipe copies.
+
+Recipe search prioritizes personal recipes, favorited recipes, cooked recipes,
+and close title matches.
+
+Recipe recommendations consider current stock, expiring food, favorited recipes,
+cooked history, and recipe variety. Recipes that help consume food near expiration
+are prioritized.
+
+After cooking a recipe, the application can suggest matching stock items to consume.
+The user confirms the consumed stock before inventory quantities are updated.
 - `default_database`
 - `expiration_reminder_days`
 
