@@ -158,7 +158,7 @@ def _parse_explore_response(raw: str) -> Optional[list[dict]]:
 async def explore_ideas(inventory_items: list[dict], structured: Optional[dict] = None, natural_language: Optional[str] = None) -> dict:
     input_mode = "structured" if structured else "natural_language"
     system_prompt, user_prompt = _build_explore_prompt(inventory_items, structured, natural_language)
-    raw = await _call_ai(system_prompt, user_prompt)
+    raw = await _call_ai(user_prompt, system_prompt)
 
     if raw is None:
         return {"mode": "ai", "input_mode": input_mode, "ideas": [], "warnings": ["AI is not configured or unavailable. Unable to generate ideas."]}
@@ -204,7 +204,7 @@ async def expand_to_recipe_draft(idea: dict) -> dict:
         "Please expand this into a complete recipe."
     )
 
-    raw = await _call_ai(system, user)
+    raw = await _call_ai(user, system)
     if raw is None:
         return {"recipe_draft": {"title": idea.get("title", ""), "ingredients": [], "steps": [], "warnings": ["AI not available for expansion."]}}
 
