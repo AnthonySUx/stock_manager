@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -8,6 +8,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  Keyboard,
   View,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
@@ -37,14 +38,17 @@ export default function RecipeListScreen({ navigation }: Props) {
   const [recipes, setRecipes] = useState<RecipeSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchDraft, setSearchDraft] = useState('');
+  const [isSearchExpanded, setIsSearchExpanded] = useState(false);
+  const searchInputRef = useRef<TextInput>(null);
+  const currentSearchTerm = useRef('');
   const [filterSource, setFilterSource] = useState<string | null>(null);
 
   const fetchRecipes = useCallback(async () => {
     try {
       const params: any = {};
       if (filterSource) params.source_type = filterSource;
-      if (searchQuery.trim()) params.query = searchQuery.trim();
+      if (currentSearchTerm.current.trim()) params.query = currentSearchTerm.current.trim();
       const res = await recipesApi.list(params);
       setRecipes(res.data);
     } catch {
@@ -53,7 +57,7 @@ export default function RecipeListScreen({ navigation }: Props) {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [filterSource, searchQuery]);
+  }, [filterSource]);
 
   useFocusEffect(
     useCallback(() => {
@@ -68,8 +72,25 @@ export default function RecipeListScreen({ navigation }: Props) {
   };
 
   const handleSearch = () => {
-    setLoading(true);
-    fetchRecipes();
+    if (!isSearchExpanded) {
+      setIsSearchExpanded(true);
+      setTimeout(() => searchInputRef.current?.focus(), 100);
+      return;
+    }
+
+    const trimmed = searchDraft.trim();
+    if (trimmed) {
+      currentSearchTerm.current = trimmed;
+      setLoading(true);
+      fetchRecipes();
+    } else {
+      currentSearchTerm.current = '';
+      setIsSearchExpanded(false);
+      setSearchDraft('');
+      Keyboard.dismiss();
+      setLoading(true);
+      fetchRecipes();
+    }
   };
 
   const renderItem = ({ item }: { item: RecipeSummary }) => (
@@ -108,20 +129,29 @@ export default function RecipeListScreen({ navigation }: Props) {
   return (
     <View style={styles.container}>
       <View style={styles.searchRow}>
-        <View style={styles.searchInputWrapper}>
-          <TextInput
-            style={styles.searchInput}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            placeholder="搜索菜谱..."
-            placeholderTextColor={colors.textMuted}
-            returnKeyType="search"
-            onSubmitEditing={handleSearch}
-          />
-        </View>
-        <TouchableOpacity style={styles.searchBtn} activeOpacity={0.85} onPress={handleSearch}>
-          <Ionicons name="search" size={20} color="#ffffff" />
-        </TouchableOpacity>
+        {isSearchExpanded ? (
+          <>
+            <View style={styles.searchInputWrapper}>
+              <TextInput
+                ref={searchInputRef}
+                style={styles.searchInput}
+                value={searchDraft}
+                onChangeText={setSearchDraft}
+                placeholder="搜索菜谱..."
+                placeholderTextColor={colors.textMuted}
+                returnKeyType="search"
+                onSubmitEditing={handleSearch}
+              />
+            </View>
+            <TouchableOpacity style={styles.searchBtn} activeOpacity={0.85} onPress={handleSearch}>
+              <Ionicons name="search" size={20} color="#ffffff" />
+            </TouchableOpacity>
+          </>
+        ) : (
+          <TouchableOpacity style={[styles.searchBtn, { marginLeft: 'auto' }]} activeOpacity={0.85} onPress={handleSearch}>
+            <Ionicons name="search" size={20} color="#ffffff" />
+          </TouchableOpacity>
+        )}
       </View>
 
       <View style={styles.filterRow}>

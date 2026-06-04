@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -11,7 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useRoute } from '@react-navigation/native';
+import { useRoute, usePreventRemove } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import api from '../api/client';
 import type { Item } from '../types';
@@ -49,10 +49,50 @@ export default function EditItemScreen({ navigation }: Props) {
   const [openedExp, setOpenedExp] = useState('');
   const [openedDate, setOpenedDate] = useState('');
   const [notes, setNotes] = useState('');
+  const initialValuesRef = useRef<Record<string, string> | null>(null);
+  const isSavingRef = useRef(false);
+  const saveHandlerRef = useRef<(() => void) | null>(null);
+  const hasUnsavedChangesRef = useRef<() => boolean>(() => false);
+
+  const hasUnsavedChanges = () => {
+    if (!initialValuesRef.current) return false;
+    const init = initialValuesRef.current;
+    return (
+      name !== init.name ||
+      category !== init.category ||
+      owner !== init.owner ||
+      purchaseDate !== init.purchaseDate ||
+      quantityValue !== init.quantityValue ||
+      quantityUnit !== init.quantityUnit ||
+      location !== init.location ||
+      unopenedExp !== init.unopenedExp ||
+      openedExp !== init.openedExp ||
+      openedDate !== init.openedDate ||
+      notes !== init.notes
+    );
+  };
+  hasUnsavedChangesRef.current = hasUnsavedChanges;
+
 
   useEffect(() => {
     fetchItem();
   }, [id]);
+
+  usePreventRemove(hasUnsavedChanges() && !isSavingRef.current, ({ data }) => {
+    Alert.alert(
+      '有未保存的更改',
+      '离开前是否保存更改？',
+      [
+        { text: '取消', style: 'cancel' },
+        { text: '不保存', style: 'destructive', onPress: () => navigation.dispatch(data.action) },
+        { text: '保存', onPress: () => {
+          isSavingRef.current = true;
+          saveHandlerRef.current?.();
+        }},
+      ]
+    );
+  });
+
 
   const fetchItem = async () => {
     try {
@@ -70,6 +110,20 @@ export default function EditItemScreen({ navigation }: Props) {
       setOpenedExp(i.opened_expiration_date || '');
       setOpenedDate(i.opened_date || '');
       setNotes(i.notes || '');
+      initialValuesRef.current = {
+        name: i.name,
+        category: i.category,
+        owner: i.owner,
+        purchaseDate: i.purchase_date,
+        quantityValue: String(i.quantity_value),
+        quantityUnit: i.quantity_unit,
+        location: i.location,
+        unopenedExp: i.unopened_expiration_date,
+        openedExp: i.opened_expiration_date || '',
+        openedDate: i.opened_date || '',
+        notes: i.notes || '',
+      };
+
     } catch {
       Alert.alert('错误', '加载物品失败');
       navigation.goBack();
@@ -80,6 +134,8 @@ export default function EditItemScreen({ navigation }: Props) {
 
   const handleSave = async () => {
     setSaving(true);
+    isSavingRef.current = true;
+
     try {
       const payload: Record<string, any> = {
         name: name || undefined,
@@ -104,15 +160,36 @@ export default function EditItemScreen({ navigation }: Props) {
       }
 
       await api.patch(`/items/${id}`, payload);
+      initialValuesRef.current = {
+        name,
+        category,
+        owner,
+        purchaseDate,
+        quantityValue,
+        quantityUnit,
+        location,
+        unopenedExp,
+        openedExp,
+        openedDate,
+        notes,
+      };
+
       Alert.alert('已更新', '物品已更新', [
         { text: '确定', onPress: () => navigation.goBack() },
       ]);
     } catch (err: any) {
+      isSavingRef.current = false;
+
       Alert.alert('错误', err?.response?.data?.detail || '更新失败');
     } finally {
       setSaving(false);
     }
   };
+
+  useEffect(() => {
+    saveHandlerRef.current = handleSave;
+  });
+
 
   const renderChips = (
     options: string[],

@@ -57,7 +57,7 @@ function InventoryStack() {
       <Stack.Screen
         name="EditItem"
         component={EditItemScreen}
-        options={{ title: '编辑物品' }}
+        options={{ title: '编辑物品', headerBackButtonMenuEnabled: false }}
       />
       <Stack.Screen
         name="ConsumeItem"
@@ -106,7 +106,7 @@ function RemindersStack() {
       <Stack.Screen
         name="EditItem"
         component={EditItemScreen}
-        options={{ title: '编辑物品' }}
+        options={{ title: '编辑物品', headerBackButtonMenuEnabled: false }}
       />
       <Stack.Screen
         name="ConsumeItem"
@@ -145,7 +145,7 @@ function RecipeStack() {
       <Stack.Screen
         name="RecipeEdit"
         component={RecipeEditScreen}
-        options={{ title: '编辑菜谱' }}
+        options={{ title: '编辑菜谱', headerBackButtonMenuEnabled: false }}
       />
       <Stack.Screen
         name="RecipeRecommendations"
@@ -249,11 +249,17 @@ export default function AppNavigator() {
   return (
     <NavigationContainer>
       <Tab.Navigator
+        initialRouteName="RecipeTab"
         tabBar={(props) => <AnimatedTabBar {...props} />}
         screenOptions={{
           headerShown: false,
         }}
       >
+        <Tab.Screen
+          name="RecipeTab"
+          component={RecipeStack}
+          options={{}}
+        />
         <Tab.Screen
           name="InventoryTab"
           component={InventoryStack}
@@ -272,11 +278,6 @@ export default function AppNavigator() {
         <Tab.Screen
           name="SettingsTab"
           component={SettingsStack}
-          options={{}}
-        />
-        <Tab.Screen
-          name="RecipeTab"
-          component={RecipeStack}
           options={{}}
         />
       </Tab.Navigator>

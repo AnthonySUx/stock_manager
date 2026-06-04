@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useRoute } from '@react-navigation/native';
+import { useRoute, usePreventRemove } from '@react-navigation/native';
 import { recipesApi } from '../api/recipes';
 import type { RecipeResponse } from '../types';
 import { neoCard, neoInput, colors, spacing, radius, shadowMd, shadowXs } from '../theme';
@@ -52,11 +52,64 @@ export default function RecipeEditScreen({ navigation }: Props) {
     { step_number: 1, instruction: '' },
   ]);
 
+  const initialValuesRef = useRef<any>(null);
+  const isSavingRef = useRef(false);
+  const saveHandlerRef = useRef<(() => void) | null>(null);
+  const hasUnsavedChangesRef = useRef<() => boolean>(() => false);
+
+  const hasUnsavedChanges = () => {
+    if (!initialValuesRef.current) return false;
+    const init = initialValuesRef.current;
+    return (
+      title !== init.title ||
+      category !== init.category ||
+      description !== init.description ||
+      difficulty !== init.difficulty ||
+      servings !== init.servings ||
+      cookTime !== init.cookTime ||
+      JSON.stringify(ingredients) !== JSON.stringify(init.ingredients) ||
+      JSON.stringify(steps) !== JSON.stringify(init.steps)
+    );
+  };
+  hasUnsavedChangesRef.current = hasUnsavedChanges;
+
+
   useEffect(() => {
     if (editId) {
       fetchRecipe();
     }
   }, [editId]);
+
+  useEffect(() => {
+    if (!editId && !initialValuesRef.current) {
+      initialValuesRef.current = {
+        title,
+        category,
+        description,
+        difficulty,
+        servings,
+        cookTime,
+        ingredients: JSON.parse(JSON.stringify(ingredients)),
+        steps: JSON.parse(JSON.stringify(steps)),
+      };
+    }
+  }, []);
+
+  usePreventRemove(hasUnsavedChanges() && !isSavingRef.current, ({ data }) => {
+    Alert.alert(
+      '有未保存的更改',
+      '离开前是否保存更改？',
+      [
+        { text: '取消', style: 'cancel' },
+        { text: '不保存', style: 'destructive', onPress: () => navigation.dispatch(data.action) },
+        { text: '保存', onPress: () => {
+          isSavingRef.current = true;
+          saveHandlerRef.current?.();
+        }},
+      ]
+    );
+  });
+
 
   const fetchRecipe = async () => {
     try {
@@ -82,6 +135,25 @@ export default function RecipeEditScreen({ navigation }: Props) {
           ? r.steps.map((s) => ({ step_number: s.step_number, instruction: s.instruction }))
           : [{ step_number: 1, instruction: '' }]
       );
+      initialValuesRef.current = {
+        title: r.title,
+        category: r.category || '',
+        description: r.description || '',
+        difficulty: r.difficulty || '',
+        servings: r.servings || '',
+        cookTime: r.cook_time_minutes ? String(r.cook_time_minutes) : '',
+        ingredients: r.ingredients.length > 0
+          ? r.ingredients.map((i) => ({
+              ingredient_name: i.ingredient_name,
+              quantity: i.quantity || '',
+              unit: i.unit || '',
+            }))
+          : [{ ingredient_name: '', quantity: '', unit: '' }],
+        steps: r.steps.length > 0
+          ? r.steps.map((s) => ({ step_number: s.step_number, instruction: s.instruction }))
+          : [{ step_number: 1, instruction: '' }],
+      };
+
     } catch {
       Alert.alert('错误', '未找到菜谱');
       navigation.goBack();
@@ -158,24 +230,55 @@ export default function RecipeEditScreen({ navigation }: Props) {
     };
 
     setSaving(true);
+    isSavingRef.current = true;
+
     try {
       if (isEditing) {
         await recipesApi.update(editId!, payload);
+        initialValuesRef.current = {
+          title,
+          category,
+          description,
+          difficulty,
+          servings,
+          cookTime,
+          ingredients: JSON.parse(JSON.stringify(ingredients)),
+          steps: JSON.parse(JSON.stringify(steps)),
+        };
+
         Alert.alert('已更新', '菜谱已更新', [
           { text: '确定', onPress: () => navigation.goBack() },
         ]);
       } else {
         const res = await recipesApi.create(payload as any);
+        initialValuesRef.current = {
+          title,
+          category,
+          description,
+          difficulty,
+          servings,
+          cookTime,
+          ingredients: JSON.parse(JSON.stringify(ingredients)),
+          steps: JSON.parse(JSON.stringify(steps)),
+        };
+
         Alert.alert('已创建', '菜谱已创建', [
           { text: '确定', onPress: () => navigation.goBack() },
         ]);
       }
     } catch (err: any) {
+      isSavingRef.current = false;
+
       Alert.alert('错误', err?.response?.data?.detail || '保存失败');
     } finally {
       setSaving(false);
     }
   };
+
+  useEffect(() => {
+    saveHandlerRef.current = handleSave;
+  });
+
 
   if (loading) {
     return <ActivityIndicator size="large" color={colors.accent} style={styles.loader} />;
