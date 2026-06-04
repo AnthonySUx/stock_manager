@@ -208,6 +208,14 @@ export default function RecipeListScreen({ navigation }: Props) {
       </TouchableOpacity>
 
       <TouchableOpacity
+        style={styles.fabExplore}
+        activeOpacity={0.85}
+        onPress={() => navigation.navigate('RecipeExplore')}
+      >
+        <Ionicons name="sparkles" size={26} color="#ffffff" />
+      </TouchableOpacity>
+
+      <TouchableOpacity
         style={styles.fabAdd}
         activeOpacity={0.85}
         onPress={() => navigation.navigate('RecipeEdit', {})}
@@ -309,4 +317,19 @@ const styles = StyleSheet.create({
     ...shadowXl,
   },
   fabText: { fontSize: 28, color: colors.white, lineHeight: 30, marginTop: -1 },
+  fabExplore: {
+    position: 'absolute',
+    right: spacing.xl,
+    bottom: spacing.xl + 128,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#7c3aed',
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.35)',
+    ...shadowXl,
+  },
+
 });

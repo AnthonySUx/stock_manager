@@ -226,3 +226,43 @@ export interface RecipeSource {
   repository: string;
   license: string;
 }
+
+// ─── Explore Recipe Types ──────────────────────────────────────────
+
+export type ExploreMode = 'structured' | 'natural_language';
+
+export interface ExploreStructuredPreferences {
+  cuisine?: string | null;
+  flavor?: string | null;
+  texture?: string | null;
+  main_ingredient?: string | null;
+  avoid_ingredients?: string[] | null;
+  meal_type?: string | null;
+  max_cook_time_minutes?: number | null;
+}
+
+export interface ExploreIdea {
+  recipe_id?: number | null;
+  title: string;
+  description?: string | null;
+  matched_ingredients?: string[];
+  expiring_ingredients?: string[];
+  missing_ingredients?: string[];
+  cuisine?: string | null;
+  flavor?: string | null;
+  texture?: string | null;
+  can_expand_to_recipe?: boolean;
+}
+
+export interface ExploreRequest {
+  mode: ExploreMode;
+  structured?: ExploreStructuredPreferences | null;
+  natural_language?: string | null;
+}
+
+export interface ExploreResponse {
+  mode: 'ai';
+  input_mode: ExploreMode;
+  ideas: ExploreIdea[];
+  warnings: string[];
+}

@@ -19,6 +19,7 @@ import RecipeDetailScreen from '../screens/RecipeDetailScreen';
 import RecipeEditScreen from '../screens/RecipeEditScreen';
 import RecipeRecommendationsScreen from '../screens/RecipeRecommendationsScreen';
 import RecipeCookScreen from '../screens/RecipeCookScreen';
+import RecipeExploreScreen from '../screens/RecipeExploreScreen';
 import { colors, shadowSm, shadowInset, radius } from '../theme';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -156,6 +157,11 @@ function RecipeStack() {
         name="RecipeCook"
         component={RecipeCookScreen}
         options={{ title: '烹饪' }}
+      />
+      <Stack.Screen
+        name="RecipeExplore"
+        component={RecipeExploreScreen}
+        options={{ title: '探索菜谱' }}
       />
     </Stack.Navigator>
   );

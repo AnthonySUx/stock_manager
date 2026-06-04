@@ -6,6 +6,9 @@ import type {
   ConsumePreview,
   CookResponse,
   RecipeSource,
+  ExploreIdea,
+  ExploreRequest,
+  ExploreResponse,
 } from '../types';
 
 // ── Mock Recipes Data ──────────────────────────────────────────────
@@ -516,6 +519,63 @@ const mockApi = {
         status: 'active',
       })),
       notes: input.notes || null,
+    };
+    return Promise.resolve({ data: response });
+  }
+,
+
+  explore(data: ExploreRequest) {
+    const { mode, structured, natural_language } = data;
+    const ideas: ExploreIdea[] = [
+      {
+        recipe_id: 1,
+        title: '番茄炒蛋',
+        description: '经典家常菜，番茄酸甜搭配鸡蛋嫩滑，简单快手。',
+        matched_ingredients: ['番茄', '鸡蛋'],
+        expiring_ingredients: [],
+        missing_ingredients: ['葱'],
+        cuisine: '中式',
+        flavor: '酸甜',
+        texture: '嫩滑',
+        can_expand_to_recipe: true,
+      },
+      {
+        recipe_id: null,
+        title: '蒜蓉西兰花炒虾仁',
+        description: '清爽低脂，蒜香浓郁，搭配鲜嫩虾仁，营养均衡。',
+        matched_ingredients: ['西兰花', '虾仁'],
+        expiring_ingredients: ['虾仁'],
+        missing_ingredients: ['大蒜', '料酒'],
+        cuisine: '中式',
+        flavor: '蒜香',
+        texture: '清爽',
+        can_expand_to_recipe: true,
+      },
+      {
+        recipe_id: 2,
+        title: '鸡胸肉沙拉',
+        description: '低卡高蛋白，健身减脂必备。',
+        matched_ingredients: ['鸡胸肉'],
+        expiring_ingredients: [],
+        missing_ingredients: [],
+        cuisine: '西式',
+        flavor: '清淡',
+        texture: '爽口',
+        can_expand_to_recipe: false,
+      },
+    ];
+    const warnings: string[] = [];
+    if (mode === 'natural_language' && natural_language && natural_language.length < 3) {
+      warnings.push('输入的文本较短，建议提供更多描述以获得更准确的推荐。');
+    }
+    if (mode === 'structured' && structured && !structured.cuisine && !structured.main_ingredient) {
+      warnings.push('未指定菜系或主要食材，推荐结果可能不够精准。');
+    }
+    const response: ExploreResponse = {
+      mode: 'ai',
+      input_mode: mode,
+      ideas,
+      warnings,
     };
     return Promise.resolve({ data: response });
   }

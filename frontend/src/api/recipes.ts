@@ -9,6 +9,8 @@ import type {
   ConsumePreview,
   CookResponse,
   RecipeSource,
+  ExploreRequest,
+  ExploreResponse,
 } from '../types';
 import mockApi from './mockRecipes';
 
@@ -122,6 +124,13 @@ export const recipesApi = {
     return wrap(
       () => mockApi.cook(id, data),
       () => api.post<CookResponse>(`/recipes/${id}/cook`, data)
+    );
+  },
+
+  explore(data: ExploreRequest) {
+    return wrap(
+      () => mockApi.explore(data),
+      () => api.post<ExploreResponse>('/recipes/explore', data)
     );
   },
 };

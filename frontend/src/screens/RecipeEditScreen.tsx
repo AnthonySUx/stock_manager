@@ -39,9 +39,9 @@ export default function RecipeEditScreen({ navigation }: Props) {
   const [loading, setLoading] = useState(isEditing);
   const [saving, setSaving] = useState(false);
 
-  const [title, setTitle] = useState('');
+  const [title, setTitle] = useState(route.params?.title || '');
   const [category, setCategory] = useState('');
-  const [description, setDescription] = useState('');
+  const [description, setDescription] = useState(route.params?.description || '');
   const [difficulty, setDifficulty] = useState('');
   const [servings, setServings] = useState('');
   const [cookTime, setCookTime] = useState('');
