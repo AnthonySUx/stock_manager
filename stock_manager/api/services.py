@@ -3,7 +3,7 @@
 from datetime import date, datetime, timedelta
 from typing import Optional
 
-from sqlalchemy import func
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from stock_manager.api.models import Item, RestockItem, Setting
@@ -111,7 +111,14 @@ def get_items(
     if status is not None:
         query = query.filter(Item.status == status)
 
-    return query.order_by(Item.id).all()
+    status_order = case(
+        (Item.status == 'expired', 0),
+        (Item.status == 'expiring soon', 1),
+        (Item.status == 'active', 2),
+        (Item.status == 'consumed', 3),
+        else_=4
+    )
+    return query.order_by(status_order, Item.current_expiration_date, Item.id).all()
 
 
 def search_items(
@@ -144,7 +151,14 @@ def search_items(
     if status is not None:
         query = query.filter(Item.status == status)
 
-    return query.order_by(Item.id).all()
+    status_order = case(
+        (Item.status == 'expired', 0),
+        (Item.status == 'expiring soon', 1),
+        (Item.status == 'active', 2),
+        (Item.status == 'consumed', 3),
+        else_=4
+    )
+    return query.order_by(status_order, Item.current_expiration_date, Item.id).all()
 
 
 def get_item(db: Session, item_id: int) -> Optional[Item]:
