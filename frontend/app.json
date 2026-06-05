@@ -28,6 +28,10 @@
     },
     "extra": {
       "apiBaseUrl": "http://localhost:8000/api"
-    }
+    },
+    "plugins": [
+      "@react-native-community/datetimepicker",
+      "expo-font"
+    ]
   }
 }

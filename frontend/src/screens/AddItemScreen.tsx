@@ -13,6 +13,7 @@ import {
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import api from '../api/client';
 import { neoCard, neoInput, neoFilterChip, colors, spacing, radius, shadowMd } from '../theme';
+import DatePickerField from '../components/DatePickerField';
 
 type Props = {
   navigation: NativeStackNavigationProp<any>;
@@ -153,17 +154,13 @@ export default function AddItemScreen({ navigation }: Props) {
           />
         </View>
 
-        {/* Purchase Date */}
-        <View style={styles.field}>
-          <Text style={styles.label}>购买日期</Text>
-          <TextInput
-            style={styles.input}
-            value={purchaseDate}
-            onChangeText={setPurchaseDate}
-            placeholder="YYYY-MM-DD（默认今天）"
-            placeholderTextColor={colors.textMuted}
-          />
-        </View>
+        <DatePickerField
+          label="购买日期"
+          value={purchaseDate}
+          onChange={setPurchaseDate}
+          placeholder="选择日期（默认今天）"
+          canClear
+        />
 
         {/* Quantity */}
         <View style={styles.fieldRow}>
@@ -189,39 +186,30 @@ export default function AddItemScreen({ navigation }: Props) {
         {/* Location */}
         {renderChips('存放位置', LOCATIONS, location, setLocation, true)}
 
-        {/* Expiration Dates */}
-        <View style={styles.field}>
-          <Text style={styles.label}>未开封过期日期 *</Text>
-          <TextInput
-            style={styles.input}
-            value={unopenedExp}
-            onChangeText={setUnopenedExp}
-            placeholder="YYYY-MM-DD 或永久"
-            placeholderTextColor={colors.textMuted}
-          />
-        </View>
+        <DatePickerField
+          label="未开封过期日期"
+          value={unopenedExp}
+          onChange={setUnopenedExp}
+          placeholder="YYYY-MM-DD 或永久"
+          allowPermanent
+          required
+        />
 
-        <View style={styles.field}>
-          <Text style={styles.label}>开封日期（可选）</Text>
-          <TextInput
-            style={styles.input}
-            value={openedDate}
-            onChangeText={setOpenedDate}
-            placeholder="YYYY-MM-DD"
-            placeholderTextColor={colors.textMuted}
-          />
-        </View>
-
-        <View style={styles.field}>
-          <Text style={styles.label}>开封后过期日期（可选）</Text>
-          <TextInput
-            style={styles.input}
-            value={openedExp}
-            onChangeText={setOpenedExp}
-            placeholder="YYYY-MM-DD 或永久"
-            placeholderTextColor={colors.textMuted}
-          />
-        </View>
+        <DatePickerField
+          label="开封日期（可选）"
+          value={openedDate}
+          onChange={setOpenedDate}
+          placeholder="YYYY-MM-DD"
+          canClear
+        />
+        <DatePickerField
+          label="开封后过期日期（可选）"
+          value={openedExp}
+          onChange={setOpenedExp}
+          placeholder="YYYY-MM-DD 或永久"
+          allowPermanent
+          canClear
+        />
 
         {/* Notes */}
         <View style={styles.field}>

@@ -170,3 +170,79 @@ class CookRecipeResponse(BaseModel):
     title: str
     consumed_items: list[CookConsumedItem] = []
     notes: Optional[str] = None
+
+# ─── Explore Recipes ─────────────────────────────────────────────
+
+
+class ExploreStructuredPreferences(BaseModel):
+    """Structured preference fields for recipe exploration."""
+    inventory_item_ids: list[int] = []
+    extra_ingredients: list[str] = []
+    flavors: list[str] = []
+    textures: list[str] = []
+    cuisine_group: Optional[str] = None
+    cuisine: Optional[str] = None
+    cooking_methods: list[str] = []
+    max_time_minutes: Optional[int] = None
+    difficulty: Optional[str] = None
+    prioritize_expiring: bool = True
+    allow_missing_ingredients: bool = True
+
+
+class ExploreRequest(BaseModel):
+    """Request body for Explore Recipes."""
+    mode: str = Field(..., pattern="^(structured|natural_language)$")
+    structured: Optional[ExploreStructuredPreferences] = None
+    natural_language: Optional[str] = None
+
+
+class ExploreIdea(BaseModel):
+    """A single cooking idea returned from Explore Recipes."""
+    idea_id: str = ""
+    title: str
+    description: Optional[str] = None
+    source_type: str = "ai_idea"  # ai_idea | existing_recipe
+    recipe_id: Optional[int] = None
+    matched_ingredients: list[str] = []
+    expiring_ingredients: list[str] = []
+    missing_ingredients: list[str] = []
+    flavors: list[str] = []
+    textures: list[str] = []
+    cuisine_group: Optional[str] = None
+    cuisine: Optional[str] = None
+    cooking_method: Optional[str] = None
+    estimated_time_minutes: Optional[int] = None
+    reason: Optional[str] = None
+    can_expand_to_recipe: bool = True
+
+
+class ExploreResponse(BaseModel):
+    """Response from Explore Recipes."""
+    mode: str  # ai
+    input_mode: str  # structured | natural_language
+    ideas: list[ExploreIdea] = []
+    warnings: list[str] = []
+
+
+class ExpandRequest(BaseModel):
+    """Request body for expanding an idea into a recipe draft."""
+    idea: ExploreIdea
+
+
+class ExpandIngredient(BaseModel):
+    ingredient_name: str
+    quantity: Optional[str] = None
+    unit: Optional[str] = None
+    is_optional: bool = False
+    is_seasoning: bool = False
+
+
+class ExpandStep(BaseModel):
+    step_number: int
+    instruction: str
+
+
+class ExpandResponse(BaseModel):
+    """Response from expanding an idea into a recipe draft."""
+    recipe_draft: dict  # RecipeCreate-compatible dict, not saved
+
