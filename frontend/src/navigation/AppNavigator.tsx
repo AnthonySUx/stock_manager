@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, Animated, TouchableOpacity, Dimensions } from 'react-native';
+import { View, StyleSheet, Animated, TouchableOpacity, Text } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { NavigationContainer } from '@react-navigation/native';
@@ -12,7 +12,6 @@ import ConsumeItemScreen from '../screens/ConsumeItemScreen';
 import RestockListScreen from '../screens/RestockListScreen';
 import AddRestockScreen from '../screens/AddRestockScreen';
 import DoneRestockScreen from '../screens/DoneRestockScreen';
-import RemindersScreen from '../screens/RemindersScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import RecipeListScreen from '../screens/RecipeListScreen';
 import RecipeDetailScreen from '../screens/RecipeDetailScreen';
@@ -20,7 +19,8 @@ import RecipeEditScreen from '../screens/RecipeEditScreen';
 import RecipeRecommendationsScreen from '../screens/RecipeRecommendationsScreen';
 import RecipeCookScreen from '../screens/RecipeCookScreen';
 import RecipeExploreScreen from '../screens/RecipeExploreScreen';
-import { colors, shadowSm, shadowInset, radius } from '../theme';
+import SceneSelectScreen from '../screens/SceneSelectScreen';
+import { colors, shadowSm, shadowInset, radius, spacing } from '../theme';
 import { Ionicons } from '@expo/vector-icons';
 
 const Stack = createNativeStackNavigator();
@@ -43,7 +43,7 @@ function InventoryStack() {
       <Stack.Screen
         name="ItemList"
         component={ItemListScreen}
-        options={{ title: '库存物品' }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="AddItem"
@@ -65,13 +65,6 @@ function InventoryStack() {
         component={ConsumeItemScreen}
         options={{ title: '消耗' }}
       />
-    </Stack.Navigator>
-  );
-}
-
-function RestockStack() {
-  return (
-    <Stack.Navigator screenOptions={sharedHeaderOptions}>
       <Stack.Screen
         name="RestockList"
         component={RestockListScreen}
@@ -87,36 +80,16 @@ function RestockStack() {
         component={DoneRestockScreen}
         options={{ title: '完成补货' }}
       />
+      <Stack.Screen
+        name="SceneSelect"
+        component={SceneSelectScreen}
+        options={{ headerShown: false }}
+      />
+
     </Stack.Navigator>
   );
 }
 
-function RemindersStack() {
-  return (
-    <Stack.Navigator screenOptions={sharedHeaderOptions}>
-      <Stack.Screen
-        name="Reminders"
-        component={RemindersScreen}
-        options={{ title: '提醒' }}
-      />
-      <Stack.Screen
-        name="ItemDetail"
-        component={ItemDetailScreen}
-        options={{ title: '物品详情' }}
-      />
-      <Stack.Screen
-        name="EditItem"
-        component={EditItemScreen}
-        options={{ title: '编辑物品', headerBackButtonMenuEnabled: false }}
-      />
-      <Stack.Screen
-        name="ConsumeItem"
-        component={ConsumeItemScreen}
-        options={{ title: '消耗' }}
-      />
-    </Stack.Navigator>
-  );
-}
 
 function SettingsStack() {
   return (
@@ -124,7 +97,7 @@ function SettingsStack() {
       <Stack.Screen
         name="Settings"
         component={SettingsScreen}
-        options={{ title: '设置' }}
+        options={{ headerShown: false }}
       />
     </Stack.Navigator>
   );
@@ -136,7 +109,7 @@ function RecipeStack() {
       <Stack.Screen
         name="RecipeList"
         component={RecipeListScreen}
-        options={{ title: '菜谱' }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="RecipeDetail"
@@ -167,22 +140,27 @@ function RecipeStack() {
   );
 }
 
-const INDICATOR_WIDTH = 64;
-const H_PADDING = 8;
+const TAB_ICONS: Record<string, { focused: keyof typeof Ionicons.glyphMap; unfocused: keyof typeof Ionicons.glyphMap; label: string }> = {
+  InventoryTab: { focused: 'cube', unfocused: 'cube-outline', label: '库存' },
+  RecipeTab: { focused: 'restaurant', unfocused: 'restaurant-outline', label: '菜谱' },
+  SettingsTab: { focused: 'settings', unfocused: 'settings-outline', label: '设置' },
+};
+
+const TAB_BAR_WIDTH = 290;
+const TAB_COUNT = 3;
+const TAB_WIDTH = TAB_BAR_WIDTH / TAB_COUNT;
 
 function AnimatedTabBar({ state, descriptors, navigation }: any) {
   const [translateX] = useState(() => new Animated.Value(0));
-  const tabWidth = (Dimensions.get('window').width - H_PADDING * 2) / state.routes.length;
-  const dynamicLeft = H_PADDING + (tabWidth - INDICATOR_WIDTH) / 2;
 
   useEffect(() => {
     Animated.spring(translateX, {
-      toValue: state.index * tabWidth,
+      toValue: state.index * TAB_WIDTH,
       useNativeDriver: true,
-      tension: 100,
-      friction: 10,
+      tension: 180,
+      friction: 16,
     }).start();
-  }, [state.index, tabWidth]);
+  }, [state.index]);
 
   return (
     <View style={styles.tabBar}>
@@ -190,8 +168,6 @@ function AnimatedTabBar({ state, descriptors, navigation }: any) {
         style={[
           styles.indicator,
           {
-            left: dynamicLeft,
-            width: INDICATOR_WIDTH,
             transform: [{ translateX }],
           },
         ]}
@@ -199,27 +175,7 @@ function AnimatedTabBar({ state, descriptors, navigation }: any) {
       {state.routes.map((route: any, index: number) => {
         const { options } = descriptors[route.key];
         const focused = state.index === index;
-
-        let iconName: keyof typeof Ionicons.glyphMap;
-        switch (route.name) {
-          case 'InventoryTab':
-            iconName = focused ? 'cube' : 'cube-outline';
-            break;
-          case 'RestockTab':
-            iconName = focused ? 'cart' : 'cart-outline';
-            break;
-          case 'RemindersTab':
-            iconName = focused ? 'notifications' : 'notifications-outline';
-            break;
-          case 'SettingsTab':
-            iconName = focused ? 'settings' : 'settings-outline';
-            break;
-          case 'RecipeTab':
-            iconName = focused ? 'restaurant' : 'restaurant-outline';
-            break;
-          default:
-            iconName = 'ellipse';
-        }
+        const config = TAB_ICONS[route.name] || { focused: 'ellipse', unfocused: 'ellipse', label: '' };
 
         const onPress = () => {
           const event = navigation.emit({
@@ -237,13 +193,21 @@ function AnimatedTabBar({ state, descriptors, navigation }: any) {
             key={route.key}
             onPress={onPress}
             style={styles.tabButton}
-            activeOpacity={0.7}
+            activeOpacity={1}
           >
             <Ionicons
-              name={iconName}
-              size={28}
-              color={focused ? '#FFFFFF' : colors.textMuted}
+              name={focused ? config.focused : config.unfocused}
+              size={22}
+              color={focused ? colors.accent : colors.textMuted}
             />
+            <Text
+              style={[
+                styles.tabLabel,
+                { color: focused ? colors.accent : colors.textMuted },
+              ]}
+            >
+              {config.label}
+            </Text>
           </TouchableOpacity>
         );
       })}
@@ -255,7 +219,7 @@ export default function AppNavigator() {
   return (
     <NavigationContainer>
       <Tab.Navigator
-        initialRouteName="RecipeTab"
+        initialRouteName="InventoryTab"
         tabBar={(props) => <AnimatedTabBar {...props} />}
         screenOptions={{
           headerShown: false,
@@ -272,16 +236,6 @@ export default function AppNavigator() {
           options={{}}
         />
         <Tab.Screen
-          name="RestockTab"
-          component={RestockStack}
-          options={{}}
-        />
-        <Tab.Screen
-          name="RemindersTab"
-          component={RemindersStack}
-          options={{}}
-        />
-        <Tab.Screen
           name="SettingsTab"
           component={SettingsStack}
           options={{}}
@@ -293,33 +247,48 @@ export default function AppNavigator() {
 
 const styles = StyleSheet.create({
   tabBar: {
+    position: 'absolute',
+    bottom: 24,
+    alignSelf: 'center',
+    width: TAB_BAR_WIDTH,
     flexDirection: 'row',
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: radius.lg,
-    borderTopRightRadius: radius.lg,
-    borderWidth: 0.5,
-    borderColor: colors.surfaceBorder,
-    height: 82,
-    paddingBottom: 10,
-    paddingTop: 10,
-    paddingHorizontal: 8,
-    ...shadowSm,
+    backgroundColor: colors.bg,
+    borderRadius: 35,
+    borderWidth: 0,
+    height: 70,
+    paddingVertical: 6,
+    paddingHorizontal: 6,
+    shadowColor: colors.shadowDark,
+    shadowOffset: { width: 8, height: 8 },
+    shadowOpacity: 0.35,
+    shadowRadius: 18,
+    elevation: 10,
   },
   indicator: {
     position: 'absolute',
-    height: 54,
-    borderRadius: 27,
-    backgroundColor: '#6C3BFF',
-    shadowColor: '#6C3BFF',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 8,
-    elevation: 8,
-    top: 14,
+    width: TAB_WIDTH - 12,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.bg,
+    top: 7,
+    left: 6,
+    shadowColor: colors.shadowInset,
+    shadowOffset: { width: -2, height: -2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 3,
+    elevation: 2,
+    borderWidth: 0.5,
+    borderColor: 'rgba(0,0,0,0.03)',
   },
   tabButton: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    zIndex: 1,
+  },
+  tabLabel: {
+    fontSize: 10,
+    fontWeight: '600',
+    marginTop: 2,
   },
 });

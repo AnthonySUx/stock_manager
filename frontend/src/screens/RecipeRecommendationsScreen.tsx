@@ -12,6 +12,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { recipesApi } from '../api/recipes';
 import type { RecipeRecommendation, AIRecommendation } from '../types';
 import { neoCard, colors, spacing, radius, shadowMd } from '../theme';
+import { PressableScale } from '../components/NeoComponents';
 import { Ionicons } from '@expo/vector-icons';
 
 type Props = {
@@ -51,11 +52,11 @@ export default function RecipeRecommendationsScreen({ navigation }: Props) {
   };
 
   const renderRuleItem = (item: RecipeRecommendation) => (
-    <TouchableOpacity
+    <PressableScale
       key={item.recipe_id}
-      style={styles.item}
-      activeOpacity={0.85}
+      scaleIn={0.97}
       onPress={() => navigation.navigate('RecipeDetail', { id: item.recipe_id })}
+      style={styles.item}
     >
       <View style={styles.itemHeader}>
         <Text style={styles.itemName} numberOfLines={1}>{item.title}</Text>
@@ -88,19 +89,19 @@ export default function RecipeRecommendationsScreen({ navigation }: Props) {
         )}
         <Text style={styles.sourceLabel}>{item.source_type === 'user' ? '我的' : item.source_type === 'howtocook' ? 'HowToCook' : 'AI'}</Text>
       </View>
-    </TouchableOpacity>
+    </PressableScale>
   );
 
   const renderAiItem = (item: AIRecommendation, idx: number) => (
-    <TouchableOpacity
+    <PressableScale
       key={idx}
       style={styles.item}
-      activeOpacity={0.85}
+      scaleIn={0.96}
       onPress={() => navigation.navigate('RecipeDetail', { id: item.recipe_id })}
     >
       <Text style={styles.itemName}>{item.title}</Text>
       {item.reason && <Text style={styles.reason}>{item.reason}</Text>}
-    </TouchableOpacity>
+    </PressableScale>
   );
 
   return (
@@ -109,17 +110,17 @@ export default function RecipeRecommendationsScreen({ navigation }: Props) {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>{'📊'} 规则推荐</Text>
         <Text style={styles.sectionDesc}>根据你的库存匹配的菜谱推荐</Text>
-        <TouchableOpacity
-          style={[styles.actionBtn, loadingRules && { opacity: 0.6 }]}
-          activeOpacity={0.85}
+        <PressableScale
+          scaleIn={0.96}
           onPress={fetchRules}
           disabled={loadingRules}
+          style={[styles.actionBtn, loadingRules && { opacity: 0.6 }]}
         >
           <Ionicons name="refresh" size={18} color="#ffffff" />
           <Text style={styles.actionBtnText}>
             {loadingRules ? '加载中...' : recommendations.length > 0 ? '刷新推荐' : '获取推荐'}
           </Text>
-        </TouchableOpacity>
+        </PressableScale>
       </View>
 
       {loadingRules ? (
@@ -132,17 +133,17 @@ export default function RecipeRecommendationsScreen({ navigation }: Props) {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>{'🤖'} AI 今日推荐</Text>
         <Text style={styles.sectionDesc}>AI 根据你的库存和偏好智能推荐</Text>
-        <TouchableOpacity
-          style={[styles.actionBtn, { backgroundColor: '#7c3aed' }, loadingAi && { opacity: 0.6 }]}
-          activeOpacity={0.85}
+        <PressableScale
+          scaleIn={0.96}
           onPress={fetchAi}
           disabled={loadingAi}
+          style={[styles.actionBtn, { backgroundColor: '#7c3aed' }, loadingAi && { opacity: 0.6 }]}
         >
           <Ionicons name="sparkles" size={18} color="#ffffff" />
           <Text style={styles.actionBtnText}>
             {loadingAi ? 'AI 思考中...' : showAi ? '重新生成' : '获取 AI 推荐'}
           </Text>
-        </TouchableOpacity>
+        </PressableScale>
       </View>
 
       {loadingAi ? (
@@ -175,17 +176,35 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     marginTop: spacing.md,
     paddingVertical: spacing.md,
-    borderRadius: radius.md,
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.35)',
-    ...shadowMd,
+    borderRadius: radius.full,
+    borderTopWidth: 0.5,
+    borderLeftWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.24)',
+    borderRightWidth: 0,
+    borderBottomWidth: 0,
+    shadowColor: colors.shadowDark,
+    shadowOffset: { width: 4, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
   },
   actionBtnText: { color: colors.white, fontSize: 15, fontWeight: '600' },
   item: {
-    ...neoCard,
     marginHorizontal: spacing.lg - 2,
     marginTop: spacing.md,
     padding: spacing.lg,
+    borderRadius: radius.xxl,
+    backgroundColor: colors.bg,
+    shadowColor: colors.shadowDark2,
+    shadowOffset: { width: 5, height: 5 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 4,
+    borderTopWidth: 0.5,
+    borderLeftWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.36)',
+    borderRightWidth: 0,
+    borderBottomWidth: 0,
   },
   itemHeader: {
     flexDirection: 'row',

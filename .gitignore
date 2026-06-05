@@ -28,3 +28,30 @@ frontend/.expo/
 frontend/dist/
 frontend/web-build/
 frontend/*.tsbuildinfo
+
+
+# Node / frontend deps
+node_modules/
+
+# Local tool cache
+.dirac-symbol-index/
+.agents/
+skills-lock.json
+
+# Expo / React Native cache & build
+frontend/.expo-shared/
+frontend/.cache/
+frontend/.metro-cache/
+frontend/android/
+frontend/ios/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+coverage/
+
+# Logs / temp
+*.log
+*.tmp
+tmp/

@@ -15,6 +15,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import api from '../api/client';
 import type { RestockItem } from '../types';
 import { neoCard, neoInput, colors, spacing, radius, shadowMd } from '../theme';
+import { PressableScale, NeoInsetField } from '../components/NeoComponents';
 import DatePickerField from '../components/DatePickerField';
 
 type Props = {
@@ -77,23 +78,20 @@ export default function DoneRestockScreen({ navigation }: Props) {
 
         <View style={styles.field}>
           <Text style={styles.label}>购买数量 *</Text>
-          <TextInput
-            style={styles.input}
+          <NeoInsetField
             value={purchasedQty}
             onChangeText={setPurchasedQty}
             keyboardType="decimal-pad"
-            placeholderTextColor={colors.textMuted}
+            placeholder="数量"
           />
         </View>
 
         <View style={styles.field}>
           <Text style={styles.label}>所有者</Text>
-          <TextInput
-            style={styles.input}
+          <NeoInsetField
             value={owner}
             onChangeText={setOwner}
             placeholder="谁购买的？"
-            placeholderTextColor={colors.textMuted}
           />
         </View>
 
@@ -107,12 +105,10 @@ export default function DoneRestockScreen({ navigation }: Props) {
 
         <View style={styles.field}>
           <Text style={styles.label}>存放位置</Text>
-          <TextInput
-            style={styles.input}
+          <NeoInsetField
             value={location}
             onChangeText={setLocation}
             placeholder="例如 冰箱"
-            placeholderTextColor={colors.textMuted}
           />
         </View>
 
@@ -141,16 +137,15 @@ export default function DoneRestockScreen({ navigation }: Props) {
           canClear
         />
 
-        <TouchableOpacity
-          style={[styles.doneBtn, saving && styles.doneBtnDisabled]}
-          activeOpacity={0.85}
+        <PressableScale
+          scaleIn={0.96}
           onPress={handleDone}
           disabled={saving}
         >
           <Text style={styles.doneBtnText}>
             {saving ? '处理中...' : '✅ 加入库存并标记完成'}
           </Text>
-        </TouchableOpacity>
+        </PressableScale>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -171,14 +166,21 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   doneBtn: {
-    ...neoCard,
     backgroundColor: '#10b981',
     paddingVertical: spacing.lg - 2,
-    borderRadius: radius.md,
+    borderRadius: radius.full,
     alignItems: 'center',
     marginTop: spacing.sm,
-    borderColor: 'rgba(255,255,255,0.35)',
-    ...shadowMd,
+    borderTopWidth: 0.5,
+    borderLeftWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.24)',
+    borderRightWidth: 0,
+    borderBottomWidth: 0,
+    shadowColor: colors.shadowDark,
+    shadowOffset: { width: 4, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
   },
   doneBtnDisabled: { opacity: 0.6 },
   doneBtnText: { color: colors.white, fontSize: 16, fontWeight: '700' },

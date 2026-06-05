@@ -14,6 +14,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import api from '../api/client';
 import type { RestockItem } from '../types';
 import { neoCard, neoFilterChip, colors, spacing, radius, shadowMd, shadowXl } from '../theme';
+import { PressableScale } from '../components/NeoComponents';
 
 type Props = {
   navigation: NativeStackNavigationProp<any>;
@@ -103,19 +104,20 @@ export default function RestockListScreen({ navigation }: Props) {
       <Text style={styles.itemDetail}>数量: {formatQuantity(item)}</Text>
       {item.status === 'pending' && (
         <View style={styles.itemActions}>
-          <TouchableOpacity
-            style={styles.doneBtn}
-            activeOpacity={0.85}
+          <PressableScale
+            scaleIn={0.96}
             onPress={() => handleDone(item)}
+            style={styles.doneBtn}
           >
             <Text style={styles.doneBtnText}>✅ 完成</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.deleteSmallBtn}
+          </PressableScale>
+          <PressableScale
+            scaleIn={0.92}
             onPress={() => handleDelete(item)}
+            style={styles.deleteSmallBtn}
           >
             <Text style={styles.deleteSmallBtnText}>🗑️</Text>
-          </TouchableOpacity>
+          </PressableScale>
         </View>
       )}
     </View>
@@ -171,13 +173,13 @@ export default function RestockListScreen({ navigation }: Props) {
         />
       )}
 
-      <TouchableOpacity
-        style={styles.fab}
-        activeOpacity={0.85}
+      <PressableScale
+        scaleIn={0.94}
         onPress={() => navigation.navigate('AddRestock')}
+        style={styles.fab}
       >
         <Text style={styles.fabText}>+</Text>
-      </TouchableOpacity>
+      </PressableScale>
     </View>
   );
 }
@@ -195,10 +197,21 @@ const styles = StyleSheet.create({
   filterChipText: { fontSize: 13, color: colors.textSecondary },
   filterChipTextActive: { color: colors.white, fontWeight: '600' },
   item: {
-    ...neoCard,
     marginHorizontal: spacing.lg - 2,
     marginTop: spacing.md,
     padding: spacing.lg,
+    borderRadius: radius.xxl,
+    backgroundColor: colors.bg,
+    shadowColor: colors.shadowDark2,
+    shadowOffset: { width: 5, height: 5 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 4,
+    borderTopWidth: 0.5,
+    borderLeftWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.36)',
+    borderRightWidth: 0,
+    borderBottomWidth: 0,
   },
   statusBadge: {
     paddingHorizontal: spacing.sm + 2,
@@ -225,10 +238,17 @@ const styles = StyleSheet.create({
     backgroundColor: '#10b981',
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
-    borderRadius: radius.sm,
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.35)',
-    ...shadowMd,
+    borderRadius: radius.full,
+    borderTopWidth: 0.5,
+    borderLeftWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.24)',
+    borderRightWidth: 0,
+    borderBottomWidth: 0,
+    shadowColor: colors.shadowDark,
+    shadowOffset: { width: 4, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
   },
   doneBtnText: { color: colors.white, fontWeight: '700', fontSize: 14 },
   deleteSmallBtn: {
@@ -240,16 +260,23 @@ const styles = StyleSheet.create({
   fab: {
     position: 'absolute',
     right: spacing.xl,
-    bottom: spacing.xl,
+    bottom: 110,
     width: 56,
     height: 56,
     borderRadius: 28,
     backgroundColor: colors.accent,
     justifyContent: 'center' as const,
     alignItems: 'center' as const,
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.35)',
-    ...shadowXl,
+    borderTopWidth: 0.5,
+    borderLeftWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.24)',
+    borderRightWidth: 0,
+    borderBottomWidth: 0,
+    shadowColor: colors.shadowDark,
+    shadowOffset: { width: 6, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 7,
   },
   fabText: { fontSize: 28, color: colors.white, lineHeight: 30, marginTop: -1 },
 });

@@ -19,6 +19,7 @@ import type {
   ExploreStructuredPreferences,
 } from '../types';
 import { neoCard, colors, spacing, radius, shadowMd } from '../theme';
+import { PressableScale } from '../components/NeoComponents';
 import { Ionicons } from '@expo/vector-icons';
 
 type Props = {
@@ -118,10 +119,10 @@ export default function RecipeExploreScreen({ navigation }: Props) {
     const missing = idea.missing_ingredients ?? [];
 
     return (
-      <TouchableOpacity
+      <PressableScale
         key={idx}
+        scaleIn={0.97}
         style={styles.ideaCard}
-        activeOpacity={idea.recipe_id ? 0.85 : 1}
         onPress={() => handleIdeaPress(idea)}
       >
         <Text style={styles.ideaTitle}>{idea.title}</Text>
@@ -178,17 +179,17 @@ export default function RecipeExploreScreen({ navigation }: Props) {
             </View>
           )}
           {idea.can_expand_to_recipe && (
-            <TouchableOpacity
-              style={styles.expandBtn}
-              activeOpacity={0.7}
+            <PressableScale
+              scaleIn={0.96}
               onPress={() => handleExpandToDraft(idea)}
+              style={styles.expandBtn}
             >
               <Ionicons name="add-circle-outline" size={14} color="#7c3aed" />
               <Text style={styles.expandBtnText}>扩展为草稿</Text>
-            </TouchableOpacity>
+            </PressableScale>
           )}
         </View>
-      </TouchableOpacity>
+      </PressableScale>
     );
   };
 
@@ -226,11 +227,11 @@ export default function RecipeExploreScreen({ navigation }: Props) {
       {/* Mode Toggle */}
       <View style={styles.modeRow}>
         {MODE_OPTIONS.map((opt) => (
-          <TouchableOpacity
+          <PressableScale
             key={opt.value}
-            style={[styles.modeBtn, mode === opt.value && styles.modeBtnActive]}
-            activeOpacity={0.8}
+            scaleIn={0.96}
             onPress={() => setMode(opt.value)}
+            style={[styles.modeBtn, mode === opt.value && styles.modeBtnActive]}
           >
             <Ionicons
               name={opt.icon}
@@ -240,7 +241,7 @@ export default function RecipeExploreScreen({ navigation }: Props) {
             <Text style={[styles.modeBtnText, mode === opt.value && styles.modeBtnTextActive]}>
               {opt.label}
             </Text>
-          </TouchableOpacity>
+          </PressableScale>
         ))}
       </View>
 
@@ -330,17 +331,17 @@ export default function RecipeExploreScreen({ navigation }: Props) {
       )}
 
       {/* Submit */}
-      <TouchableOpacity
-        style={[styles.submitBtn, loading && { opacity: 0.6 }]}
-        activeOpacity={0.85}
+      <PressableScale
+        scaleIn={0.96}
         onPress={handleExplore}
         disabled={loading}
+        style={[styles.submitBtn, loading && { opacity: 0.6 }]}
       >
         <Ionicons name="sparkles" size={20} color="#ffffff" />
         <Text style={styles.submitBtnText}>
           {loading ? 'AI 思考中...' : '探索菜谱想法'}
         </Text>
-      </TouchableOpacity>
+      </PressableScale>
 
       {/* Results */}
       {renderResults()}
@@ -452,7 +453,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md + 2,
     borderRadius: radius.md,
     borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.35)',
+    borderColor: 'rgba(255,255,255,0.24)',
     ...shadowMd,
   },
   submitBtnText: { color: '#ffffff', fontSize: 16, fontWeight: '700' },

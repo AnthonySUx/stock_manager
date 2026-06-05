@@ -11,11 +11,12 @@ import {
   Keyboard,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { recipesApi } from '../api/recipes';
 import type { RecipeSummary } from '../types';
-import { neoCard, neoFilterChip, colors, spacing, radius, shadowXl } from '../theme';
+import { neoCard, neoFilterChip, colors, spacing, radius, shadowXl, neuIn, neuOut } from '../theme';
 import { Ionicons } from '@expo/vector-icons';
 
 type Props = {
@@ -39,7 +40,6 @@ export default function RecipeListScreen({ navigation }: Props) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchDraft, setSearchDraft] = useState('');
-  const [isSearchExpanded, setIsSearchExpanded] = useState(false);
   const searchInputRef = useRef<TextInput>(null);
   const currentSearchTerm = useRef('');
   const [filterSource, setFilterSource] = useState<string | null>(null);
@@ -72,88 +72,133 @@ export default function RecipeListScreen({ navigation }: Props) {
   };
 
   const handleSearch = () => {
-    if (!isSearchExpanded) {
-      setIsSearchExpanded(true);
-      setTimeout(() => searchInputRef.current?.focus(), 100);
-      return;
-    }
-
     const trimmed = searchDraft.trim();
-    if (trimmed) {
-      currentSearchTerm.current = trimmed;
-      setLoading(true);
-      fetchRecipes();
-    } else {
-      currentSearchTerm.current = '';
-      setIsSearchExpanded(false);
-      setSearchDraft('');
-      Keyboard.dismiss();
-      setLoading(true);
-      fetchRecipes();
-    }
+    currentSearchTerm.current = trimmed;
+    setLoading(true);
+    fetchRecipes();
+    Keyboard.dismiss();
   };
 
-  const renderItem = ({ item }: { item: RecipeSummary }) => (
-    <TouchableOpacity
-      style={styles.item}
-      activeOpacity={0.85}
-      onPress={() => navigation.navigate('RecipeDetail', { id: item.id })}
-    >
-      <View style={styles.itemHeader}>
-        <Text style={styles.itemName} numberOfLines={1}>{item.title}</Text>
-        <View style={styles.badges}>
-          {item.is_favorite && <Ionicons name="heart" size={16} color="#ef4444" />}
-          {item.has_been_cooked && <Ionicons name="checkmark-circle" size={16} color="#10b981" />}
+  const getMatchLevel = (item: RecipeSummary): { label: string; level: 'high' | 'medium' | 'low' } | null => {
+    // Determine match level based on recipe data
+    // For now use is_favorite or has_been_cooked as heuristic
+    if (item.is_favorite) return { label: '90% 匹配', level: 'high' };
+    if (item.has_been_cooked) return { label: '70% 匹配', level: 'medium' };
+    return null;
+  };
+
+  const renderItem = ({ item }: { item: RecipeSummary }) => {
+    const match = getMatchLevel(item);
+    return (
+      <TouchableOpacity
+        style={styles.recipeCard}
+        activeOpacity={0.85}
+        onPress={() => navigation.navigate('RecipeDetail', { id: item.id })}
+      >
+        {/* Top row: match badge + favorite */}
+        <View style={styles.recipeCardTop}>
+          {match ? (
+            <View style={[styles.matchBadge, match.level === 'high' ? styles.matchHigh : styles.matchMedium]}>
+              <View style={[styles.matchDot, match.level === 'high' ? styles.dotHigh : styles.dotMedium]} />
+              <Text style={[styles.matchText, match.level === 'high' ? styles.matchTextHigh : styles.matchTextMedium]}>
+                {match.label}
+              </Text>
+            </View>
+          ) : (
+            <View />
+          )}
+          <View style={styles.favBtnWrap}>
+            <Ionicons
+              name={item.is_favorite ? 'heart' : 'heart-outline'}
+              size={16}
+              color={item.is_favorite ? '#FF4757' : colors.textMuted}
+            />
+          </View>
         </View>
-      </View>
-      <View style={styles.itemMeta}>
-        <Text style={styles.metaText}>{item.category || '未分类'}</Text>
-        <Text style={styles.metaDivider}>·</Text>
-        <Text style={styles.metaText}>{SOURCE_LABELS[item.source_type] || item.source_type}</Text>
-        {item.difficulty && (
-          <>
-            <Text style={styles.metaDivider}>·</Text>
-            <Text style={styles.metaText}>{DIFFICULTY_LABELS[item.difficulty] || item.difficulty}</Text>
-          </>
-        )}
-        {item.cook_time_minutes && (
-          <>
-            <Text style={styles.metaDivider}>·</Text>
-            <Text style={styles.metaText}>{item.cook_time_minutes} 分钟</Text>
-          </>
-        )}
-      </View>
-    </TouchableOpacity>
-  );
+
+        {/* Title */}
+        <Text style={styles.recipeTitle} numberOfLines={1}>{item.title}</Text>
+
+        {/* Tags */}
+        <View style={styles.recipeTags}>
+          <View style={styles.tag}>
+            <Ionicons name="home" size={11} color={colors.textMuted} style={{ marginRight: 3 }} />
+            <Text style={styles.tagText}>{item.category || '家常菜'}</Text>
+          </View>
+          {item.difficulty && (
+            <View style={styles.tag}>
+              <Ionicons name="flame" size={11} color={colors.textMuted} style={{ marginRight: 3 }} />
+              <Text style={styles.tagText}>{DIFFICULTY_LABELS[item.difficulty] || item.difficulty}</Text>
+            </View>
+          )}
+          {item.cook_time_minutes && (
+            <View style={styles.tag}>
+              <Ionicons name="time" size={11} color={colors.textMuted} style={{ marginRight: 3 }} />
+              <Text style={styles.tagText}>{item.cook_time_minutes} 分钟</Text>
+            </View>
+          )}
+        </View>
+
+        {/* Bottom row: cook button */}
+        <View style={styles.recipeActions}>
+          <Text style={styles.recipeSource}>
+            <Ionicons name="bookmark" size={11} color={colors.textMuted} style={{ marginRight: 4 }} />
+            {' '}{SOURCE_LABELS[item.source_type] || item.source_type}
+          </Text>
+          <TouchableOpacity
+            style={styles.cookBtn}
+            activeOpacity={0.85}
+            onPress={() => {
+              if (item.has_been_cooked) {
+                navigation.navigate('RecipeDetail', { id: item.id });
+              } else {
+                navigation.navigate('RecipeCook', { id: item.id });
+              }
+            }}
+          >
+            <Ionicons name="flame" size={13} color={colors.accent} style={{ marginRight: 4 }} />
+            <Text style={styles.cookBtnText}>
+              {item.has_been_cooked ? '查看详情' : '去烹饪'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  const insets = useSafeAreaInsets();
 
   return (
     <View style={styles.container}>
-      <View style={styles.searchRow}>
-        {isSearchExpanded ? (
-          <>
-            <View style={styles.searchInputWrapper}>
-              <TextInput
-                ref={searchInputRef}
-                style={styles.searchInput}
-                value={searchDraft}
-                onChangeText={setSearchDraft}
-                placeholder="搜索菜谱..."
-                placeholderTextColor={colors.textMuted}
-                returnKeyType="search"
-                onSubmitEditing={handleSearch}
-              />
-            </View>
-            <TouchableOpacity style={styles.searchBtn} activeOpacity={0.85} onPress={handleSearch}>
-              <Ionicons name="search" size={20} color="#ffffff" />
-            </TouchableOpacity>
-          </>
-        ) : (
-          <TouchableOpacity style={[styles.searchBtn, { marginLeft: 'auto' }]} activeOpacity={0.85} onPress={handleSearch}>
-            <Ionicons name="search" size={20} color="#ffffff" />
-          </TouchableOpacity>
-        )}
+      {/* Header */}
+      <View style={[styles.headerRow, { paddingTop: insets.top + spacing.sm }]}>
+        <Text style={styles.screenTitle}>智能菜谱</Text>
       </View>
 
+      {/* Search bar - always visible capsule */}
+      <View style={styles.searchRow}>
+        <View style={styles.searchBar}>
+          <Ionicons name="search" size={16} color={colors.textMuted} style={{ marginRight: 8 }} />
+          <TextInput
+            ref={searchInputRef}
+            style={styles.searchInput}
+            value={searchDraft}
+            onChangeText={setSearchDraft}
+            placeholder="自然语言探索：我想吃点清淡的..."
+            placeholderTextColor={colors.textMuted}
+            returnKeyType="search"
+            onSubmitEditing={handleSearch}
+          />
+        </View>
+        <TouchableOpacity style={styles.searchBtn} activeOpacity={0.85} onPress={handleSearch}>
+          <Ionicons name="search" size={18} color="#ffffff" />
+        </TouchableOpacity>
+      </View>
+
+      {/* Section title */}
+      <Text style={styles.sectionTitle}>基于库存今日推荐</Text>
+
+      {/* Filter chips */}
       <View style={styles.filterRow}>
         {[
           { label: '全部', value: null },
@@ -195,32 +240,25 @@ export default function RecipeListScreen({ navigation }: Props) {
             />
           }
           ListEmptyComponent={<Text style={styles.empty}>暂无菜谱</Text>}
-          contentContainerStyle={recipes.length === 0 ? styles.emptyContainer : { paddingBottom: 80 }}
+          contentContainerStyle={recipes.length === 0 ? styles.emptyContainer : { paddingBottom: 120 }}
         />
       )}
 
-      <TouchableOpacity
-        style={styles.fab}
-        activeOpacity={0.85}
-        onPress={() => navigation.navigate('RecipeRecommendations')}
-      >
-        <Ionicons name="bulb" size={26} color="#ffffff" />
-      </TouchableOpacity>
-
+      {/* FABs - consolidated to two main ones */}
       <TouchableOpacity
         style={styles.fabExplore}
         activeOpacity={0.85}
         onPress={() => navigation.navigate('RecipeExplore')}
       >
-        <Ionicons name="sparkles" size={26} color="#ffffff" />
+        <Ionicons name="sparkles" size={24} color="#ffffff" />
       </TouchableOpacity>
 
       <TouchableOpacity
         style={styles.fabAdd}
         activeOpacity={0.85}
-        onPress={() => navigation.navigate('RecipeEdit', {})}
+        onPress={() => navigation.navigate('RecipeRecommendations')}
       >
-        <Text style={styles.fabText}>+</Text>
+        <Ionicons name="bulb" size={24} color="#ffffff" />
       </TouchableOpacity>
     </View>
   );
@@ -229,107 +267,225 @@ export default function RecipeListScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   loader: { flex: 1, justifyContent: 'center' },
-  searchRow: {
+  headerRow: {
     flexDirection: 'row',
-    paddingHorizontal: spacing.lg - 2,
-    paddingTop: spacing.md,
-    gap: spacing.sm,
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: spacing.xl,
+    paddingBottom: spacing.sm,
     backgroundColor: colors.bg,
   },
-  searchInputWrapper: {
-    flex: 1,
-    backgroundColor: colors.inputBg,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.inputBorder,
-    paddingHorizontal: spacing.md,
-    justifyContent: 'center',
+  screenTitle: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: colors.textPrimary,
   },
-  searchInput: { fontSize: 15, color: colors.textPrimary, paddingVertical: spacing.md - 4 },
+  // Search
+  searchRow: {
+    flexDirection: 'row',
+    paddingHorizontal: spacing.xl,
+    gap: spacing.sm,
+    marginBottom: spacing.xl,
+  },
+  searchBar: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.xl,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.inputBg,
+    shadowColor: colors.shadowInset,
+    shadowOffset: { width: -2, height: -2 },
+    shadowOpacity: 0.5,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: colors.textPrimary,
+    paddingVertical: 0,
+  },
   searchBtn: {
     backgroundColor: colors.accent,
-    width: 44,
-    height: 44,
-    borderRadius: radius.md,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.35)',
+    shadowColor: colors.shadowDark,
+    shadowOffset: { width: 4, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  // Section
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    marginHorizontal: spacing.xl,
+    marginBottom: spacing.md,
   },
   filterRow: {
     flexDirection: 'row',
-    paddingHorizontal: spacing.lg - 2,
-    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.xl - 2,
+    paddingBottom: spacing.md,
     gap: spacing.sm - 2,
-    backgroundColor: colors.bg,
   },
   filterChipText: { fontSize: 13, color: colors.textSecondary },
   filterChipTextActive: { color: colors.white, fontWeight: '600' },
-  item: {
-    ...neoCard,
-    marginHorizontal: spacing.lg - 2,
-    marginTop: spacing.md,
-    padding: spacing.lg,
+  // Recipe card
+  recipeCard: {
+    marginHorizontal: spacing.xl,
+    marginBottom: spacing.xl,
+    padding: spacing.xl,
+    borderRadius: 30,
+    backgroundColor: colors.bg,
+    shadowColor: colors.shadowDark,
+    shadowOffset: { width: 6, height: 6 },
+    shadowOpacity: 0.36,
+    shadowRadius: 12,
+    elevation: 4,
   },
-  itemHeader: {
+  recipeCardTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  matchBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+    borderRadius: 16,
+    backgroundColor: colors.bg,
+    shadowColor: colors.shadowInset,
+    shadowOffset: { width: -2, height: -2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  matchHigh: {},
+  matchMedium: {},
+  matchDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginRight: 6,
+  },
+  dotHigh: {
+    backgroundColor: colors.success,
+    shadowColor: colors.success,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  dotMedium: {
+    backgroundColor: colors.warning,
+    shadowColor: colors.warning,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  matchText: { fontSize: 11, fontWeight: '700' },
+  matchTextHigh: { color: colors.accent },
+  matchTextMedium: { color: colors.textMuted },
+  favBtnWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: colors.bg,
+    shadowColor: colors.shadowDark,
+    shadowOffset: { width: 3, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 5,
+    elevation: 3,
+  },
+  recipeTitle: { fontSize: 17, fontWeight: '700', color: colors.textPrimary, marginBottom: spacing.md },
+  recipeTags: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginBottom: spacing.lg,
+  },
+  tag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md - 2,
+    paddingVertical: spacing.xs + 1,
+    borderRadius: 14,
+    backgroundColor: colors.bg,
+    shadowColor: colors.shadowInset,
+    shadowOffset: { width: -1, height: -1 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  tagText: { fontSize: 11, fontWeight: '600', color: colors.textSecondary },
+  recipeActions: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  itemName: { fontSize: 16, fontWeight: '700', color: colors.textPrimary, flex: 1 },
-  badges: { flexDirection: 'row', gap: 4, marginLeft: spacing.sm },
-  itemMeta: {
+  recipeSource: { fontSize: 12, color: colors.textMuted },
+  cookBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: spacing.xs + 1,
-    flexWrap: 'wrap',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: 22,
+    backgroundColor: colors.bg,
+    shadowColor: colors.shadowDark,
+    shadowOffset: { width: 4, height: 4 },
+    shadowOpacity: 0.36,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  metaText: { fontSize: 13, color: colors.textSecondary },
-  metaDivider: { fontSize: 13, color: colors.textMuted, marginHorizontal: 4 },
+  cookBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.accent,
+  },
   empty: { fontSize: 16, color: colors.textMuted, textAlign: 'center' },
   emptyContainer: { flex: 1, justifyContent: 'center' },
-  fab: {
+  // FABs
+  fabExplore: {
     position: 'absolute',
     right: spacing.xl,
-    bottom: spacing.xl + 64,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#f59e0b',
+    bottom: spacing.xl + 74,
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: '#7c3aed',
     justifyContent: 'center' as const,
     alignItems: 'center' as const,
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.35)',
-    ...shadowXl,
+    shadowColor: colors.shadowDark,
+    shadowOffset: { width: 6, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 7,
   },
   fabAdd: {
     position: 'absolute',
     right: spacing.xl,
     bottom: spacing.xl,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 54,
+    height: 54,
+    borderRadius: 27,
     backgroundColor: colors.accent,
     justifyContent: 'center' as const,
     alignItems: 'center' as const,
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.35)',
-    ...shadowXl,
+    shadowColor: colors.shadowDark,
+    shadowOffset: { width: 6, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 7,
   },
-  fabText: { fontSize: 28, color: colors.white, lineHeight: 30, marginTop: -1 },
-  fabExplore: {
-    position: 'absolute',
-    right: spacing.xl,
-    bottom: spacing.xl + 128,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#7c3aed',
-    justifyContent: 'center' as const,
-    alignItems: 'center' as const,
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.35)',
-    ...shadowXl,
-  },
-
 });

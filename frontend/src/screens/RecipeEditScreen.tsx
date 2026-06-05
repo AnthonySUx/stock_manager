@@ -14,6 +14,7 @@ import { useRoute, usePreventRemove } from '@react-navigation/native';
 import { recipesApi } from '../api/recipes';
 import type { RecipeResponse } from '../types';
 import { neoCard, neoInput, colors, spacing, radius, shadowMd, shadowXs } from '../theme';
+import { PressableScale, NeoInsetField } from '../components/NeoComponents';
 import { Ionicons } from '@expo/vector-icons';
 
 type Props = {
@@ -315,7 +316,7 @@ export default function RecipeEditScreen({ navigation }: Props) {
         <Text style={styles.label}>难度</Text>
         <View style={styles.chipRow}>
           {['easy', 'medium', 'hard'].map((v) => (
-            <TouchableOpacity
+            <PressableScale
               key={v}
               style={[
                 styles.chip,
@@ -326,7 +327,7 @@ export default function RecipeEditScreen({ navigation }: Props) {
               <Text style={[styles.chipText, difficulty === v && { color: colors.white }]}>
                 {v === 'easy' ? '简单' : v === 'medium' ? '中等' : '困难'}
               </Text>
-            </TouchableOpacity>
+            </PressableScale>
           ))}
         </View>
 
@@ -354,9 +355,9 @@ export default function RecipeEditScreen({ navigation }: Props) {
       <View style={styles.card}>
         <View style={styles.cardHeader}>
           <Text style={styles.cardTitle}>食材</Text>
-          <TouchableOpacity onPress={addIngredient} style={styles.addBtn}>
+          <PressableScale onPress={addIngredient} style={styles.addBtn}>
             <Ionicons name="add-circle" size={24} color={colors.accent} />
-          </TouchableOpacity>
+          </PressableScale>
         </View>
         {ingredients.map((ing, idx) => (
           <View key={idx} style={styles.listItemRow}>
@@ -383,9 +384,9 @@ export default function RecipeEditScreen({ navigation }: Props) {
                 placeholderTextColor={colors.textMuted}
               />
             </View>
-            <TouchableOpacity onPress={() => removeIngredient(idx)} style={styles.removeBtn}>
+            <PressableScale onPress={() => removeIngredient(idx)} style={styles.removeBtn}>
               <Ionicons name="close-circle" size={22} color={colors.danger} />
-            </TouchableOpacity>
+            </PressableScale>
           </View>
         ))}
       </View>
@@ -394,9 +395,9 @@ export default function RecipeEditScreen({ navigation }: Props) {
       <View style={styles.card}>
         <View style={styles.cardHeader}>
           <Text style={styles.cardTitle}>步骤</Text>
-          <TouchableOpacity onPress={addStep} style={styles.addBtn}>
+          <PressableScale onPress={addStep} style={styles.addBtn}>
             <Ionicons name="add-circle" size={24} color={colors.accent} />
-          </TouchableOpacity>
+          </PressableScale>
         </View>
         {steps.map((step, idx) => (
           <View key={idx} style={styles.listItemRow}>
@@ -411,22 +412,22 @@ export default function RecipeEditScreen({ navigation }: Props) {
               placeholderTextColor={colors.textMuted}
               multiline
             />
-            <TouchableOpacity onPress={() => removeStep(idx)} style={styles.removeBtn}>
+            <PressableScale onPress={() => removeStep(idx)} style={styles.removeBtn}>
               <Ionicons name="close-circle" size={22} color={colors.danger} />
-            </TouchableOpacity>
+            </PressableScale>
           </View>
         ))}
       </View>
 
       {/* Save */}
-      <TouchableOpacity
+      <PressableScale
         style={[styles.saveBtn, saving && { opacity: 0.6 }]}
-        activeOpacity={0.85}
+        scaleIn={0.96}
         onPress={handleSave}
         disabled={saving}
       >
         <Text style={styles.saveBtnText}>{saving ? '保存中...' : isEditing ? '更新菜谱' : '创建菜谱'}</Text>
-      </TouchableOpacity>
+      </PressableScale>
 
       <View style={{ height: 40 }} />
     </ScrollView>
@@ -502,7 +503,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     alignItems: 'center',
     borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.35)',
+    borderColor: 'rgba(255,255,255,0.24)',
     ...shadowMd,
   },
   saveBtnText: { color: colors.white, fontSize: 16, fontWeight: '700' },

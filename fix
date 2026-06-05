@@ -1,0 +1,20 @@
+const fs = require('fs');
+const BASE = '/Users/hukeer/Documents/stock_manager/frontend/src/screens';
+
+// Fix RecipeEditScreen
+let c = fs.readFileSync(BASE + '/RecipeEditScreen.tsx', 'utf-8');
+c = c.replace(
+  "import { neoCard, neoInput, colors, spacing, radius, shadowMd, shadowXs } from '../theme';",
+  "import { neoCard, neoInput, colors, spacing, radius, shadowMd, shadowXs } from '../theme';\nimport { PressableScale, NeoInsetField } from '../components/NeoComponents';"
+);
+fs.writeFileSync(BASE + '/RecipeEditScreen.tsx', c, 'utf-8');
+console.log('OK: RecipeEditScreen');
+
+// Fix RecipeExploreScreen
+c = fs.readFileSync(BASE + '/RecipeExploreScreen.tsx', 'utf-8');
+c = c.replace(
+  "import { neoCard, neoInput, neoFilterChip, colors, spacing, radius, shadowMd } from '../theme';",
+  "import { neoCard, neoInput, neoFilterChip, colors, spacing, radius, shadowMd } from '../theme';\nimport { PressableScale } from '../components/NeoComponents';"
+);
+fs.writeFileSync(BASE + '/RecipeExploreScreen.tsx', c, 'utf-8');
+console.log('OK: RecipeExploreScreen');

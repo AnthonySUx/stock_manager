@@ -269,7 +269,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     alignItems: 'center',
     marginTop: spacing.sm,
-    borderColor: 'rgba(255,255,255,0.35)',
+    borderColor: 'rgba(255,255,255,0.24)',
     ...shadowMd,
   },
   saveBtnDisabled: { opacity: 0.6 },

@@ -14,6 +14,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import api from '../api/client';
 import type { Item } from '../types';
 import { neoCard, colors, spacing, radius } from '../theme';
+import { PressableScale } from '../components/NeoComponents';
 
 type Props = {
   navigation: NativeStackNavigationProp<any>;
@@ -55,10 +56,10 @@ export default function RemindersScreen({ navigation }: Props) {
     const label = isExpired ? '已过期' : '即将过期';
 
     return (
-      <TouchableOpacity
-        style={[styles.item, { backgroundColor: bgColor, borderLeftColor: borderColor }]}
-        activeOpacity={0.85}
+      <PressableScale
+        scaleIn={0.97}
         onPress={() => navigation.navigate('ItemDetail', { id: item.id })}
+        style={[styles.item, { backgroundColor: bgColor, borderLeftColor: borderColor }]}
       >
         <View style={styles.itemHeader}>
           <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
@@ -84,7 +85,7 @@ export default function RemindersScreen({ navigation }: Props) {
         <Text style={styles.itemDetail}>
           {item.location} · {item.quantity_value} {item.quantity_unit}
         </Text>
-      </TouchableOpacity>
+      </PressableScale>
     );
   };
 

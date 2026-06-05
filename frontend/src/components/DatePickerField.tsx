@@ -140,7 +140,6 @@ export default function DatePickerField({
                 display="default"
                 onChange={handleDateChange}
               />
-              {/* Android picker auto-dismisses; show action buttons separately */}
               <View style={styles.actionRow}>
                 {(canClear || value) && (
                   <TouchableOpacity onPress={handleClear} style={styles.actionBtn}>
@@ -237,7 +236,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.full,
     backgroundColor: colors.accent,
     borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.35)',
+    borderColor: 'rgba(255,255,255,0.24)',
   },
   doneBtnText: {
     fontSize: 14,

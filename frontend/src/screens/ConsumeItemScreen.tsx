@@ -153,7 +153,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: spacing.xl,
     borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.35)',
+    borderColor: 'rgba(255,255,255,0.24)',
     ...shadowMd,
   },
   consumeBtnDisabled: { opacity: 0.6 },

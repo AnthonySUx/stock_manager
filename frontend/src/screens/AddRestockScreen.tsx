@@ -13,6 +13,7 @@ import {
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import api from '../api/client';
 import { neoCard, neoInput, colors, spacing, radius, shadowMd } from '../theme';
+import { PressableScale, NeoInsetField } from '../components/NeoComponents';
 
 type Props = {
   navigation: NativeStackNavigationProp<any>;
@@ -61,72 +62,62 @@ export default function AddRestockScreen({ navigation }: Props) {
 
         <View style={styles.field}>
           <Text style={styles.label}>名称 *</Text>
-          <TextInput
-            style={styles.input}
+          <NeoInsetField
             value={name}
             onChangeText={setName}
             placeholder="物品名称"
-            placeholderTextColor={colors.textMuted}
           />
         </View>
 
         <View style={styles.field}>
           <Text style={styles.label}>分类</Text>
-          <TextInput
-            style={styles.input}
+          <NeoInsetField
             value={category}
             onChangeText={setCategory}
             placeholder="例如 蔬菜、肉类"
-            placeholderTextColor={colors.textMuted}
           />
         </View>
 
         <View style={styles.fieldRow}>
           <View style={[styles.field, { flex: 1 }]}>
             <Text style={styles.label}>数量</Text>
-            <TextInput
-              style={styles.input}
+            <NeoInsetField
               value={quantityValue}
               onChangeText={setQuantityValue}
               keyboardType="decimal-pad"
               placeholder="例如 1"
-              placeholderTextColor={colors.textMuted}
             />
           </View>
           <View style={[styles.field, { flex: 1, marginLeft: spacing.sm }]}>
             <Text style={styles.label}>单位</Text>
-            <TextInput
-              style={styles.input}
+            <NeoInsetField
               value={quantityUnit}
               onChangeText={setQuantityUnit}
               placeholder="例如 千克、个"
-              placeholderTextColor={colors.textMuted}
             />
           </View>
         </View>
 
         <View style={styles.field}>
           <Text style={styles.label}>备注</Text>
-          <TextInput
-            style={[styles.input, styles.multiline]}
+          <NeoInsetField
             value={notes}
             onChangeText={setNotes}
             placeholder="可选备注"
-            placeholderTextColor={colors.textMuted}
             multiline
+            numberOfLines={2}
           />
         </View>
 
-        <TouchableOpacity
-          style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
-          activeOpacity={0.85}
+        <PressableScale
+          scaleIn={0.96}
           onPress={handleSave}
           disabled={saving}
         >
           <Text style={styles.saveBtnText}>
             {saving ? '保存中...' : '加入补货清单'}
           </Text>
-        </TouchableOpacity>
+        </PressableScale>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -148,14 +139,21 @@ const styles = StyleSheet.create({
   },
   multiline: { minHeight: 60, textAlignVertical: 'top' },
   saveBtn: {
-    ...neoCard,
     backgroundColor: colors.accent,
     paddingVertical: spacing.lg - 2,
-    borderRadius: radius.md,
+    borderRadius: radius.full,
     alignItems: 'center',
     marginTop: spacing.sm,
-    borderColor: 'rgba(255,255,255,0.35)',
-    ...shadowMd,
+    borderTopWidth: 0.5,
+    borderLeftWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.24)',
+    borderRightWidth: 0,
+    borderBottomWidth: 0,
+    shadowColor: colors.shadowDark,
+    shadowOffset: { width: 4, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
   },
   saveBtnDisabled: { opacity: 0.6 },
   saveBtnText: { color: colors.white, fontSize: 16, fontWeight: '700' },
