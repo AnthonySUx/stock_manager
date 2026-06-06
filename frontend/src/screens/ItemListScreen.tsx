@@ -1,5 +1,8 @@
-import React, { useCallback, useState, useEffect, useRef } from 'react';
+import React, { useCallback, useState, useEffect, useRef, useMemo } from 'react';
 import {
+    Animated,
+    Dimensions,
+    PanResponder,
     ActivityIndicator,
     Alert,
     FlatList,
@@ -19,7 +22,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import api from '../api/client';
 import type { Item } from '../types';
 import { colors, spacing, radius, status } from '../theme';
-import { NeuOut, NeuIn, PressableScale } from '../components/NeoComponents';
+import { NeuOut, NeuIn, PressableScale, NeuIconBtn } from '../components/NeoComponents';
 import { Ionicons } from '@expo/vector-icons';
 
 type Props = {
@@ -57,13 +60,7 @@ export default function ItemListScreen({ navigation }: Props) {
     const route = useRoute<any>();
     const [scene, setScene] = useState<string>('全部');
 
-    useEffect(() => {
-        const newScene = route.params?.selectedScene;
-        if (newScene && newScene !== scene) {
-            setScene(newScene);
-        }
-    }, [route.params?.selectedScene, scene]);
-
+    // Removed: scene is now updated via onSelectScene callback, no need for route.params sync
     const fetchItems = useCallback(async () => {
         try {
             const res = await api.get('/items');
@@ -189,13 +186,193 @@ export default function ItemListScreen({ navigation }: Props) {
 
     const insets = useSafeAreaInsets();
 
+
+    // === Draggable FAB — Magnetic Snap-to-Edge ===
+    const fabSize = 62;
+    const fabPadding = spacing.xl;
+    const bottomReserve = 122;
+    const headerReserve = 80;
+
+    const insetsRef = useRef(insets);
+    insetsRef.current = insets;
+
+    const getDefaultX = () => Dimensions.get('window').width - fabPadding - fabSize;
+    const getDefaultY = () => Dimensions.get('window').height - bottomReserve - fabSize;
+
+    // Animated values for rendering
+    const posX = useRef(new Animated.Value(getDefaultX())).current;
+    const posY = useRef(new Animated.Value(getDefaultY())).current;
+
+    const isDragging = useRef(false);
+    const dragStartX = useRef(0);
+    const dragStartY = useRef(0);
+
+    const getBounds = useCallback(() => {
+        const { width: winW, height: winH } = Dimensions.get('window');
+        const { top, bottom } = insetsRef.current;
+        return {
+            minX: fabPadding,
+            maxX: winW - fabPadding - fabSize,
+            minY: top + headerReserve,
+            maxY: winH - bottom - bottomReserve - fabSize,
+        };
+    }, []);
+
+    const clampPoint = useCallback((x: number, y: number) => {
+        const b = getBounds();
+        return {
+            x: Math.min(Math.max(x, b.minX), b.maxX),
+            y: Math.min(Math.max(y, b.minY), b.maxY),
+        };
+    }, []);
+
+    const panResponder = useRef(PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dx) > 3 || Math.abs(g.dy) > 3,
+        onPanResponderGrant: () => {
+            isDragging.current = false;
+            // Cancel any ongoing snap animation and capture current position
+            posX.stopAnimation((v) => { dragStartX.current = v; });
+            posY.stopAnimation((v) => { dragStartY.current = v; });
+        },
+        onPanResponderMove: (_, gesture) => {
+            if (Math.abs(gesture.dx) > 5 || Math.abs(gesture.dy) > 5) {
+                isDragging.current = true;
+            }
+            // Use grant-time position + cumulative gesture delta (NOT _value + dx)
+            const clamped = clampPoint(dragStartX.current + gesture.dx, dragStartY.current + gesture.dy);
+            posX.setValue(clamped.x);
+            posY.setValue(clamped.y);
+        },
+        onPanResponderRelease: (_, gesture) => {
+            if (!isDragging.current) {
+                // Tap — navigate
+                navigation.navigate('AddItem');
+                return;
+            }
+            const releaseX = dragStartX.current + gesture.dx;
+            const releaseY = dragStartY.current + gesture.dy;
+
+            // Clamp current visual position to bounds
+            const rx = clampPoint(releaseX, releaseY).x;
+            const ry = clampPoint(releaseX, releaseY).y;
+
+            // Calculate inertia direction & distance from velocity (or displacement)
+            const speed = Math.sqrt(gesture.vx * gesture.vx + gesture.vy * gesture.vy);
+            const dist = Math.sqrt(gesture.dx * gesture.dx + gesture.dy * gesture.dy);
+
+            let dirX: number, dirY: number;
+            let inertiaDist: number;
+
+            if (speed > 0.1) {
+                inertiaDist = Math.min(speed * 100, 160);
+                dirX = gesture.vx / speed;
+                dirY = gesture.vy / speed;
+            } else if (dist > 10) {
+                inertiaDist = Math.min(dist * 0.5, 100);
+                dirX = gesture.dx / dist;
+                dirY = gesture.dy / dist;
+            } else {
+                dirX = 0;
+                dirY = 0;
+                inertiaDist = 0;
+            }
+
+            let targetX: number;
+            let targetY: number;
+            const b = getBounds();
+
+            if (dirX === 0 && dirY === 0) {
+                // No direction — snap to nearest edge
+                const dL = rx - b.minX;
+                const dR = b.maxX - rx;
+                const dT = ry - b.minY;
+                const dB = b.maxY - ry;
+                const minD = Math.min(dL, dR, dT, dB);
+                if (minD === dL) { targetX = b.minX; targetY = ry; }
+                else if (minD === dR) { targetX = b.maxX; targetY = ry; }
+                else if (minD === dT) { targetX = rx; targetY = b.minY; }
+                else { targetX = rx; targetY = b.maxY; }
+            } else {
+                // Project endpoint along direction
+                const px = rx + dirX * inertiaDist;
+                const py = ry + dirY * inertiaDist;
+
+                // Raycast: find first boundary intersection along direction
+                let bestT = Infinity;
+                let hitX = px;
+                let hitY = py;
+
+                // Left edge
+                if (dirX < 0) {
+                    const t = (b.minX - rx) / dirX;
+                    const y = ry + t * dirY;
+                    const d = Math.sqrt((b.minX - rx) ** 2 + (y - ry) ** 2);
+                    if (t > 0 && d <= inertiaDist && y >= b.minY && y <= b.maxY && t < bestT) {
+                        bestT = t; hitX = b.minX; hitY = y;
+                    }
+                }
+                // Right edge
+                if (dirX > 0) {
+                    const t = (b.maxX - rx) / dirX;
+                    const y = ry + t * dirY;
+                    const d = Math.sqrt((b.maxX - rx) ** 2 + (y - ry) ** 2);
+                    if (t > 0 && d <= inertiaDist && y >= b.minY && y <= b.maxY && t < bestT) {
+                        bestT = t; hitX = b.maxX; hitY = y;
+                    }
+                }
+                // Top edge
+                if (dirY < 0) {
+                    const t = (b.minY - ry) / dirY;
+                    const x = rx + t * dirX;
+                    const d = Math.sqrt((x - rx) ** 2 + (b.minY - ry) ** 2);
+                    if (t > 0 && d <= inertiaDist && x >= b.minX && x <= b.maxX && t < bestT) {
+                        bestT = t; hitX = x; hitY = b.minY;
+                    }
+                }
+                // Bottom edge
+                if (dirY > 0) {
+                    const t = (b.maxY - ry) / dirY;
+                    const x = rx + t * dirX;
+                    const d = Math.sqrt((x - rx) ** 2 + (b.maxY - ry) ** 2);
+                    if (t > 0 && d <= inertiaDist && x >= b.minX && x <= b.maxX && t < bestT) {
+                        bestT = t; hitX = x; hitY = b.maxY;
+                    }
+                }
+
+                // If ray hit a boundary, use intersection; otherwise use projected point clamped
+                if (bestT < Infinity) {
+                    targetX = hitX;
+                    targetY = hitY;
+                } else {
+                    targetX = Math.min(Math.max(px, b.minX), b.maxX);
+                    targetY = Math.min(Math.max(py, b.minY), b.maxY);
+                }
+            }
+
+            // Smooth XY animation along the glide path
+            Animated.parallel([
+                Animated.timing(posX, {
+                    toValue: targetX,
+                    duration: 200,
+                    useNativeDriver: false,
+                }),
+                Animated.timing(posY, {
+                    toValue: targetY,
+                    duration: 200,
+                    useNativeDriver: false,
+                }),
+            ]).start();
+        },
+    })).current;
+
     return (
         <View style={styles.container}>
             {/* Header */}
             <View style={[styles.headerArea, { paddingTop: insets.top + spacing.sm }]}>
                 <View style={styles.headerTopRow}>
                     <PressableScale
-                        onPress={() => navigation.navigate('SceneSelect', { currentScene: scene })}
+                        onPress={() => navigation.navigate('SceneSelect', { currentScene: scene, onSelectScene: (s: string) => setScene(s) })}
                         scaleIn={0.95}
                     >
                         <View style={styles.sceneBtn}>
@@ -208,9 +385,9 @@ export default function ItemListScreen({ navigation }: Props) {
                         onPress={() => navigation.navigate('RestockList')}
                         scaleIn={0.92}
                     >
-                        <View style={styles.headerRightBtn}>
+                        <NeuIconBtn size={52} backgroundColor={colors.accentBg}>
                             <Ionicons name="list-outline" size={27} color={colors.accent} />
-                        </View>
+                        </NeuIconBtn>
                     </PressableScale>
                 </View>
                 <Text style={styles.screenTitle}>库存管理</Text>
@@ -324,14 +501,16 @@ export default function ItemListScreen({ navigation }: Props) {
                 />
             )}
 
-            {/* FAB */}
-            <TouchableOpacity
-                style={styles.fab}
-                activeOpacity={0.85}
-                onPress={() => navigation.navigate('AddItem')}
+            {/* FAB - Draggable Magnetic Snap */}
+            <Animated.View
+                style={[
+                    styles.fab,
+                    { left: posX, top: posY },
+                ]}
+                {...panResponder.panHandlers}
             >
                 <Ionicons name="add" size={30} color="#ffffff" />
-            </TouchableOpacity>
+            </Animated.View>
         </View >
     );
 }
@@ -362,16 +541,6 @@ const styles = StyleSheet.create({
         backgroundColor: colors.accentBg,
         justifyContent: 'center',
         alignItems: 'center',
-        shadowColor: colors.shadowDark,
-        shadowOffset: { width: 5, height: 5 },
-        shadowOpacity: 0.40,
-        shadowRadius: 14,
-        elevation: 6,
-        borderTopWidth: 0.5,
-        borderLeftWidth: 0.5,
-        borderRightWidth: 0,
-        borderBottomWidth: 0,
-        borderColor: 'rgba(255,255,255,0.55)',
     },
     sceneBtn: {
         flexDirection: 'row',
@@ -510,8 +679,6 @@ const styles = StyleSheet.create({
     // FAB
     fab: {
         position: 'absolute',
-        right: spacing.xl,
-        bottom: 122,
         width: 62,
         height: 62,
         borderRadius: 31,
@@ -525,5 +692,6 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.6,
         shadowRadius: 12,
         elevation: 8,
+        zIndex: 999,
     },
 });

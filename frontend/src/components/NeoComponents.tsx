@@ -423,3 +423,117 @@ export function NeuIn({
         </View>
     );
 }
+
+// ─── NeuIconBtn ──────────────────────────────────────────
+// Skia-based dual-tone outset shadow for circular icon buttons.
+// Canvas extends beyond bounds so the shadow is visible.
+
+const ICON_SHADOW_EXTRA = 40;
+
+interface NeuIconBtnProps {
+    children: React.ReactNode;
+    size?: number;
+    style?: StyleProp<ViewStyle>;
+    backgroundColor?: string;
+}
+
+export function NeuIconBtn({
+    children,
+    size = 52,
+    style,
+    backgroundColor = colors.accentBg,
+}: NeuIconBtnProps) {
+    const [layout, setLayout] = useState({ width: 0, height: 0 });
+    const s = ICON_SHADOW_EXTRA;
+
+    return (
+        <View
+            style={[
+                {
+                    width: size,
+                    height: size,
+                    borderRadius: size / 2,
+                    position: 'relative',
+                },
+                style,
+            ]}
+            onLayout={(e) => {
+                const { width, height } = e.nativeEvent.layout;
+                if (width > 0 && height > 0) setLayout({ width, height });
+            }}
+        >
+            {/* Skia shadow layer — Canvas extends beyond bounds for shadow bleed */}
+            {layout.width > 0 && (
+                <Canvas
+                    style={{
+                        position: 'absolute',
+                        top: -s,
+                        left: -s,
+                        right: -s,
+                        bottom: -s,
+                    }}
+                    pointerEvents="none"
+                >
+                    <RoundedRect
+                        x={s}
+                        y={s}
+                        width={layout.width}
+                        height={layout.height}
+                        r={layout.width / 2}
+                        color={backgroundColor}
+                    >
+                        {/* Dark shadow (bottom-right) — primary depth */}
+                        <Shadow
+                            dx={8}
+                            dy={10}
+                            blur={18}
+                            color={colors.shadowDark}
+                        />
+                        {/* Light shadow (top-left) — highlight / glow */}
+                        <Shadow
+                            dx={-3}
+                            dy={-3}
+                            blur={8}
+                            color={colors.shadowLight}
+                        />
+                    </RoundedRect>
+                </Canvas>
+            )}
+            {/* Content layer */}
+            <View
+                style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    borderRadius: size / 2,
+                    backgroundColor,
+                    zIndex: 1,
+                }}
+            >
+                {children}
+            </View>
+            {/* Light edge highlight */}
+            <View
+                style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    borderRadius: size / 2,
+                    borderTopWidth: 0.5,
+                    borderLeftWidth: 0.5,
+                    borderRightWidth: 0,
+                    borderBottomWidth: 0,
+                    borderColor: 'rgba(255,255,255,0.55)',
+                    zIndex: 2,
+                    pointerEvents: 'none' as const,
+                }}
+            />
+        </View>
+    );
+}
