@@ -219,13 +219,12 @@ function AnimatedTabBar({ state, descriptors, navigation }: any) {
                             style={styles.tabButton}
                             activeOpacity={1}
                         >
-                            <View style={styles.tabButtonInner}>
-                                <Ionicons
-                                    name={focused ? config.focused : config.unfocused}
-                                    size={28}
-                                    color={focused ? colors.accent : colors.textMuted}
-                                />
-                            </View>
+                            <Ionicons
+                                name={focused ? config.focused : config.unfocused}
+                                size={28}
+                                color={focused ? colors.accent : colors.textMuted}
+                                style={{ marginTop: 1 }}
+                            />
                         </TouchableOpacity>
                     );
                 })}
@@ -274,7 +273,7 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
     },
     tabBarInner: {
-        flex: 1,
+        height: TAB_HEIGHT,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
@@ -283,6 +282,7 @@ const styles = StyleSheet.create({
     slidingIndicator: {
         position: 'absolute',
         left: 0,
+        top: 4,
         width: TAB_SLOT,
         height: 52,
         justifyContent: 'center',
@@ -296,15 +296,9 @@ const styles = StyleSheet.create({
     },
     tabButton: {
         width: TAB_SLOT,
-        height: 52,
+        height: TAB_HEIGHT,
         justifyContent: 'center',
         alignItems: 'center',
         zIndex: 1,
-    },
-    tabButtonInner: {
-        width: '100%',
-        height: '100%',
-        justifyContent: 'center',
-        alignItems: 'center',
     },
 });

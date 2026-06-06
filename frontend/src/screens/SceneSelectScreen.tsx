@@ -22,8 +22,7 @@ export default function SceneSelectScreen({ navigation, route }: any) {
     const currentScene = route?.params?.currentScene || '全部';
 
     const handleSelect = (scene: string) => {
-        route?.params?.onSelectScene?.(scene);
-        navigation.goBack();
+        navigation.navigate('ItemList', { selectedScene: scene });
     };
 
     return (

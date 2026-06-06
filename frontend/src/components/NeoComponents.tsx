@@ -212,27 +212,70 @@ interface NeoCardProps {
 }
 
 export function NeoCard({ children, style, depth = 'md', padding = spacing.lg }: NeoCardProps) {
+    const [layout, setLayout] = useState({ width: 0, height: 0 });
     const isMd = depth === 'md';
     return (
-        <View style={[{
-            marginHorizontal: spacing.lg,
-            marginBottom: spacing.lg,
-            padding,
-            borderRadius: radius.xxl,
-            backgroundColor: colors.bg,
-            // Enhanced depth shadow
-            shadowColor: isMd ? colors.shadowDark2 : colors.shadowDark,
-            shadowOffset: { width: isMd ? 7 : 5, height: isMd ? 7 : 5 },
-            shadowOpacity: isMd ? 0.42 : 0.36,
-            shadowRadius: isMd ? 16 : 12,
-            elevation: isMd ? 6 : 4,
-            borderTopWidth: 0.5,
-            borderLeftWidth: 0.5,
-            borderColor: 'rgba(255,255,255,0.50)',
-            borderRightWidth: 0,
-            borderBottomWidth: 0,
-        }, style]}>
-            {children}
+        <View
+            style={[{
+                marginHorizontal: spacing.lg,
+                marginBottom: spacing.lg,
+                padding,
+                borderRadius: radius.xxl,
+                backgroundColor: colors.bg,
+                position: 'relative',
+                // Enhanced depth shadow
+                shadowColor: isMd ? colors.shadowDark2 : colors.shadowDark,
+                shadowOffset: { width: isMd ? 7 : 5, height: isMd ? 7 : 5 },
+                shadowOpacity: isMd ? 0.42 : 0.36,
+                shadowRadius: isMd ? 16 : 12,
+                elevation: isMd ? 6 : 4,
+            }, style]}
+            onLayout={(e) => {
+                const { width, height } = e.nativeEvent.layout;
+                if (width > 0 && height > 0) setLayout({ width, height });
+            }}
+        >
+            {/* Skia top-left soft glow */}
+            {layout.width > 0 && (
+                <Canvas style={StyleSheet.absoluteFill} pointerEvents="none">
+                    <RoundedRect
+                        x={0}
+                        y={0}
+                        width={layout.width}
+                        height={layout.height}
+                        r={radius.xxl}
+                        color={colors.bg}
+                    >
+                        <Shadow
+                            dx={-4}
+                            dy={-4}
+                            blur={12}
+                            color="rgba(255,255,255,0.50)"
+                        />
+                    </RoundedRect>
+                </Canvas>
+            )}
+            <View style={{ position: 'relative', zIndex: 1 }}>
+                {children}
+            </View>
+            {/* Light edge highlight */}
+            <View
+                style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    borderRadius: radius.xxl,
+                    borderTopWidth: 0.5,
+                    borderLeftWidth: 0.5,
+                    borderColor: 'rgba(255,255,255,0.55)',
+                    borderRightWidth: 0,
+                    borderBottomWidth: 0,
+                    zIndex: 2,
+                }}
+                pointerEvents="none"
+            />
         </View>
     );
 }
@@ -309,6 +352,7 @@ export function NeuOut({
     borderRadius = 36,
     depth = 'md',
 }: NeuOutProps) {
+    const [layout, setLayout] = useState({ width: 0, height: 0 });
     const shadows = NEUOUT_SHADOWS[depth];
 
     return (
@@ -327,8 +371,34 @@ export function NeuOut({
                 },
                 style,
             ]}
+            onLayout={(e) => {
+                const { width, height } = e.nativeEvent.layout;
+                if (width > 0 && height > 0) setLayout({ width, height });
+            }}
         >
-            {children}
+            {/* Skia top-left soft glow — mimics light hitting the raised surface */}
+            {layout.width > 0 && (
+                <Canvas style={StyleSheet.absoluteFill} pointerEvents="none">
+                    <RoundedRect
+                        x={0}
+                        y={0}
+                        width={layout.width}
+                        height={layout.height}
+                        r={borderRadius}
+                        color={colors.bg}
+                    >
+                        <Shadow
+                            dx={shadows.lightDx}
+                            dy={shadows.lightDy}
+                            blur={shadows.lightBlur}
+                            color="rgba(255,255,255,0.55)"
+                        />
+                    </RoundedRect>
+                </Canvas>
+            )}
+            <View style={{ position: 'relative', zIndex: 1 }}>
+                {children}
+            </View>
             {/* Light edge highlight overlay — absolute, non-interactive, no layout impact */}
             <View
                 style={{
@@ -342,7 +412,8 @@ export function NeuOut({
                     borderLeftWidth: 0.5,
                     borderRightWidth: 0,
                     borderBottomWidth: 0,
-                    borderColor: 'rgba(255,255,255,0.50)',
+                    borderColor: 'rgba(255,255,255,0.55)',
+                    zIndex: 2,
                 }}
                 pointerEvents="none"
             />

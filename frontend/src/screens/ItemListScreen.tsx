@@ -60,7 +60,15 @@ export default function ItemListScreen({ navigation }: Props) {
     const route = useRoute<any>();
     const [scene, setScene] = useState<string>('全部');
 
-    // Removed: scene is now updated via onSelectScene callback, no need for route.params sync
+    // Sync selectedScene from route params (safe, serializable)
+    useEffect(() => {
+        const selectedScene = route.params?.selectedScene;
+        if (typeof selectedScene === 'string') {
+            setScene(selectedScene);
+            // Clear param to prevent re-trigger
+            navigation.setParams({ selectedScene: undefined });
+        }
+    }, [route.params?.selectedScene]);
     const fetchItems = useCallback(async () => {
         try {
             const res = await api.get('/items');
@@ -372,7 +380,7 @@ export default function ItemListScreen({ navigation }: Props) {
             <View style={[styles.headerArea, { paddingTop: insets.top + spacing.sm }]}>
                 <View style={styles.headerTopRow}>
                     <PressableScale
-                        onPress={() => navigation.navigate('SceneSelect', { currentScene: scene, onSelectScene: (s: string) => setScene(s) })}
+                        onPress={() => navigation.navigate('SceneSelect', { currentScene: scene })}
                         scaleIn={0.95}
                     >
                         <View style={styles.sceneBtn}>
