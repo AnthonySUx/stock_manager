@@ -1,7 +1,7 @@
 import InventorySummaryScreen from '../screens/InventorySummaryScreen';
 
-import React from 'react';
-import { View, StyleSheet, TouchableOpacity } from 'react-native';
+import React, { useRef, useEffect } from 'react';
+import { View, StyleSheet, TouchableOpacity, Animated } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { NavigationContainer } from '@react-navigation/native';
@@ -157,10 +157,21 @@ const TAB_ICONS: Record<string, { focused: keyof typeof Ionicons.glyphMap; unfoc
 
 const TAB_BAR_WIDTH = 290;
 const TAB_COUNT = 3;
-const TAB_WIDTH = TAB_BAR_WIDTH / TAB_COUNT;
+const TAB_SLOT = TAB_BAR_WIDTH / TAB_COUNT;
 const TAB_HEIGHT = 60;
 
 function AnimatedTabBar({ state, descriptors, navigation }: any) {
+    const slideAnim = useRef(new Animated.Value(state.index * TAB_SLOT)).current;
+
+    useEffect(() => {
+        Animated.spring(slideAnim, {
+            toValue: state.index * TAB_SLOT,
+            useNativeDriver: true,
+            tension: 120,
+            friction: 10,
+        }).start();
+    }, [state.index]);
+
     return (
         <NeuOut
             borderRadius={30}
@@ -168,6 +179,23 @@ function AnimatedTabBar({ state, descriptors, navigation }: any) {
             style={styles.tabBarOuter}
         >
             <View style={styles.tabBarInner}>
+                {/* Sliding indicator */}
+                <Animated.View
+                    style={[
+                        styles.slidingIndicator,
+                        {
+                            transform: [{ translateX: slideAnim }],
+                        },
+                    ]}
+                >
+                    <NeuIn
+                        borderRadius={999}
+                        depth="sm"
+                        style={styles.activeTab}
+                    />
+                </Animated.View>
+
+                {/* Tab buttons */}
                 {state.routes.map((route: any, index: number) => {
                     const { options } = descriptors[route.key];
                     const focused = state.index === index;
@@ -191,19 +219,13 @@ function AnimatedTabBar({ state, descriptors, navigation }: any) {
                             style={styles.tabButton}
                             activeOpacity={1}
                         >
-                            {focused ? (
-                                <NeuIn
-                                    borderRadius={999}
-                                    depth="sm"
-                                    style={styles.activeTab}
-                                >
-                                    <Ionicons name={config.focused} size={28} color={colors.accent} />
-                                </NeuIn>
-                            ) : (
-                                <View style={styles.tabButtonInner}>
-                                    <Ionicons name={config.unfocused} size={28} color={colors.textMuted} />
-                                </View>
-                            )}
+                            <View style={styles.tabButtonInner}>
+                                <Ionicons
+                                    name={focused ? config.focused : config.unfocused}
+                                    size={28}
+                                    color={focused ? colors.accent : colors.textMuted}
+                                />
+                            </View>
                         </TouchableOpacity>
                     );
                 })}
@@ -249,25 +271,35 @@ const styles = StyleSheet.create({
         alignSelf: 'center',
         width: TAB_BAR_WIDTH,
         height: TAB_HEIGHT,
+        overflow: 'hidden',
     },
     tabBarInner: {
         flex: 1,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        paddingHorizontal: 4,
+        paddingHorizontal: 0,
+    },
+    slidingIndicator: {
+        position: 'absolute',
+        left: 0,
+        width: TAB_SLOT,
+        height: 52,
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     activeTab: {
-        width: TAB_WIDTH - 8,
+        width: TAB_SLOT - 8,
         height: 52,
         justifyContent: 'center',
         alignItems: 'center',
     },
     tabButton: {
-        width: TAB_WIDTH - 8,
+        width: TAB_SLOT,
         height: 52,
         justifyContent: 'center',
         alignItems: 'center',
+        zIndex: 1,
     },
     tabButtonInner: {
         width: '100%',
