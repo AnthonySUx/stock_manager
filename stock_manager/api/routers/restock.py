@@ -20,6 +20,8 @@ from stock_manager.api.services import (
     update_restock_item,
     update_restock_item_quantity,
     find_restock_duplicates,
+    shopping_check_restock_item,
+    shopping_uncheck_restock_item,
 )
 
 router = APIRouter()
@@ -28,10 +30,11 @@ router = APIRouter()
 @router.get("", response_model=list[schemas.RestockItemResponse])
 def list_restock(
     status: Optional[str] = Query(None),
+    shopping_checked: Optional[bool] = Query(None),
     db: Session = Depends(get_session),
 ):
-    """List restock items, optionally filtered by status."""
-    return get_restock_items(db, status=status)
+    """List restock items, optionally filtered by status and shopping check state."""
+    return get_restock_items(db, status=status, shopping_checked=shopping_checked)
 
 
 
@@ -59,6 +62,35 @@ def get_restock_endpoint(
 ):
     """Get a single restock item by ID."""
     item = get_restock_item(db, item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Restock item not found")
+    return item
+
+
+
+@router.post("/{item_id}/shopping-check", response_model=schemas.RestockItemResponse)
+def shopping_check_endpoint(
+    item_id: int,
+    db: Session = Depends(get_session),
+):
+    """Mark a restock item as bought/checked during shopping.
+
+    This does NOT change status or create stock records.
+    Use restock done for actual stock-in.
+    """
+    item = shopping_check_restock_item(db, item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Restock item not found")
+    return item
+
+
+@router.post("/{item_id}/shopping-uncheck", response_model=schemas.RestockItemResponse)
+def shopping_uncheck_endpoint(
+    item_id: int,
+    db: Session = Depends(get_session),
+):
+    """Unmark a restock item — move it back to active shopping list."""
+    item = shopping_uncheck_restock_item(db, item_id)
     if item is None:
         raise HTTPException(status_code=404, detail="Restock item not found")
     return item
