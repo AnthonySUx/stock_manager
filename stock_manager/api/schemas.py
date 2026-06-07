@@ -114,6 +114,31 @@ class RestockItemResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ─── Restock Duplicate Detection ──────────────────────────────────
+
+
+class RestockDuplicateCandidate(BaseModel):
+    """A single pending restock item that may be a duplicate."""
+    id: int
+    name: str
+    category: Optional[str] = None
+    quantity_value: Optional[float] = None
+    quantity_unit: Optional[str] = None
+    status: str
+    notes: Optional[str] = None
+    created_at: Optional[datetime] = None
+    match_confidence: str = "high"
+    match_reason: str = ""
+
+
+class RestockDuplicateResponse(BaseModel):
+    """Response for restock duplicate detection."""
+    query: str
+    normalized_name: str
+    candidates: list[RestockDuplicateCandidate] = []
+
+
+
 # ─── Settings ────────────────────────────────────────────────────
 
 
