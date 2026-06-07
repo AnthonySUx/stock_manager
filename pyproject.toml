@@ -20,5 +20,11 @@ dependencies = [
     "httpx>=0.28.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
+]
+
 [tool.setuptools.packages.find]
 include = ["stock_manager*"]
