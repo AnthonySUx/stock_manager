@@ -111,6 +111,9 @@ class RestockItemResponse(BaseModel):
     created_at: Optional[datetime] = None
     done_at: Optional[datetime] = None
 
+    shopping_checked: bool = False
+    shopping_checked_at: Optional[datetime] = None
+
     model_config = {"from_attributes": True}
 
 

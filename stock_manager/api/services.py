@@ -269,11 +269,14 @@ def get_restock_items(
     db: Session,
     *,
     status: Optional[str] = None,
+    shopping_checked: Optional[bool] = None,
 ) -> list[RestockItem]:
-    """Return restock items that match the optional status filter."""
+    """Return restock items that match the optional filters."""
     query = db.query(RestockItem)
     if status is not None:
         query = query.filter(RestockItem.status == status)
+    if shopping_checked is not None:
+        query = query.filter(RestockItem.shopping_checked == shopping_checked)
 
     return query.order_by(
         RestockItem.status == "done", RestockItem.id
@@ -341,6 +344,37 @@ def update_restock_item_quantity(db: Session, item_id: int, quantity: float) -> 
     item.quantity_value = quantity
     db.commit()
     return True
+
+
+
+def shopping_check_restock_item(db: Session, item_id: int) -> Optional[RestockItem]:
+    """Mark a restock item as checked in shopping mode.
+
+    Sets shopping_checked = True without changing status or creating stock.
+    """
+    item = db.query(RestockItem).filter(RestockItem.id == item_id).first()
+    if item is None:
+        return None
+    item.shopping_checked = True
+    item.shopping_checked_at = datetime.utcnow()
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+def shopping_uncheck_restock_item(db: Session, item_id: int) -> Optional[RestockItem]:
+    """Unmark a restock item as checked in shopping mode.
+
+    Sets shopping_checked = False without changing status or creating stock.
+    """
+    item = db.query(RestockItem).filter(RestockItem.id == item_id).first()
+    if item is None:
+        return None
+    item.shopping_checked = False
+    item.shopping_checked_at = None
+    db.commit()
+    db.refresh(item)
+    return item
 
 
 def delete_restock_item(db: Session, item_id: int) -> bool:

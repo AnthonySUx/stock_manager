@@ -78,6 +78,8 @@ class RestockItem(Base):
         server_default=func.now(),
     )
     done_at = Column(DateTime, nullable=True)
+    shopping_checked = Column(Boolean, nullable=False, default=False, server_default=func.false())
+    shopping_checked_at = Column(DateTime, nullable=True)
 
     # Relationship
     source_item = relationship("Item", backref="restock_items")
