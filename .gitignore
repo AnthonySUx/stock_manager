@@ -28,3 +28,7 @@ frontend/.expo/
 frontend/dist/
 frontend/web-build/
 frontend/*.tsbuildinfo
+
+# Coverage
+.coverage
+coverage_html_report/
