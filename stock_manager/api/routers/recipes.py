@@ -132,8 +132,16 @@ def ai_today_recommendations(limit: int = Query(15, ge=1, le=50),
             summary="No matching recipes found.", source_notice=HOWTOCOOK_SOURCE.notice,
             recommendations=[])
     try:
-        from stock_manager.api.models import Item
-        inventory = db.query(Item).filter(Item.status.in_(["active", "expiring soon"])).all()
+        from stock_manager.api.models import Item, Category
+        inventory = (
+            db.query(Item)
+            .join(Category, Item.category_id == Category.id)
+            .filter(
+                Item.status.in_(["active", "expiring soon"]),
+                Category.recipe_usage.in_(["always", "conditional"]),
+            )
+            .all()
+        )
         inv_names = list(set(i.name.strip() for i in inventory))
         exp_names = list(set(i.name.strip() for i in inventory if i.status == "expiring soon"))
         ai_result = asyncio.run(get_ai_recommendations(
@@ -159,13 +167,19 @@ async def explore_recipes_endpoint(
     db: Session = Depends(get_session),
 ):
     from stock_manager.api.explore_services import explore_ideas
-    from stock_manager.api.models import Item
+    from stock_manager.api.models import Item, Category
 
-    inventory_items = db.query(Item).filter(
-        Item.status.in_(["active", "expiring soon"])
-    ).all()
+    inventory_items = (
+        db.query(Item)
+        .join(Category, Item.category_id == Category.id)
+        .filter(
+            Item.status.in_(["active", "expiring soon"]),
+            Category.recipe_usage.in_(["always", "conditional"]),
+        )
+        .all()
+    )
 
-    inv_dicts = [{"name": i.name, "quantity": i.quantity_value, "unit": i.quantity_unit, "status": i.status} for i in inventory_items]
+    inv_dicts = [{"name": i.name, "quantity": i.quantity_value, "unit": i.quantity_unit, "status": i.status, "recipe_usage": i.category.recipe_usage} for i in inventory_items]
 
     structured = data.structured.model_dump() if data.structured else None
     nat_lang = data.natural_language

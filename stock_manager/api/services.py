@@ -93,7 +93,7 @@ def calculate_item_status(
 def get_items(
     db: Session,
     *,
-    category: Optional[str] = None,
+    category: Optional[int] = None,
     owner: Optional[str] = None,
     location: Optional[str] = None,
     status: Optional[str] = None,
@@ -103,7 +103,7 @@ def get_items(
 
     query = db.query(Item)
     if category is not None:
-        query = query.filter(func.lower(Item.category) == category.lower())
+        query = query.filter(Item.category_id == category)
     if owner is not None:
         query = query.filter(func.lower(Item.owner) == owner.lower())
     if location is not None:
@@ -118,7 +118,7 @@ def search_items(
     db: Session,
     keyword: str,
     *,
-    category: Optional[str] = None,
+    category: Optional[int] = None,
     owner: Optional[str] = None,
     location: Optional[str] = None,
     status: Optional[str] = None,
@@ -126,10 +126,11 @@ def search_items(
     """Return stock items matching a keyword and optional filters."""
     refresh_item_statuses(db)
 
+    from stock_manager.api.models import Category
     pattern = f"%{keyword}%"
-    query = db.query(Item).filter(
+    query = db.query(Item).outerjoin(Category, Item.category_id == Category.id).filter(
         func.lower(Item.name).like(pattern.lower())
-        | func.lower(Item.category).like(pattern.lower())
+        | func.lower(Category.name).like(pattern.lower())
         | func.lower(Item.owner).like(pattern.lower())
         | func.lower(Item.location).like(pattern.lower())
         | func.lower(func.coalesce(Item.notes, "")).like(pattern.lower())
@@ -140,7 +141,7 @@ def search_items(
     if location is not None:
         query = query.filter(func.lower(Item.location) == location.lower())
     if category is not None:
-        query = query.filter(func.lower(Item.category) == category.lower())
+        query = query.filter(Item.category_id == category)
     if status is not None:
         query = query.filter(Item.status == status)
 
@@ -207,7 +208,7 @@ def consume_item(
     if new_quantity <= 0 and add_to_restock:
         restock = RestockItem(
             name=item.name,
-            category=item.category,
+            category_id=item.category_id,
             quantity_value=original_quantity,
             quantity_unit=item.quantity_unit,
             source_item_id=item.id,
@@ -303,8 +304,7 @@ def update_restock_item(
         return None
 
     for key, value in item_data.items():
-        if value is not None:
-            setattr(item, key, value)
+        setattr(item, key, value)
 
     # Handle done_at
     if item_data.get("status") == "done" and item.done_at is None:

@@ -36,7 +36,7 @@ def _calculate_current_expiration_date(item_data: dict) -> str:
 
 @router.get("", response_model=list[schemas.ItemResponse])
 def list_items(
-    category: Optional[str] = Query(None),
+    category: Optional[int] = Query(None),
     owner: Optional[str] = Query(None),
     location: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
@@ -55,7 +55,7 @@ def list_items(
 @router.get("/search", response_model=list[schemas.ItemResponse])
 def search_items(
     keyword: str = Query(..., min_length=1),
-    category: Optional[str] = Query(None),
+    category: Optional[int] = Query(None),
     owner: Optional[str] = Query(None),
     location: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
@@ -100,6 +100,12 @@ def create_item_endpoint(
     db: Session = Depends(get_session),
 ):
     """Create a new stock item."""
+    from stock_manager.api.category_services import validate_category_exists
+    try:
+        validate_category_exists(db, payload.category_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     item_data = payload.model_dump()
     item_data["current_expiration_date"] = _calculate_current_expiration_date(
         item_data
@@ -126,6 +132,13 @@ def update_item_endpoint(
 
     if not item_data:
         raise HTTPException(status_code=400, detail="No fields to update")
+
+    from stock_manager.api.category_services import validate_category_exists
+    if "category_id" in item_data:
+        try:
+            validate_category_exists(db, item_data["category_id"])
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
     # Recalculate current_expiration_date if relevant fields changed
     if any(k in item_data for k in ("opened_date", "opened_expiration_date", "unopened_expiration_date")):

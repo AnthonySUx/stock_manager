@@ -93,11 +93,20 @@ def done_restock(
     original_qty = item.quantity_value or purchased_qty
 
     # Add the purchased item(s) to stock
+    final_category_id = payload.category_id or item.category_id
+    if final_category_id is None:
+        raise HTTPException(status_code=400, detail="Category is required when restocking into inventory")
+    from stock_manager.api.category_services import validate_category_exists
+    try:
+        validate_category_exists(db, final_category_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     stock_item = create_item(
         db,
         {
             "name": item.name,
-            "category": item.category or "",
+            "category_id": final_category_id,
             "owner": payload.owner or "",
             "purchase_date": payload.purchase_date or date.today().isoformat(),
             "quantity_value": purchased_qty,
