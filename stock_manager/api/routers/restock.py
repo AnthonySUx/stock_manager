@@ -19,6 +19,7 @@ from stock_manager.api.services import (
     mark_restock_item_done,
     update_restock_item,
     update_restock_item_quantity,
+    find_restock_duplicates,
 )
 
 router = APIRouter()
@@ -31,6 +32,24 @@ def list_restock(
 ):
     """List restock items, optionally filtered by status."""
     return get_restock_items(db, status=status)
+
+
+
+
+
+@router.get("/duplicates", response_model=schemas.RestockDuplicateResponse)
+def find_restock_duplicates_endpoint(
+    name: str = Query(..., min_length=1),
+    db: Session = Depends(get_session),
+):
+    """Find pending restock items that may be duplicates of the given name.
+
+    Matches by exact name and synonym-normalized name.
+    Does not use fuzzy substring matching to avoid false positives.
+    This is a pure query — no data is created or modified.
+    """
+    return find_restock_duplicates(db, name)
+
 
 
 @router.get("/{item_id}", response_model=schemas.RestockItemResponse)

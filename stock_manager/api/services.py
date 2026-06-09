@@ -365,6 +365,57 @@ def delete_restock_items_by_status(db: Session, status: str) -> int:
     return deleted
 
 
+
+def find_restock_duplicates(db: Session, name: str) -> dict:
+    """Find pending restock items that may be duplicates of the given name.
+
+    Matches by exact name (case-insensitive) and synonym-normalized name.
+    Does NOT use fuzzy substring matching to avoid false positives.
+    This is a pure query — no data is created or modified.
+    """
+    from stock_manager.api.recipe_services import _normalize_name as _normalize_restock_name
+
+    query_name = name.strip()
+    if not query_name:
+        return {"query": name, "normalized_name": "", "candidates": []}
+
+    normalized_query = _normalize_restock_name(query_name).lower()
+    pending = db.query(RestockItem).filter(RestockItem.status == "pending").all()
+
+    candidates = []
+    for item in pending:
+        item_name = item.name.strip().lower()
+        item_norm = _normalize_restock_name(item.name).lower()
+
+        if item_name == query_name.lower():
+            match_confidence = "high"
+            match_reason = "same name"
+        elif item_norm == normalized_query:
+            match_confidence = "high"
+            match_reason = "same normalized name"
+        else:
+            continue
+
+        candidates.append({
+            "id": item.id,
+            "name": item.name,
+            "category": item.category,
+            "quantity_value": item.quantity_value,
+            "quantity_unit": item.quantity_unit,
+            "status": item.status,
+            "notes": item.notes,
+            "created_at": item.created_at,
+            "match_confidence": match_confidence,
+            "match_reason": match_reason,
+        })
+
+    return {
+        "query": name,
+        "normalized_name": normalized_query or query_name,
+        "candidates": candidates,
+    }
+
+
 # ─── Settings ────────────────────────────────────────────────────
 
 
