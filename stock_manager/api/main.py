@@ -1,12 +1,13 @@
 """FastAPI application entry point for Stock Manager."""
 
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from stock_manager import __version__
 from stock_manager.api.db import engine
 from stock_manager.api.models import Base
-from stock_manager.api.routers import items, restock, settings, recipes
+from stock_manager.api.routers import items, restock, settings, recipes, categories
 
 description = """
 Stock Manager API — manage family stock, expiration reminders, and restocking lists.
@@ -16,12 +17,24 @@ Stock Manager API — manage family stock, expiration reminders, and restocking 
 * [Settings](/docs#/settings) — configure global options
 """
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Create database tables on startup if they do not exist."""
+    Base.metadata.create_all(bind=engine)
+    from sqlalchemy.orm import sessionmaker
+    from stock_manager.api.category_services import seed_default_categories
+    SeedSession = sessionmaker(bind=engine)
+    with SeedSession() as session:
+        seed_default_categories(session)
+    yield
+
 app = FastAPI(
     title="Stock Manager API",
     description=description,
     version=__version__,
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 # CORS — allow Expo development server
@@ -38,12 +51,8 @@ app.include_router(items.router, prefix="/api/items", tags=["Stock Items"])
 app.include_router(restock.router, prefix="/api/restock", tags=["Restock Items"])
 app.include_router(settings.router, prefix="/api/settings", tags=["Settings"])
 app.include_router(recipes.router, prefix="/api/recipes", tags=["Recipes"])
+app.include_router(categories.router, prefix="/api/categories", tags=["Categories"])
 
-
-@app.on_event("startup")
-def on_startup():
-    """Create tables on startup if they do not exist."""
-    Base.metadata.create_all(bind=engine)
 
 
 @app.get("/api/health", tags=["Health"])

@@ -2,6 +2,14 @@
 
 from datetime import date, timedelta
 
+
+def _cat_id(db_session, slug):
+    """Helper to get category ID by slug."""
+    from stock_manager.api.category_services import get_category_by_slug
+    cat = get_category_by_slug(db_session, slug)
+    return cat.id if cat else None
+
+
 from tests.helpers import make_item_model_data
 
 
@@ -10,7 +18,7 @@ class TestCreateAndGetItem:
         """create_item returns a persisted Item with an id."""
         from stock_manager.api.services import create_item, get_item
 
-        model = make_item_model_data()
+        model = make_item_model_data(category_id=_cat_id(db_session, "dairy"))
         item = create_item(db_session, model)
 
         assert item.id is not None
@@ -32,7 +40,7 @@ class TestUpdateItem:
         """update_item modifies fields and returns the updated item."""
         from stock_manager.api.services import create_item, update_item
 
-        item = create_item(db_session, make_item_model_data())
+        item = create_item(db_session, make_item_model_data(category_id=_cat_id(db_session, "dairy")))
 
         updated = update_item(
             db_session, item.id, {"quantity_value": 5, "location": "储物柜"}
@@ -54,7 +62,7 @@ class TestConsumeItem:
         """consume_item deducts the specified quantity."""
         from stock_manager.api.services import consume_item, create_item
 
-        item = create_item(db_session, make_item_model_data(quantity_value=3))
+        item = create_item(db_session, make_item_model_data(category_id=_cat_id(db_session, "dairy"), quantity_value=3))
 
         result = consume_item(db_session, item.id, quantity=1)
 
@@ -64,7 +72,7 @@ class TestConsumeItem:
         """consume_item to zero sets status to consumed."""
         from stock_manager.api.services import consume_item, create_item
 
-        item = create_item(db_session, make_item_model_data(quantity_value=1))
+        item = create_item(db_session, make_item_model_data(category_id=_cat_id(db_session, "dairy"), quantity_value=1))
 
         result = consume_item(db_session, item.id, quantity=1)
 
@@ -76,7 +84,7 @@ class TestConsumeItem:
         from stock_manager.api.services import consume_item, create_item
 
         item = create_item(
-            db_session, make_item_model_data(name="牛奶", quantity_value=1)
+            db_session, make_item_model_data(category_id=_cat_id(db_session, "dairy"), name="牛奶", quantity_value=1)
         )
 
         result = consume_item(db_session, item.id, quantity=1, add_to_restock=True)
@@ -91,7 +99,7 @@ class TestDeleteItem:
         """delete_item removes an existing item and returns True."""
         from stock_manager.api.services import create_item, delete_item, get_item
 
-        item = create_item(db_session, make_item_model_data())
+        item = create_item(db_session, make_item_model_data(category_id=_cat_id(db_session, "dairy")))
 
         assert delete_item(db_session, item.id) is True
         assert get_item(db_session, item.id) is None

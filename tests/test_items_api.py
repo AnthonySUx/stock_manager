@@ -2,11 +2,18 @@
 
 from tests.helpers import make_item_create_payload
 
+def _cat_id(db_session, slug):
+    """Helper to get category ID by slug."""
+    from stock_manager.api.category_services import get_category_by_slug
+    cat = get_category_by_slug(db_session, slug)
+    return cat.id if cat else None
+
+
 
 class TestCreateItem:
-    def test_create_item_success(self, client):
+    def test_create_item_success(self, client, db_session):
         """POST /api/items with valid data returns 201."""
-        payload = make_item_create_payload()
+        payload = make_item_create_payload(category_id=_cat_id(db_session, "dairy"))
 
         response = client.post("/api/items", json=payload)
 
@@ -25,10 +32,10 @@ class TestCreateItem:
 
 
 class TestListItems:
-    def test_list_items(self, client):
+    def test_list_items(self, client, db_session):
         """GET /api/items returns all created items."""
-        client.post("/api/items", json=make_item_create_payload(name="牛奶"))
-        client.post("/api/items", json=make_item_create_payload(name="鸡蛋"))
+        client.post("/api/items", json=make_item_create_payload(category_id=_cat_id(db_session, "dairy"), name="牛奶"))
+        client.post("/api/items", json=make_item_create_payload(category_id=_cat_id(db_session, "eggs"), name="鸡蛋"))
 
         response = client.get("/api/items")
 
@@ -39,10 +46,10 @@ class TestListItems:
 
 
 class TestGetItem:
-    def test_get_item_by_id(self, client):
+    def test_get_item_by_id(self, client, db_session):
         """GET /api/items/{id} returns the item."""
         created = client.post(
-            "/api/items", json=make_item_create_payload()
+            "/api/items", json=make_item_create_payload(category_id=_cat_id(db_session, "dairy"))
         ).json()
 
         response = client.get(f"/api/items/{created['id']}")
@@ -58,10 +65,10 @@ class TestGetItem:
 
 
 class TestUpdateItem:
-    def test_update_item(self, client):
+    def test_update_item(self, client, db_session):
         """PATCH /api/items/{id} updates fields."""
         created = client.post(
-            "/api/items", json=make_item_create_payload()
+            "/api/items", json=make_item_create_payload(category_id=_cat_id(db_session, "dairy"))
         ).json()
 
         response = client.patch(
@@ -76,10 +83,10 @@ class TestUpdateItem:
 
 
 class TestConsumeItem:
-    def test_consume_item_reduces_quantity(self, client):
+    def test_consume_item_reduces_quantity(self, client, db_session):
         """POST /api/items/{id}/consume deducts quantity."""
         created = client.post(
-            "/api/items", json=make_item_create_payload(quantity_value=3)
+            "/api/items", json=make_item_create_payload(category_id=_cat_id(db_session, "dairy"), quantity_value=3)
         ).json()
 
         response = client.post(
@@ -90,11 +97,11 @@ class TestConsumeItem:
         assert response.status_code == 200
         assert response.json()["quantity_value"] == 2
 
-    def test_consume_to_zero_adds_restock(self, client):
+    def test_consume_to_zero_adds_restock(self, client, db_session):
         """Consuming all quantity with add_to_restock=True creates restock item."""
         created = client.post(
             "/api/items",
-            json=make_item_create_payload(name="牛奶", quantity_value=1),
+            json=make_item_create_payload(category_id=_cat_id(db_session, "dairy"), name="牛奶", quantity_value=1),
         ).json()
 
         response = client.post(
@@ -112,10 +119,10 @@ class TestConsumeItem:
 
 
 class TestDeleteItem:
-    def test_delete_item(self, client):
+    def test_delete_item(self, client, db_session):
         """DELETE /api/items/{id} removes the item."""
         created = client.post(
-            "/api/items", json=make_item_create_payload()
+            "/api/items", json=make_item_create_payload(category_id=_cat_id(db_session, "dairy"))
         ).json()
 
         response = client.delete(f"/api/items/{created['id']}")

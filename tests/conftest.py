@@ -30,6 +30,8 @@ def db_session():
     """Provide a clean database session for each test."""
     Base.metadata.create_all(bind=test_engine)
     session = TestingSessionLocal()
+    from stock_manager.api.category_services import seed_default_categories
+    seed_default_categories(session)
     try:
         yield session
     finally:
