@@ -33,6 +33,7 @@ from stock_manager.api.recipe_services import (
     get_recipe,
     get_recipes,
     get_recommendations,
+    record_recommendations,
     has_been_cooked,
     is_favorite,
     remove_favorite,
@@ -106,7 +107,7 @@ def list_sources():
 
 @router.get("", response_model=list[RecipeSummary])
 def list_recipes(
-    source_type: Optional[str] = Query(None, regex="^(howtocook|user|ai_saved)$"),
+    source_type: Optional[str] = Query(None, pattern="^(howtocook|user|ai_saved)$"),
     category: Optional[str] = None, query: Optional[str] = None,
     favorite_only: bool = False, limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0), db: Session = Depends(get_session),
@@ -118,9 +119,11 @@ def list_recipes(
 
 @router.get("/recommendations", response_model=RecipeRecommendationResponse)
 def rule_recommendations(limit: int = Query(10, ge=1, le=50),
-    include_expired: bool = False, db: Session = Depends(get_session)):
+    db: Session = Depends(get_session)):
+    results = get_recommendations(db, limit=limit)
+    record_recommendations(db, [r["recipe_id"] for r in results])
     return RecipeRecommendationResponse(source_notice=HOWTOCOOK_SOURCE.notice,
-        recommendations=[RecipeRecommendation(**r) for r in get_recommendations(db, limit=limit, include_expired=include_expired)])
+        recommendations=[RecipeRecommendation(**r) for r in results])
 
 
 @router.post("/ai/today", response_model=AIRecipeRecommendationResponse)
