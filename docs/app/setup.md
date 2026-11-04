@@ -137,6 +137,44 @@ Expected: `{"status":"ok","version":"0.9.0"}`
 
 Open http://localhost:8000/docs in your browser.
 
+### 3.5 Rebuilding the Database After a Schema Change
+
+The backend creates missing tables on startup (`Base.metadata.create_all`) and seeds the
+default inventory categories. It does **not** alter existing tables, and the project has
+no migration tool yet.
+
+The structured category change (issue #33) replaced the free-text `items.category` /
+`restock_items.category` columns with `category_id`. **Existing databases are not
+upgraded. You have to drop and rebuild them. All existing stock, restock, settings,
+recipe, and favorite data is lost.**
+
+Docker MySQL — drop and recreate only the app database:
+
+```bash
+docker exec -it stock_manager_mysql mysql -u root -p \
+  -e "DROP DATABASE stock_manager; CREATE DATABASE stock_manager CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+```
+
+Or remove the whole Docker volume. This also resets MySQL users to the values in `docker-compose.yml`:
+
+```bash
+docker compose down -v
+docker compose up -d
+```
+
+Homebrew MySQL:
+
+```bash
+mysql -u root -e "DROP DATABASE stock_manager; CREATE DATABASE stock_manager CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+```
+
+Then restart the backend. It recreates all tables and seeds the default categories.
+Re-import HowToCook recipes if you need them:
+
+```bash
+python scripts/import_howtocook.py /path/to/HowToCook
+```
+
 ---
 
 ## 4. Frontend (Expo + React Native)
