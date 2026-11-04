@@ -1,5 +1,6 @@
 """FastAPI application entry point for Stock Manager."""
 
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -16,12 +17,19 @@ Stock Manager API — manage family stock, expiration reminders, and restocking 
 * [Settings](/docs#/settings) — configure global options
 """
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Create database tables on startup if they do not exist."""
+    Base.metadata.create_all(bind=engine)
+    yield
+
 app = FastAPI(
     title="Stock Manager API",
     description=description,
     version=__version__,
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 # CORS — allow Expo development server
@@ -39,11 +47,6 @@ app.include_router(restock.router, prefix="/api/restock", tags=["Restock Items"]
 app.include_router(settings.router, prefix="/api/settings", tags=["Settings"])
 app.include_router(recipes.router, prefix="/api/recipes", tags=["Recipes"])
 
-
-@app.on_event("startup")
-def on_startup():
-    """Create tables on startup if they do not exist."""
-    Base.metadata.create_all(bind=engine)
 
 
 @app.get("/api/health", tags=["Health"])
