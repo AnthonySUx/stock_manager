@@ -350,18 +350,29 @@ def get_recommendations(
     today = date.today()
     warning_days = 2
 
-    # Gather active inventory
-    items = db.query(Item).filter(
-        Item.status.in_(["active", "expiring soon"])
-    ).all()
+    # Gather active inventory - only recipe eligible
+    from stock_manager.api.models import Category
+    from stock_manager.api.category_services import RECIPE_USAGE_ALWAYS, RECIPE_USAGE_CONDITIONAL
+    items = (
+        db.query(Item)
+        .join(Category, Item.category_id == Category.id)
+        .filter(
+            Item.status.in_(["active", "expiring soon"]),
+            Category.recipe_usage.in_([RECIPE_USAGE_ALWAYS, RECIPE_USAGE_CONDITIONAL]),
+        )
+        .all()
+    )
 
     inventory_names = set()
     expiring_names = set()
+    always_names = set()
     for item in items:
         item_lower = item.name.strip().lower()
         inventory_names.add(item_lower)
         if item.status == "expiring soon":
             expiring_names.add(item_lower)
+        if item.category.recipe_usage == RECIPE_USAGE_ALWAYS:
+            always_names.add(item_lower)
 
     # Also add normalized names
     inv_norm = _build_normalized_set(list(inventory_names))
@@ -412,6 +423,13 @@ def get_recommendations(
                 missing.append(ing.ingredient_name)
 
         score = len(matched) * 10 + len(expiring_used) * 40
+        # Reduce score for conditional (non-always) matched items
+        for m in matched:
+            if m.strip().lower() not in always_names:
+                score -= 4  # +10 becomes +6 for conditional
+        for e in expiring_used:
+            if e.strip().lower() not in always_names:
+                score -= 20  # +40 becomes +20 for conditional
         score -= len(missing) * 5
         if recipe.id in fav_ids:
             score += 15
@@ -455,10 +473,18 @@ def get_consume_preview(db: Session, recipe_id: int) -> Optional[dict]:
         RecipeIngredient.recipe_id == recipe_id
     ).all()
 
-    # Get active inventory
-    items = db.query(Item).filter(
-        Item.status.in_(["active", "expiring soon"])
-    ).all()
+    # Get active inventory - exclude never recipe_usage
+    from stock_manager.api.models import Category
+    from stock_manager.api.category_services import RECIPE_ALLOWED_USAGES
+    items = (
+        db.query(Item)
+        .join(Category, Item.category_id == Category.id)
+        .filter(
+            Item.status.in_(["active", "expiring soon"]),
+            Category.recipe_usage.in_(RECIPE_ALLOWED_USAGES),
+        )
+        .all()
+    )
 
     suggestions = []
     unmatched = []
@@ -534,6 +560,8 @@ def cook_recipe_and_consume(
         item = db.query(Item).filter(Item.id == ci["item_id"]).first()
         if item is None:
             continue
+        if item.category.recipe_usage == "never":
+            continue  # never allow non-recipe items to be consumed via recipe
 
         qty = ci["quantity"]
         if qty <= 0:
