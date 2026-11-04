@@ -19,6 +19,13 @@ from datetime import date, timedelta
 
 from tests.helpers import make_restock_create_payload
 
+def _cat_id(db_session, slug):
+    """Helper to get category ID by slug."""
+    from stock_manager.api.category_services import get_category_by_slug
+    cat = get_category_by_slug(db_session, slug)
+    return cat.id if cat else None
+
+
 
 class TestCreateRestockItem:
     def test_create_restock_item_success(self, client):
@@ -95,7 +102,7 @@ class TestUpdateRestockItem:
 
 
 class TestDoneRestockItem:
-    def test_done_restock_item_adds_to_stock(self, client):
+    def test_done_restock_item_adds_to_stock(self, client, db_session):
         """POST /api/restock/{id}/done marks done and adds to stock."""
         created = client.post(
             "/api/restock", json=make_restock_create_payload(quantity_value=12)
@@ -111,6 +118,7 @@ class TestDoneRestockItem:
                 "unopened_expiration_date": (
                     (date.today() + timedelta(days=30)).isoformat()
                 ),
+                "category_id": _cat_id(db_session, "dairy"),
             },
         )
 
@@ -126,7 +134,7 @@ class TestDoneRestockItem:
         get_response = client.get(f"/api/restock/{created['id']}")
         assert get_response.json()["status"] == "done"
 
-    def test_partial_done_restock_item(self, client):
+    def test_partial_done_restock_item(self, client, db_session):
         """POST /api/restock/{id}/done with partial purchase keeps rest as pending."""
         created = client.post(
             "/api/restock", json=make_restock_create_payload(quantity_value=12)
@@ -142,6 +150,7 @@ class TestDoneRestockItem:
                 "unopened_expiration_date": (
                     (date.today() + timedelta(days=30)).isoformat()
                 ),
+                "category_id": _cat_id(db_session, "dairy"),
             },
         )
 
@@ -159,7 +168,7 @@ class TestDoneRestockItem:
 
 
 class TestCleanRestockItems:
-    def test_clean_done_restock_items(self, client):
+    def test_clean_done_restock_items(self, client, db_session):
         """POST /api/restock/clean removes done restock items."""
         # Create and mark as done
         created = client.post(
@@ -176,6 +185,7 @@ class TestCleanRestockItems:
                 "unopened_expiration_date": (
                     (date.today() + timedelta(days=30)).isoformat()
                 ),
+                "category_id": _cat_id(db_session, "dairy"),
             },
         )
 

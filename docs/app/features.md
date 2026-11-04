@@ -11,7 +11,7 @@ Core App features for inventory management.
 The app supports recording:
 
 - Name
-- Category (vegetable, meat, fruit, medicine, frozen food, pet food, etc.)
+- Category (required; chosen from the structured category tree, see [Categories](#categories))
 - Purchaser or assigned user
 - Date of purchase
 - Expiration date when unopened / after opening
@@ -46,6 +46,35 @@ Current expiration date and status are calculated automatically.
 
 - **Consume**: Partial or full consumption. Status set to `consumed` when quantity reaches zero. Optionally add to restock list.
 - **Delete**: Remove stock items. Optionally add to restock list.
+
+---
+
+## Categories
+
+Inventory categories are stored in a `categories` table. Stock items reference one by
+`category_id` (required). Restock items can leave it empty (`category_id` nullable), but
+a category is required when a restock item is marked done and moved into stock.
+
+- Two levels at most: top-level category → subcategory.
+- Default system categories are seeded on backend startup. Examples: 食品, 药品/健康, 家居清洁,
+  个人护理, 宠物, 母婴, 电子/工具, 其他, plus subcategories such as 蔬菜, 肉类, 饮品.
+- Users can add their own top-level categories or subcategories. System categories cannot be deleted.
+  A category cannot be deleted while it has subcategories or while stock or restock items still use it.
+- API: `GET /api/categories` (tree), `GET /api/categories/flat`, `GET /api/categories/{id}`,
+  `POST`, `PATCH /api/categories/{id}`, `DELETE /api/categories/{id}`.
+
+### Recipe eligibility (`recipe_usage`)
+
+Each category has a `recipe_usage` value. It controls whether its stock is used by recipe
+features: rule-based recommendations, AI today recommendations, Explore, consume preview, and cook.
+
+| Value | Behavior | Default examples |
+|---|---|---|
+| `always` | Used normally | 蔬菜, 水果, 肉类 |
+| `conditional` | Used with reduced weight (match +6 instead of +10; expiring +20 instead of +40) | 饮品, 零食, 冷冻食品, 罐头/包装食品, 即食/熟食, 其他食品, top-level 食品 |
+| `never` | Never used, never deducted by cooking | 药品, 宠物, 家居清洁, 个人护理, 未分类 |
+
+A new subcategory inherits its parent's `recipe_usage` unless one is given.
 
 ---
 

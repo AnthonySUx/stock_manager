@@ -20,12 +20,34 @@ class Base(DeclarativeBase):
     pass
 
 
+# ─── Categories ──────────────────────────────────────────────────
+
+
+class Category(Base):
+    """Inventory category taxonomy. Max 2 levels: top-level and subcategory."""
+    __tablename__ = "categories"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False)
+    slug = Column(String(100), nullable=False, unique=True)
+    parent_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
+    recipe_usage = Column(String(20), nullable=False, default="never", server_default="never")
+    is_system = Column(Boolean, nullable=False, default=False, server_default="0")
+    sort_order = Column(Integer, nullable=False, default=0, server_default="0")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow, server_default=func.now())
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, server_default=func.now(), onupdate=func.now())
+
+    parent = relationship("Category", remote_side="Category.id", back_populates="children")
+    children = relationship("Category", back_populates="parent")
+
+
+
 class Item(Base):
     __tablename__ = "items"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(255), nullable=False)
-    category = Column(String(100), nullable=False)
+    category_id = Column(Integer, ForeignKey("categories.id"), nullable=False)
     owner = Column(String(100), nullable=False)
     purchase_date = Column(String(10), nullable=False)
     quantity_value = Column(Float, nullable=False)
@@ -55,13 +77,15 @@ class Item(Base):
         onupdate=func.now(),
     )
 
+    # Relationship
+    category = relationship("Category")
 
 class RestockItem(Base):
     __tablename__ = "restock_items"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(255), nullable=False)
-    category = Column(String(100), nullable=True)
+    category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
     quantity_value = Column(Float, nullable=True)
     quantity_unit = Column(String(50), nullable=True)
     source_item_id = Column(Integer, ForeignKey("items.id"), nullable=True)
@@ -79,7 +103,8 @@ class RestockItem(Base):
     )
     done_at = Column(DateTime, nullable=True)
 
-    # Relationship
+    # Relationships
+    category = relationship("Category")
     source_item = relationship("Item", backref="restock_items")
 
 
