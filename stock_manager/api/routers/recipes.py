@@ -1,5 +1,6 @@
 """FastAPI router for recipe features."""
 import asyncio
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -33,6 +34,7 @@ from stock_manager.api.recipe_services import (
     get_recipe,
     get_recipes,
     get_recommendations,
+    record_recommendations,
     has_been_cooked,
     is_favorite,
     remove_favorite,
@@ -41,6 +43,7 @@ from stock_manager.api.recipe_services import (
 from stock_manager.api.ai_recipe_service import get_ai_recommendations
 
 router = APIRouter(tags=["Recipes"])
+logger = logging.getLogger(__name__)
 
 
 HOWTOCOOK_SOURCE = SourceResponse(
@@ -118,14 +121,21 @@ def list_recipes(
 
 @router.get("/recommendations", response_model=RecipeRecommendationResponse)
 def rule_recommendations(limit: int = Query(10, ge=1, le=50),
-    include_expired: bool = False, db: Session = Depends(get_session)):
+    db: Session = Depends(get_session)):
+    results = get_recommendations(db, limit=limit)
+    record_recommendations(db, [r["recipe_id"] for r in results])
     return RecipeRecommendationResponse(source_notice=HOWTOCOOK_SOURCE.notice,
-        recommendations=[RecipeRecommendation(**r) for r in get_recommendations(db, limit=limit, include_expired=include_expired)])
+        recommendations=[RecipeRecommendation(**r) for r in results])
 
 
-@router.post("/ai/today", response_model=AIRecipeRecommendationResponse)
+@router.post("/ai/today", response_model=AIRecipeRecommendationResponse, deprecated=True)
 def ai_today_recommendations(limit: int = Query(15, ge=1, le=50),
     db: Session = Depends(get_session)):
+    """Deprecated for MVP (PR #14): use GET /api/recipes/recommendations.
+
+    Kept for compatibility only. The returned list is always the rule-based
+    result; AI (when enabled) contributes the summary only.
+    """
     rule_results = get_recommendations(db, limit=limit)
     if not rule_results:
         return AIRecipeRecommendationResponse(mode="rule_based_fallback",
@@ -145,7 +155,8 @@ def ai_today_recommendations(limit: int = Query(15, ge=1, le=50),
         inv_names = list(set(i.name.strip() for i in inventory))
         exp_names = list(set(i.name.strip() for i in inventory if i.status == "expiring soon"))
         ai_result = asyncio.run(get_ai_recommendations(
-            candidates=[{"recipe_id": r["recipe_id"], "title": r["title"]} for r in rule_results],
+            # Pass full rule results: the prompt builder reads expiring_inventory_items.
+            candidates=rule_results,
             inventory_items=inv_names, expiring_soon_items=exp_names,
             favorite_ids=[r["recipe_id"] for r in rule_results if r.get("is_favorite")],
         ))
@@ -154,7 +165,7 @@ def ai_today_recommendations(limit: int = Query(15, ge=1, le=50),
                 summary=ai_result.get("summary"), source_notice=HOWTOCOOK_SOURCE.notice,
                 recommendations=[RecipeRecommendation(**r) for r in rule_results])
     except Exception:
-        pass
+        logger.exception("AI today recommendations failed; falling back to rule-based results")
     return AIRecipeRecommendationResponse(mode="rule_based_fallback",
         summary="AI not available.", source_notice=HOWTOCOOK_SOURCE.notice,
         recommendations=[RecipeRecommendation(**r) for r in rule_results])
