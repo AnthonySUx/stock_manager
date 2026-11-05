@@ -18,7 +18,116 @@ from stock_manager.api.models import (
 from stock_manager.api.recipe_schemas import RecipeCreate, RecipeUpdate
 
 
-SYNONYM_MAP: dict[str, list[str]] = {}
+DEFAULT_SYNONYM_MAP: dict[str, list[str]] = {
+    # ── 蔬菜 / Vegetables ──
+    "番茄": ["西红柿", "tomato", "tomatoes", "トマト"],
+    "土豆": ["马铃薯", "洋芋", "potato", "potatoes", "じゃがいも", "ジャガイモ"],
+    "胡萝卜": ["红萝卜", "carrot", "carrots", "人参", "にんじん", "ニンジン"],
+    "西兰花": ["青花菜", "broccoli", "ブロッコリー"],
+    "菠菜": ["spinach", "ほうれん草", "ホウレンソウ"],
+    "白菜": ["大白菜", "Chinese cabbage", "napa cabbage", "ハクサイ"],
+    "卷心菜": ["圆白菜", "包菜", "甘蓝", "cabbage", "キャベツ"],
+    "生菜": ["lettuce", "レタス"],
+    "洋葱": ["onion", "玉ねぎ", "タマネギ"],
+    "大蒜": ["蒜", "garlic", "ニンニク"],
+    "生姜": ["姜", "ginger", "しょうが", "ショウガ"],
+    "葱": ["小葱", "green onion", "scallion", "spring onion", "ねぎ", "ネギ"],
+    "黄瓜": ["青瓜", "cucumber", "きゅうり", "キュウリ"],
+    "茄子": ["eggplant", "aubergine", "なす", "ナス"],
+    "玉米": ["corn", "sweet corn", "とうもろこし", "トウモロコシ"],
+    "青椒": ["甜椒", "bell pepper", "ピーマン"],
+    "辣椒": ["尖椒", "chili", "chilli", "唐辛子", "とうがらし"],
+    "豆芽": ["绿豆芽", "黄豆芽", "bean sprout", "bean sprouts", "もやし"],
+    "芹菜": ["celery", "セロリ"],
+    "韭菜": ["leek", "garlic chives", "にら", "ニラ"],
+    "南瓜": ["pumpkin", "かぼちゃ", "カボチャ"],
+    "山药": ["山藥", "淮山", "Chinese yam", "长芋", "ながいも", "ナガイモ"],
+    "莲藕": ["lotus root", "れんこん", "レンコン"],
+    "豆腐": ["tofu", "とうふ"],
+    "豆角": ["四季豆", "green bean", "green beans", "さやいんげん"],
+    "秋葵": ["okra", "オクラ"],
+    "芦笋": ["asparagus", "アスパラガス"],
+    # ── 肉类 / Meats ──
+    "猪肉": ["pork", "豚肉", "ぶたにく"],
+    "牛肉": ["beef", "ぎゅうにく", "牛肉"],
+    "鸡肉": ["chicken", "鶏肉", "とりにく"],
+    "羊肉": ["lamb", "mutton", "ラム"],
+    "排骨": ["ribs", "spareribs", "rib"],
+    "鸡翅": ["chicken wing", "chicken wings", "手羽先", "てばさき"],
+    "鸡胸肉": ["chicken breast", "鶏むね肉"],
+    "鸡腿": ["chicken leg", "chicken drumstick", "鶏もも肉"],
+    "培根": ["bacon", "ベーコン"],
+    "火腿": ["ham", "ハム"],
+    "香肠": ["sausage", "sausages", "ソーセージ"],
+    "五花肉": ["pork belly"],
+    "里脊肉": ["tenderloin", "loin"],
+    "肉末": ["绞肉", "ground pork", "minced pork", "ひき肉"],
+    # ── 蛋奶 / Eggs & Dairy ──
+    "鸡蛋": ["鸡子", "egg", "eggs", "鶏卵", "たまご", "卵"],
+    "牛奶": ["鲜奶", "milk", "牛乳"],
+    "黄油": ["奶油", "butter", "バター"],
+    "奶酪": ["芝士", "cheese", "起司", "チーズ"],
+    "酸奶": ["yogurt", "ヨーグルト"],
+    "淡奶油": ["鲜奶油", "heavy cream", "whipping cream", "生クリーム"],
+    # ── 水产 / Seafood ──
+    "虾": ["虾仁", "shrimp", "prawn", "prawns", "えび", "エビ"],
+    "鱼": ["鱼片", "fish", "さかな", "サカナ"],
+    "三文鱼": ["salmon", "サーモン"],
+    "金枪鱼": ["tuna", "ツナ", "マグロ"],
+    "带鱼": ["ribbonfish", "太刀魚"],
+    "鱿鱼": ["squid", "いか", "イカ"],
+    "蛤蜊": ["clams", "clam", "あさり"],
+    # ── 主食 / Staples ──
+    "大米": ["白米", "rice", "米", "ライス"],
+    "糯米": ["glutinous rice", "もち米"],
+    "面粉": ["中筋面粉", "低筋面粉", "高筋面粉", "flour", "小麦粉"],
+    "面条": ["面", "挂面", "noodle", "noodles", "麺"],
+    "意面": ["意大利面", "pasta", "spaghetti", "パスタ"],
+    "面包": ["bread", "パン"],
+    "馒头": ["steamed bun", "steamed bread", "饅頭"],
+    "饺子": ["dumpling", "dumplings", "gyoza", "餃子"],
+    "鸡蛋面": ["egg noodle", "egg noodles"],
+    # ── 豆类 / Legumes ──
+    "红豆": ["赤小豆", "red bean", "red beans", "あずき"],
+    "绿豆": ["mung bean", "mung beans", "green gram"],
+    "黄豆": ["大豆", "soybean", "soybeans", "大豆"],
+    "花生": ["peanut", "peanuts", "落花生", "らっかせい"],
+    # ── 干货 / Dry goods ──
+    "木耳": ["黑木耳", "wood ear", "black fungus", "きくらげ"],
+    "香菇": ["干香菇", "shiitake", "椎茸", "しいたけ"],
+    "紫菜": ["海苔", "nori", "seaweed", "のり"],
+    "海带": ["kelp", "昆布"],
+    "银耳": ["白木耳", "snow fungus", "しろきくらげ"],
+    # ── 水果 / Fruits ──
+    "柠檬": ["lemon", "レモン"],
+    "苹果": ["apple", "りんご", "リンゴ"],
+    "香蕉": ["banana", "バナナ"],
+    "草莓": ["strawberry", "strawberries", "いちご"],
+    "葡萄": ["grapes", "grape", "ぶどう"],
+    "橙子": ["orange", "橙", "オレンジ"],
+    # ── 调味品 / Seasonings (basic) ──
+    "盐": ["食盐", "salt", "食塩"],
+    "糖": ["白糖", "sugar", "グラニュー糖"],
+    "酱油": ["生抽", "老抽", "soy sauce", "醤油", "しょうゆ"],
+    "醋": ["vinegar", "酢"],
+    "料酒": ["cooking wine", "料理酒"],
+    "淀粉": ["生粉", "cornstarch", "potato starch", "片栗粉"],
+    "食用油": ["植物油", "菜籽油", "玉米油", "cooking oil", "oil", "サラダ油"],
+    "芝麻油": ["麻油", "香油", "sesame oil", "ごま油"],
+    "蚝油": ["oyster sauce", "オイスターソース"],
+    "豆瓣酱": ["doubanjiang", "toban djan"],
+    "番茄酱": ["ketchup", "tomato sauce", "ケチャップ"],
+    "蜂蜜": ["honey", "はちみつ"],
+    # ── 香料 / Spices ──
+    "胡椒": ["白胡椒", "黑胡椒", "pepper", "black pepper", "white pepper", "こしょう"],
+    "花椒": ["Sichuan pepper", "Szechuan pepper", "山椒"],
+    "八角": ["star anise", "スターアニス"],
+    "桂皮": ["肉桂", "cinnamon", "シナモン"],
+    "香叶": ["bay leaf", "bay leaves", "ローリエ"],
+}
+
+
+SYNONYM_MAP: dict[str, list[str]] = dict(DEFAULT_SYNONYM_MAP)
 
 def load_synonym_map(map_data: dict[str, list[str]]):
     """Load a synonym map for ingredient name normalization."""
@@ -73,7 +182,7 @@ def get_recipes(
         )
     if favorite_only:
         q = q.filter(Recipe.id.in_(
-            db.query(RecipeFavorite.recipe_id).subquery()
+            db.query(RecipeFavorite.recipe_id)
         ))
 
     results = q.all()
@@ -329,13 +438,19 @@ def record_recommendation(db: Session, recipe_id: int):
     db.commit()
 
 
+def record_recommendations(db: Session, recipe_ids: list[int]):
+    """Record that multiple recipes were recommended (batch)."""
+    for recipe_id in recipe_ids:
+        db.add(RecipeUsageHistory(recipe_id=recipe_id, event_type="recommended"))
+    db.commit()
+
+
 # ─── Rule-based recommendations ─────────────────────────────────
 
 
 def get_recommendations(
     db: Session,
     limit: int = 10,
-    include_expired: bool = False,
 ) -> list[dict]:
     """Generate rule-based recipe recommendations from inventory.
 
