@@ -41,7 +41,7 @@ Generates a daily list of recipes to cook based on current inventory.
 
 ### How It Works
 
-1. Gathers all `active` and `expiring soon` inventory items
+1. Gathers all `active` and `expiring soon` inventory items whose category is recipe-eligible (`recipe_usage` is `always` or `conditional`; see [Categories](features.md#categories))
 2. Normalizes item names using the [ingredient synonym table](#ingredient-matching) for matching
 3. Scores each recipe using local rules
 4. Returns the top-ranked recipes
@@ -57,6 +57,8 @@ Generates a daily list of recipes to cook based on current inventory.
 | Recommended in last 7 days | −10 (diversity) |
 | Not recommended in last 7 days | +5 (novelty) |
 
+Ingredients matched from `conditional` categories (drinks, snacks, frozen, canned, etc.) get reduced weight: +6 instead of +10, and +20 instead of +40 when expiring. Whether an ingredient counts as `always` is checked after synonym resolution, so `西红柿` in a vegetables category keeps full weight when it matches a recipe's `番茄`.
+
 ### Ingredient Matching
 
 To handle cases where inventory names don't exactly match recipe ingredient names (e.g., `西红柿` vs `番茄`, `potato` vs `土豆`, `じゃがいも`), the app uses a local synonym table (`DEFAULT_SYNONYM_MAP`).
@@ -65,7 +67,7 @@ This is **deterministic**, not AI-based. It covers common names in Chinese, Engl
 
 ### Recommendation History
 
-When recommendations are generated, the results are recorded in the usage history. Recipes recommended in the last 7 days receive a scoring penalty to ensure diversity. Over time, the same recipes won't dominate daily recommendations.
+Each call to `GET /api/recipes/recommendations` records the returned recipes in the usage history (`recommended` events). Recipes recommended in the last 7 days receive a scoring penalty to ensure diversity. Over time, the same recipes won't dominate daily recommendations.
 
 ### Consume Preview and Cook
 
@@ -97,9 +99,10 @@ Select an explore idea and expand it into a structured recipe draft with estimat
 
 ### AI Boundary
 
-Currently AI is used **only** for Explore Recipes. 
+Currently AI is used **only** for Explore Recipes. Today Recommendations use local scoring (decided in PR #14).
 
 - If AI is disabled or fails, Explore endpoints return descriptive error messages
+- `POST /api/recipes/ai/today` is **deprecated** (shown as deprecated in `/docs`). It is kept only for compatibility. Its list is always the rule-based result: when AI is enabled, AI adds only the `summary`, and on any failure it returns `mode="rule_based_fallback"`. New frontend code should call `GET /api/recipes/recommendations`.
 - AI configuration uses the following environment variables:
 
 Example:

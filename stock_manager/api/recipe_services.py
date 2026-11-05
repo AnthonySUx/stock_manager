@@ -489,9 +489,20 @@ def get_recommendations(
         if item.category.recipe_usage == RECIPE_USAGE_ALWAYS:
             always_names.add(item_lower)
 
-    # Also add normalized names
-    inv_norm = _build_normalized_set(list(inventory_names))
-    exp_norm = _build_normalized_set(list(expiring_names))
+    # Also add normalized (synonym-resolved) names, lower-cased for comparison
+    inv_norm = {n.lower() for n in _build_normalized_set(list(inventory_names))}
+    exp_norm = {n.lower() for n in _build_normalized_set(list(expiring_names))}
+    always_norm = {n.lower() for n in _build_normalized_set(list(always_names))}
+
+    def _is_always(ingredient_name: str) -> bool:
+        """True if the matched ingredient comes from an always-usage item.
+
+        Checks both the raw name and its synonym-resolved form, so an
+        always item named e.g. 西红柿 is not down-weighted when matched to
+        a recipe ingredient named 番茄.
+        """
+        raw = ingredient_name.strip().lower()
+        return raw in always_names or _normalize_name(ingredient_name).lower() in always_norm
 
     # Get all recipes with their ingredients
     recipes = db.query(Recipe).all()
@@ -540,10 +551,10 @@ def get_recommendations(
         score = len(matched) * 10 + len(expiring_used) * 40
         # Reduce score for conditional (non-always) matched items
         for m in matched:
-            if m.strip().lower() not in always_names:
+            if not _is_always(m):
                 score -= 4  # +10 becomes +6 for conditional
         for e in expiring_used:
-            if e.strip().lower() not in always_names:
+            if not _is_always(e):
                 score -= 20  # +40 becomes +20 for conditional
         score -= len(missing) * 5
         if recipe.id in fav_ids:
