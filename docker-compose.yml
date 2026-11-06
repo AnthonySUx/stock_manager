@@ -5,13 +5,17 @@ services:
     image: mysql:8
     container_name: stock_manager_mysql
     restart: unless-stopped
+    # Passwords come from .env (see .env.example). The defaults are for local
+    # development only. They are applied when the volume is first created;
+    # changing them later does not change existing MySQL users.
     environment:
-      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_password}
       MYSQL_DATABASE: stock_manager
       MYSQL_USER: stock_user
-      MYSQL_PASSWORD: stock_password
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-stock_password}
+    # Only reachable from this machine, not from the local network.
     ports:
-      - "3306:3306"
+      - "127.0.0.1:3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     command:
