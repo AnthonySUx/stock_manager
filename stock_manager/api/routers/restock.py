@@ -148,6 +148,14 @@ def clean_restock(
     status: str = Query(default="done"),
     db: Session = Depends(get_session),
 ):
-    """Batch delete restock items by status (default: done)."""
+    """Batch delete restock items by status (default: done).
+
+    Only `done` items can be cleaned; pending items must be deleted one by one.
+    """
+    if status != "done":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot clean restock items with status '{status}'. Allowed: ['done']",
+        )
     count = delete_restock_items_by_status(db, status)
     return {"message": f"{count} restock item(s) deleted"}

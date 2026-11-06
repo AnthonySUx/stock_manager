@@ -81,8 +81,18 @@ Create `.env` in the project root:
 
 ```env
 DATABASE_URL=mysql+pymysql://stock_user:stock_password@127.0.0.1:3306/stock_manager
-API_HOST=0.0.0.0
+
+# Docker MySQL passwords (used when the volume is first created).
+# If you change MYSQL_PASSWORD, change it in DATABASE_URL too.
+MYSQL_ROOT_PASSWORD=root_password
+MYSQL_PASSWORD=stock_password
+
+# 127.0.0.1 = only this machine. See 3.6 for testing on a real phone.
+API_HOST=127.0.0.1
 API_PORT=8000
+
+# Browser origins allowed by CORS (Expo web). Native apps are not affected.
+# CORS_ALLOW_ORIGINS=http://localhost:8081,http://127.0.0.1:8081,http://localhost:19006
 
 # AI recipe recommendations (optional, for Explore Recipes)
 # AI_RECIPE_ENABLED=false
@@ -122,7 +132,7 @@ pip install -e .
 ### 3.2 Start the API Server
 
 ```bash
-uvicorn stock_manager.api.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn stock_manager.api.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 ### 3.3 Verify
@@ -175,6 +185,23 @@ Re-import HowToCook recipes if you need them:
 python scripts/import_howtocook.py /path/to/HowToCook
 ```
 
+### 3.6 Network Exposure and Testing on a Real Phone
+
+By default the API listens on `127.0.0.1`, so only this machine can reach it:
+
+- iOS Simulator (`http://localhost:8000/api`) and Android Emulator (`http://10.0.2.2:8000/api`) work as usual.
+- Docker MySQL is published on `127.0.0.1:3306` only.
+
+The API has no authentication yet (see issue #41). To test on a real phone, start the backend on the LAN only while you need it:
+
+```bash
+API_HOST=0.0.0.0 ./scripts/start_backend.sh
+```
+
+Then set `frontend/app.json` → `expo.extra.apiBaseUrl` to `http://YOUR_MAC_IP:8000/api`. Anyone on the same network can reach the API while it runs this way.
+
+Bulk cleanup endpoints only delete finished records: `POST /api/items/clean` accepts `consumed` and `expired`, and `POST /api/restock/clean` accepts `done`. Other statuses return `400`.
+
 ---
 
 ## 4. Frontend (Expo + React Native)
@@ -223,7 +250,7 @@ docker compose up -d
 # Terminal 2: Backend
 cd /path/to/stock_manager
 source .venv/bin/activate
-uvicorn stock_manager.api.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn stock_manager.api.main:app --reload --host 127.0.0.1 --port 8000
 
 # Terminal 3: Frontend
 cd /path/to/stock_manager/frontend

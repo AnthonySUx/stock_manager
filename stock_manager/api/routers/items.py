@@ -21,6 +21,9 @@ from stock_manager.api.services import (
 
 router = APIRouter()
 
+# Statuses that POST /clean may delete in bulk (issue #40).
+CLEANABLE_ITEM_STATUSES = {"consumed", "expired"}
+
 
 def _calculate_current_expiration_date(item_data: dict) -> str:
     """Determine the effective expiration date for new stock items."""
@@ -207,6 +210,16 @@ def clean_items(
     statuses: list[str] = Query(default=["consumed"]),
     db: Session = Depends(get_session),
 ):
-    """Batch delete items by statuses (default: consumed)."""
+    """Batch delete items by statuses (default: consumed).
+
+    Only finished items can be cleaned: `consumed` and `expired`. Active and
+    expiring-soon stock must be deleted one by one.
+    """
+    disallowed = sorted(set(statuses) - CLEANABLE_ITEM_STATUSES)
+    if disallowed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot clean items with status {disallowed}. Allowed: {sorted(CLEANABLE_ITEM_STATUSES)}",
+        )
     count = delete_items_by_statuses(db, statuses)
     return {"message": f"{count} item(s) deleted"}

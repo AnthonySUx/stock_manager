@@ -1,5 +1,6 @@
 """FastAPI application entry point for Stock Manager."""
 
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -37,11 +38,20 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — allow Expo development server
+# CORS — only browser clients (e.g. Expo web) are affected; native iOS/Android
+# requests do not use CORS. Origins come from CORS_ALLOW_ORIGINS (comma-separated).
+DEFAULT_CORS_ORIGINS = "http://localhost:8081,http://127.0.0.1:8081,http://localhost:19006"
+
+
+def _cors_origins() -> list[str]:
+    raw = os.getenv("CORS_ALLOW_ORIGINS", DEFAULT_CORS_ORIGINS)
+    return [o.strip() for o in raw.split(",") if o.strip()]
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_origins(),
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
