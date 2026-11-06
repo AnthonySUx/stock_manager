@@ -87,6 +87,10 @@ DATABASE_URL=mysql+pymysql://stock_user:stock_password@127.0.0.1:3306/stock_mana
 MYSQL_ROOT_PASSWORD=root_password
 MYSQL_PASSWORD=stock_password
 
+# Shared API token (required). See 3.7.
+API_TOKEN=paste-a-generated-token-here
+# API_AUTH_DISABLED=true   # local development only
+
 # 127.0.0.1 = only this machine. See 3.6 for testing on a real phone.
 API_HOST=127.0.0.1
 API_PORT=8000
@@ -143,9 +147,15 @@ curl http://localhost:8000/api/health
 
 Expected: `{"status":"ok","version":"0.9.0"}`
 
+`/api/health` is public. Every other endpoint needs the token (see 3.7):
+
+```bash
+curl -H "Authorization: Bearer $API_TOKEN" http://localhost:8000/api/items
+```
+
 ### 3.4 API Documentation
 
-Open http://localhost:8000/docs in your browser.
+Open http://localhost:8000/docs in your browser. Click **Authorize** and paste the API token to try protected endpoints.
 
 ### 3.5 Rebuilding the Database After a Schema Change
 
@@ -192,7 +202,7 @@ By default the API listens on `127.0.0.1`, so only this machine can reach it:
 - iOS Simulator (`http://localhost:8000/api`) and Android Emulator (`http://10.0.2.2:8000/api`) work as usual.
 - Docker MySQL is published on `127.0.0.1:3306` only.
 
-The API has no authentication yet (see issue #41). To test on a real phone, start the backend on the LAN only while you need it:
+Requests still need the API token (3.7), but anyone on the network can try to reach the API. To test on a real phone, start the backend on the LAN only while you need it:
 
 ```bash
 API_HOST=0.0.0.0 ./scripts/start_backend.sh
@@ -201,6 +211,29 @@ API_HOST=0.0.0.0 ./scripts/start_backend.sh
 Then set `frontend/app.json` → `expo.extra.apiBaseUrl` to `http://YOUR_MAC_IP:8000/api`. Anyone on the same network can reach the API while it runs this way.
 
 Bulk cleanup endpoints only delete finished records: `POST /api/items/clean` accepts `consumed` and `expired`, and `POST /api/restock/clean` accepts `done`. Other statuses return `400`.
+
+### 3.7 API Authentication
+
+All endpoints under `/api/` except `/api/health` require a shared token:
+
+```
+Authorization: Bearer <API_TOKEN>
+```
+
+There is one token per installation (one household). There are no per-member accounts.
+
+1. Generate a token and put it in `.env` as `API_TOKEN`:
+
+   ```bash
+   python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+   ```
+
+2. Restart the backend. If `API_TOKEN` is empty, the backend refuses to start with an explanatory error.
+3. Give the same token to the app (see the frontend notes in issue #41).
+
+Missing or wrong tokens return `401` with `WWW-Authenticate: Bearer`.
+
+For local development only, `API_AUTH_DISABLED=true` skips the check. Do not combine it with `API_HOST=0.0.0.0`.
 
 ---
 

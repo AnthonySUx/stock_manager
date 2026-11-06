@@ -39,11 +39,19 @@ def db_session():
         Base.metadata.drop_all(bind=test_engine)
 
 
+TEST_API_TOKEN = "test-api-token"
+
+
 @pytest.fixture()
 def client(db_session, monkeypatch):
-    """Provide a FastAPI TestClient with an isolated SQLite database."""
+    """Provide a FastAPI TestClient with an isolated SQLite database.
+
+    The client sends the shared API token (issue #41) on every request.
+    """
     # Must patch before TestClient enters startup lifespan
     monkeypatch.setattr("stock_manager.api.main.engine", test_engine)
+    monkeypatch.setenv("API_TOKEN", TEST_API_TOKEN)
+    monkeypatch.delenv("API_AUTH_DISABLED", raising=False)
 
     def override_get_session():
         try:
@@ -53,7 +61,7 @@ def client(db_session, monkeypatch):
 
     app.dependency_overrides[get_session] = override_get_session
 
-    with TestClient(app) as test_client:
+    with TestClient(app, headers={"Authorization": f"Bearer {TEST_API_TOKEN}"}) as test_client:
         yield test_client
 
     app.dependency_overrides.clear()
