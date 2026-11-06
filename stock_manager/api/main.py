@@ -2,10 +2,11 @@
 
 import os
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from stock_manager import __version__
+from stock_manager.api.auth import check_auth_config, require_api_token
 from stock_manager.api.db import engine
 from stock_manager.api.models import Base
 from stock_manager.api.routers import items, restock, settings, recipes, categories
@@ -20,7 +21,8 @@ Stock Manager API — manage family stock, expiration reminders, and restocking 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Create database tables on startup if they do not exist."""
+    """Check auth config, then create database tables if they do not exist."""
+    check_auth_config()
     Base.metadata.create_all(bind=engine)
     from sqlalchemy.orm import sessionmaker
     from stock_manager.api.category_services import seed_default_categories
@@ -56,12 +58,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Routers
-app.include_router(items.router, prefix="/api/items", tags=["Stock Items"])
-app.include_router(restock.router, prefix="/api/restock", tags=["Restock Items"])
-app.include_router(settings.router, prefix="/api/settings", tags=["Settings"])
-app.include_router(recipes.router, prefix="/api/recipes", tags=["Recipes"])
-app.include_router(categories.router, prefix="/api/categories", tags=["Categories"])
+# Routers — all require the shared API token (issue #41); /api/health stays public.
+_auth = [Depends(require_api_token)]
+app.include_router(items.router, prefix="/api/items", tags=["Stock Items"], dependencies=_auth)
+app.include_router(restock.router, prefix="/api/restock", tags=["Restock Items"], dependencies=_auth)
+app.include_router(settings.router, prefix="/api/settings", tags=["Settings"], dependencies=_auth)
+app.include_router(recipes.router, prefix="/api/recipes", tags=["Recipes"], dependencies=_auth)
+app.include_router(categories.router, prefix="/api/categories", tags=["Categories"], dependencies=_auth)
 
 
 

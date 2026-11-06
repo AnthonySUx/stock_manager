@@ -48,6 +48,15 @@ Check:
 1. Backend is running: `curl http://localhost:8000/api/health`
 2. MySQL is running
 3. If on real device, use your Mac IP instead of `localhost`
+4. The app sends the API token (a `401` response means the token is missing or wrong)
+
+### `401 Missing or invalid API token`
+
+The request did not carry `Authorization: Bearer <API_TOKEN>`, or the token does not match `.env`. See [Setup §3.7](setup.md#37-api-authentication).
+
+### Backend fails to start: `API_TOKEN is not set`
+
+Set `API_TOKEN` in `.env` (see [Setup §3.7](setup.md#37-api-authentication)), or set `API_AUTH_DISABLED=true` for local development only.
 
 ### Connection refused
 
