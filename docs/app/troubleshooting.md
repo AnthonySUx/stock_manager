@@ -54,6 +54,12 @@ Check:
 
 The request did not carry `Authorization: Bearer <API_TOKEN>`, or the token does not match `.env`. See [Setup §3.7](setup.md#37-api-authentication).
 
+### `422 Unprocessable Entity`
+
+The request body failed validation, for example a date that is not `YYYY-MM-DD`
+(or does not exist, such as `2026-02-30`), or `null` sent for a required field.
+The response `detail` is a list; each entry names the field (`loc`) and the reason (`msg`).
+
 ### Backend fails to start: `API_TOKEN is not set`
 
 Set `API_TOKEN` in `.env` (see [Setup §3.7](setup.md#37-api-authentication)), or set `API_AUTH_DISABLED=true` for local development only.

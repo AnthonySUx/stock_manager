@@ -17,7 +17,8 @@ Users can:
 - Create personal recipes
 - Fork existing recipes as personal editable copies
 - Edit user-created recipes
-- Delete user-created recipes
+- Delete user-created recipes (its favorite and cooking history are removed with it;
+  recipes forked from it are kept)
 
 ### Sources
 
