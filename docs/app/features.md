@@ -86,7 +86,9 @@ Features:
 
 - View pending and done restock items
 - Add manual restock items
-- Mark items as done (with partial purchase support)
+- Mark items as done (with partial purchase support). Marking an item that is
+  already done returns `409 Conflict` and adds nothing to stock; the stock item
+  and the restock update are saved together or not at all.
 - Add purchased items to the main stock list
 - Edit and delete restock items
 

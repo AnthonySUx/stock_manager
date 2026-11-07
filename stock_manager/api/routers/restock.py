@@ -9,19 +9,19 @@ from sqlalchemy.orm import Session
 from stock_manager.api import schemas
 from stock_manager.api.db import get_session
 from stock_manager.api.services import (
-    create_item,
+    RestockAlreadyDoneError,
+    complete_restock_purchase,
     create_restock_item,
     delete_restock_item,
     delete_restock_items_by_status,
-    get_item,
     get_restock_item,
     get_restock_items,
-    mark_restock_item_done,
     update_restock_item,
-    update_restock_item_quantity,
 )
 
 router = APIRouter()
+
+RESTOCK_ALREADY_DONE_DETAIL = "Restock item is already done"
 
 
 @router.get("", response_model=list[schemas.RestockItemResponse])
@@ -80,17 +80,21 @@ def done_restock(
     payload: schemas.RestockDoneRequest,
     db: Session = Depends(get_session),
 ):
-    """Mark a restock item as done, optionally adding purchased items to stock.
+    """Add a purchase to stock and mark the restock item done.
 
     If the purchased quantity is less than the restock quantity, the remaining
     quantity stays on the restock list as pending.
+
+    Returns 409 if the item is already done (or changed by another request);
+    the stock item and restock update are written in a single transaction.
     """
     item = get_restock_item(db, item_id)
     if item is None:
         raise HTTPException(status_code=404, detail="Restock item not found")
+    if item.status == "done":
+        raise HTTPException(status_code=409, detail=RESTOCK_ALREADY_DONE_DETAIL)
 
     purchased_qty = payload.purchased_quantity
-    original_qty = item.quantity_value or purchased_qty
 
     # Add the purchased item(s) to stock
     final_category_id = payload.category_id or item.category_id
@@ -102,34 +106,29 @@ def done_restock(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    stock_item = create_item(
-        db,
-        {
-            "name": item.name,
-            "category_id": final_category_id,
-            "owner": payload.owner or "",
-            "purchase_date": payload.purchase_date or date.today().isoformat(),
-            "quantity_value": purchased_qty,
-            "quantity_unit": item.quantity_unit or "pcs",
-            "location": payload.location or "",
-            "unopened_expiration_date": payload.unopened_expiration_date or "infinite",
-            "opened_expiration_date": payload.opened_expiration_date,
-            "opened_date": payload.opened_date,
-            "current_expiration_date": payload.unopened_expiration_date or "infinite",
-            "status": "active",
-            "notes": item.notes,
-        },
-    )
+    stock_data = {
+        "name": item.name,
+        "category_id": final_category_id,
+        "owner": payload.owner or "",
+        "purchase_date": payload.purchase_date or date.today().isoformat(),
+        "quantity_value": purchased_qty,
+        "quantity_unit": item.quantity_unit or "pcs",
+        "location": payload.location or "",
+        "unopened_expiration_date": payload.unopened_expiration_date or "infinite",
+        "opened_expiration_date": payload.opened_expiration_date,
+        "opened_date": payload.opened_date,
+        "current_expiration_date": payload.unopened_expiration_date or "infinite",
+        "status": "active",
+        "notes": item.notes,
+    }
+    unit = item.quantity_unit or "pcs"
 
-    # If purchased less than asked, keep the rest as pending
-    remaining = original_qty - purchased_qty
-    if remaining > 0:
-        update_restock_item_quantity(db, item_id, remaining)
-    else:
-        # Fully purchased: mark as done
-        mark_restock_item_done(db, item_id)
+    try:
+        complete_restock_purchase(db, item, purchased_qty, stock_data)
+    except RestockAlreadyDoneError:
+        raise HTTPException(status_code=409, detail=RESTOCK_ALREADY_DONE_DETAIL)
 
-    return {"message": f"Added {purchased_qty} {item.quantity_unit or 'pcs'} to stock"}
+    return {"message": f"Added {purchased_qty} {unit} to stock"}
 
 
 @router.delete("/{item_id}", response_model=schemas.MessageResponse)
