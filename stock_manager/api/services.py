@@ -343,6 +343,59 @@ def update_restock_item_quantity(db: Session, item_id: int, quantity: float) -> 
     return True
 
 
+class RestockAlreadyDoneError(Exception):
+    """Raised when a restock item is no longer pending (already done)."""
+
+
+def complete_restock_purchase(
+    db: Session,
+    restock_item: RestockItem,
+    purchased_quantity: float,
+    stock_data: dict,
+) -> Item:
+    """Add a purchase to stock and update the restock item in one transaction.
+
+    The restock row is updated with a guarded UPDATE (still pending, quantity
+    unchanged since it was read), so a repeated or concurrent request cannot
+    add the same purchase twice. Nothing is written unless both steps succeed.
+
+    Raises:
+        RestockAlreadyDoneError: the item is done, or changed since it was read.
+    """
+    observed_qty = restock_item.quantity_value
+    original_qty = observed_qty or purchased_quantity
+    remaining = original_qty - purchased_quantity
+
+    guard = db.query(RestockItem).filter(
+        RestockItem.id == restock_item.id,
+        RestockItem.status == "pending",
+    )
+    if observed_qty is None:
+        guard = guard.filter(RestockItem.quantity_value.is_(None))
+    else:
+        guard = guard.filter(RestockItem.quantity_value == observed_qty)
+
+    if remaining > 0:
+        values = {RestockItem.quantity_value: remaining}
+    else:
+        values = {RestockItem.status: "done", RestockItem.done_at: datetime.utcnow()}
+
+    try:
+        updated = guard.update(values, synchronize_session=False)
+        if updated != 1:
+            raise RestockAlreadyDoneError(restock_item.id)
+        stock_item = Item(**stock_data)
+        db.add(stock_item)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    db.refresh(stock_item)
+    db.expire(restock_item)
+    return stock_item
+
+
 def delete_restock_item(db: Session, item_id: int) -> bool:
     """Delete a restock item."""
     item = db.query(RestockItem).filter(RestockItem.id == item_id).first()
