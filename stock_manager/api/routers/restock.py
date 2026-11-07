@@ -14,6 +14,7 @@ from stock_manager.api.services import (
     create_restock_item,
     delete_restock_item,
     delete_restock_items_by_status,
+    get_item,
     get_restock_item,
     get_restock_items,
     update_restock_item,
@@ -22,6 +23,24 @@ from stock_manager.api.services import (
 router = APIRouter()
 
 RESTOCK_ALREADY_DONE_DETAIL = "Restock item is already done"
+
+
+def _validate_references(
+    db: Session,
+    category_id: Optional[int] = None,
+    source_item_id: Optional[int] = None,
+) -> None:
+    """Return 400 for a category or source item that does not exist (issue #43)."""
+    from stock_manager.api.category_services import validate_category_exists
+    if category_id is not None:
+        try:
+            validate_category_exists(db, category_id)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    if source_item_id is not None and get_item(db, source_item_id) is None:
+        raise HTTPException(
+            status_code=400, detail=f"Source item id={source_item_id} not found"
+        )
 
 
 @router.get("", response_model=list[schemas.RestockItemResponse])
@@ -51,6 +70,7 @@ def add_restock(
     db: Session = Depends(get_session),
 ):
     """Add a new item to the restock list."""
+    _validate_references(db, payload.category_id, payload.source_item_id)
     item_data = payload.model_dump()
     item_data["status"] = "pending"
     return create_restock_item(db, item_data)
@@ -68,6 +88,7 @@ def edit_restock(
     if not item_data:
         raise HTTPException(status_code=400, detail="No fields to update")
 
+    _validate_references(db, item_data.get("category_id"))
     result = update_restock_item(db, item_id, item_data)
     if result is None:
         raise HTTPException(status_code=404, detail="Restock item not found")

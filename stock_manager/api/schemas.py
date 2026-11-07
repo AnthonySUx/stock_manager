@@ -1,9 +1,39 @@
 """Pydantic schemas for request/response validation."""
 
 from datetime import date, datetime
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import AfterValidator, BaseModel, Field, field_validator
+
+
+# ─── Date fields (issue #43) ──────────────────────────────────────
+
+INFINITE = "infinite"
+
+
+def _check_date(value: str) -> str:
+    """Accept a real calendar date in YYYY-MM-DD form."""
+    try:
+        parsed = date.fromisoformat(value)
+    except (TypeError, ValueError):
+        raise ValueError("must be a valid date in YYYY-MM-DD format")
+    if len(value) != 10 or parsed.isoformat() != value:
+        raise ValueError("must be a valid date in YYYY-MM-DD format")
+    return value
+
+
+def _check_date_or_infinite(value: str) -> str:
+    """Accept YYYY-MM-DD or the literal 'infinite' (never expires)."""
+    if value == INFINITE:
+        return value
+    try:
+        return _check_date(value)
+    except ValueError:
+        raise ValueError("must be a valid date in YYYY-MM-DD format or 'infinite'")
+
+
+DateStr = Annotated[str, AfterValidator(_check_date)]
+ExpirationStr = Annotated[str, AfterValidator(_check_date_or_infinite)]
 
 
 # ─── Categories ───────────────────────────────────────────────────
@@ -50,14 +80,14 @@ class ItemCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     category_id: int = Field(..., gt=0)
     owner: str = Field(..., min_length=1, max_length=100)
-    purchase_date: str = Field(default_factory=lambda: date.today().isoformat())
+    purchase_date: DateStr = Field(default_factory=lambda: date.today().isoformat())
     quantity_value: float = Field(..., gt=0)
     quantity_unit: str = Field(..., min_length=1, max_length=50)
     location: str = Field(..., min_length=1, max_length=100)
-    unopened_expiration_date: str = Field(..., min_length=1)
-    opened_expiration_date: Optional[str] = None
-    opened_date: Optional[str] = None
-    current_expiration_date: str = Field(...)
+    unopened_expiration_date: ExpirationStr = Field(..., min_length=1)
+    opened_expiration_date: Optional[ExpirationStr] = None
+    opened_date: Optional[DateStr] = None
+    current_expiration_date: ExpirationStr = Field(...)
     status: str = Field(default="active")
     notes: Optional[str] = None
 
@@ -66,16 +96,30 @@ class ItemUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     category_id: Optional[int] = Field(None, gt=0)
     owner: Optional[str] = Field(None, min_length=1, max_length=100)
-    purchase_date: Optional[str] = None
+    purchase_date: Optional[DateStr] = None
     quantity_value: Optional[float] = Field(None, gt=0)
     quantity_unit: Optional[str] = Field(None, min_length=1, max_length=50)
     location: Optional[str] = Field(None, min_length=1, max_length=100)
-    unopened_expiration_date: Optional[str] = None
-    opened_expiration_date: Optional[str] = None
-    opened_date: Optional[str] = None
-    current_expiration_date: Optional[str] = None
+    unopened_expiration_date: Optional[ExpirationStr] = None
+    opened_expiration_date: Optional[ExpirationStr] = None
+    opened_date: Optional[DateStr] = None
+    current_expiration_date: Optional[ExpirationStr] = None
     status: Optional[str] = None
     notes: Optional[str] = None
+
+    # Omitting a field leaves it unchanged; sending null for a NOT NULL
+    # column is rejected with 422 instead of failing in the database.
+    @field_validator(
+        "name", "category_id", "owner", "purchase_date", "quantity_value",
+        "quantity_unit", "location", "unopened_expiration_date",
+        "current_expiration_date", "status",
+        mode="before",
+    )
+    @classmethod
+    def reject_null_for_required(cls, value, info):
+        if value is None:
+            raise ValueError(f"{info.field_name} cannot be null")
+        return value
 
 
 class ConsumeRequest(BaseModel):
@@ -113,7 +157,7 @@ class RestockItemCreate(BaseModel):
     category_id: Optional[int] = Field(None, gt=0)
     quantity_value: Optional[float] = Field(None, gt=0)
     quantity_unit: Optional[str] = Field(None, max_length=50)
-    source_item_id: Optional[int] = None
+    source_item_id: Optional[int] = Field(None, gt=0)
     notes: Optional[str] = None
 
 
@@ -131,11 +175,11 @@ class RestockDoneRequest(BaseModel):
     # Fields for adding to stock
     category_id: Optional[int] = Field(None, gt=0)
     owner: Optional[str] = None
-    purchase_date: Optional[str] = None
+    purchase_date: Optional[DateStr] = None
     location: Optional[str] = None
-    unopened_expiration_date: Optional[str] = None
-    opened_expiration_date: Optional[str] = None
-    opened_date: Optional[str] = None
+    unopened_expiration_date: Optional[ExpirationStr] = None
+    opened_expiration_date: Optional[ExpirationStr] = None
+    opened_date: Optional[DateStr] = None
 
 
 class RestockItemResponse(BaseModel):

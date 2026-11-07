@@ -42,6 +42,13 @@ Displays current stock with:
 Edit one or more fields: name, category, owner, purchase date, quantity, location, expiration dates, notes.
 Current expiration date and status are calculated automatically.
 
+Validation (returns `422`):
+
+- Dates must be real calendar dates in `YYYY-MM-DD` form (`2026-02-30` is rejected).
+  Expiration dates may also be `infinite`; `purchase_date` and `opened_date` may not.
+- On edit, leave a field out to keep it. Sending `null` is only allowed for
+  `opened_date`, `opened_expiration_date` and `notes`.
+
 ### Consume and Delete
 
 - **Consume**: Partial or full consumption. Status set to `consumed` when quantity reaches zero. Optionally add to restock list.
@@ -54,6 +61,7 @@ Current expiration date and status are calculated automatically.
 Inventory categories are stored in a `categories` table. Stock items reference one by
 `category_id` (required). Restock items can leave it empty (`category_id` nullable), but
 a category is required when a restock item is marked done and moved into stock.
+A restock item that points to a category or source item that does not exist is rejected with `400`.
 
 - Two levels at most: top-level category → subcategory.
 - Default system categories are seeded on backend startup. Examples: 食品, 药品/健康, 家居清洁,

@@ -329,6 +329,15 @@ def delete_recipe(db: Session, recipe_id: int) -> bool:
         return False
     if recipe.source_type not in ("user", "ai_saved"):
         return False
+    # Remove rows that reference this recipe so the delete does not violate
+    # foreign keys (issue #43). Forks are kept: the `forks` backref sets their
+    # base_recipe_id to NULL when the recipe is deleted.
+    db.query(RecipeFavorite).filter(RecipeFavorite.recipe_id == recipe_id).delete(
+        synchronize_session=False
+    )
+    db.query(RecipeUsageHistory).filter(
+        RecipeUsageHistory.recipe_id == recipe_id
+    ).delete(synchronize_session=False)
     db.delete(recipe)
     db.commit()
     return True
