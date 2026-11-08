@@ -68,6 +68,11 @@ A restock item that points to a category or source item that does not exist is r
   个人护理, 宠物, 母婴, 电子/工具, 其他, plus subcategories such as 蔬菜, 肉类, 饮品.
 - Users can add their own top-level categories or subcategories. System categories cannot be deleted.
   A category cannot be deleted while it has subcategories or while stock or restock items still use it.
+- Moving: `PATCH /api/categories/{id}` with `"parent_id": <top-level id>` moves a user
+  subcategory under another parent; `"parent_id": null` moves it to top level. Leaving
+  `parent_id` out keeps the current parent. System categories keep their name and parent,
+  and a name must be unique under its (new) parent.
+- Seeding is idempotent: a missing default subcategory is recreated under its existing parent.
 - API: `GET /api/categories` (tree), `GET /api/categories/flat`, `GET /api/categories/{id}`,
   `POST`, `PATCH /api/categories/{id}`, `DELETE /api/categories/{id}`.
 

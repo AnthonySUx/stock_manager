@@ -114,8 +114,11 @@ def seed_default_categories(db: Session) -> None:
         if slug in existing:
             continue
         parent_id = None
-        if parent_slug and parent_slug in cats:
-            parent_id = cats[parent_slug].id
+        if parent_slug:
+            # Parent may be created in this run or already exist in the DB (#44).
+            parent = cats.get(parent_slug) or get_category_by_slug(db, parent_slug)
+            if parent is not None:
+                parent_id = parent.id
         cat = Category(
             name=name,
             slug=slug,
@@ -266,6 +269,16 @@ def create_category(db: Session, data: dict) -> Category:
     return cat
 
 
+def _name_taken_under_parent(
+    db: Session, name: str, parent_id: Optional[int], exclude_id: int
+) -> bool:
+    """True if another category with this name exists under the same parent."""
+    parent_cond = Category.parent_id.is_(None) if parent_id is None else Category.parent_id == parent_id
+    return db.query(Category).filter(
+        Category.name == name, parent_cond, Category.id != exclude_id
+    ).first() is not None
+
+
 def update_category(db: Session, category_id: int, data: dict) -> Optional[Category]:
     """Update a category. System categories cannot change name or parent_id."""
     cat = get_category(db, category_id)
@@ -273,18 +286,22 @@ def update_category(db: Session, category_id: int, data: dict) -> Optional[Categ
         return None
 
     name = data.get("name")
-    parent_id = data.get("parent_id")
     recipe_usage = data.get("recipe_usage")
     sort_order = data.get("sort_order")
 
+    # `data` holds only the fields the client sent (exclude_unset), so an
+    # explicit "parent_id": null means "move to top level" (#44).
+    parent_changed = "parent_id" in data and data["parent_id"] != cat.parent_id
+    target_parent_id = data["parent_id"] if parent_changed else cat.parent_id
+
     if cat.is_system:
-        if name is not None or parent_id is not None:
+        if name is not None or parent_changed:
             raise ValueError("Cannot change name or parent of system categories")
 
-    if parent_id is not None:
-        if parent_id == category_id:
+    if parent_changed and target_parent_id is not None:
+        if target_parent_id == category_id:
             raise ValueError("Category cannot be its own parent")
-        parent = validate_category_exists(db, parent_id)
+        parent = validate_category_exists(db, target_parent_id)
         if not _is_top_level(parent):
             raise ValueError("Only two levels allowed. Parent must be a top-level category.")
         if _has_children(db, category_id):
@@ -294,17 +311,16 @@ def update_category(db: Session, category_id: int, data: dict) -> Optional[Categ
         name = name.strip()
         if not name:
             raise ValueError("Category name is required")
-        existing = db.query(Category).filter(
-            Category.name == name,
-            Category.parent_id == (parent_id if parent_id is not None else cat.parent_id),
-            Category.id != category_id,
-        ).first()
-        if existing:
-            raise ValueError(f"Category '{name}' already exists under this parent")
-        cat.name = name
 
-    if parent_id is not None:
-        cat.parent_id = parent_id
+    if name is not None or parent_changed:
+        final_name = name if name is not None else cat.name
+        if _name_taken_under_parent(db, final_name, target_parent_id, category_id):
+            raise ValueError(f"Category '{final_name}' already exists under this parent")
+
+    if name is not None:
+        cat.name = name
+    if parent_changed:
+        cat.parent_id = target_parent_id
     if recipe_usage is not None:
         if recipe_usage not in RECIPE_USAGES:
             raise ValueError(f"Invalid recipe_usage '{recipe_usage}'")
