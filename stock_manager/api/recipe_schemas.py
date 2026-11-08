@@ -2,7 +2,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class IngredientSchema(BaseModel):
@@ -176,6 +176,7 @@ class CookRecipeResponse(BaseModel):
 
 class ExploreStructuredPreferences(BaseModel):
     """Structured preference fields for recipe exploration."""
+    # When non-empty, only these inventory items are sent to the AI (#45).
     inventory_item_ids: list[int] = []
     extra_ingredients: list[str] = []
     flavors: list[str] = []
@@ -194,6 +195,23 @@ class ExploreRequest(BaseModel):
     mode: str = Field(..., pattern="^(structured|natural_language)$")
     structured: Optional[ExploreStructuredPreferences] = None
     natural_language: Optional[str] = None
+
+    @model_validator(mode="after")
+    def check_mode_matches_payload(self):
+        """`mode` decides which input is used; the other one must be empty (#45)."""
+        text = (self.natural_language or "").strip()
+        if self.mode == "structured":
+            if self.structured is None:
+                raise ValueError("mode 'structured' requires 'structured'")
+            if text:
+                raise ValueError("mode 'structured' does not accept 'natural_language'")
+        else:
+            if not text:
+                raise ValueError("mode 'natural_language' requires non-empty 'natural_language'")
+            if self.structured is not None:
+                raise ValueError("mode 'natural_language' does not accept 'structured'")
+            self.natural_language = text
+        return self
 
 
 class ExploreIdea(BaseModel):

@@ -177,27 +177,57 @@ async def explore_recipes_endpoint(
     data: ExploreRequest,
     db: Session = Depends(get_session),
 ):
+    """Generate cooking ideas from inventory with structured or free-text input.
+
+    `structured.inventory_item_ids` limits the inventory sent to the AI; unknown
+    or ineligible ids return 400. DB work runs in a threadpool so the event
+    loop is not blocked while the AI call is awaited.
+    """
+    from starlette.concurrency import run_in_threadpool
     from stock_manager.api.explore_services import explore_ideas
+
+    structured = data.structured.model_dump() if data.structured else None
+    selected_ids = (structured or {}).get("inventory_item_ids") or []
+
+    inv_dicts, bad_ids = await run_in_threadpool(_load_explore_inventory, db, selected_ids)
+    if bad_ids:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Inventory items not found or not usable for recipes: {bad_ids}",
+        )
+
+    # ExploreRequest guarantees exactly one of structured / natural_language is set.
+    return await explore_ideas(
+        inv_dicts, structured=structured, natural_language=data.natural_language
+    )
+
+
+def _load_explore_inventory(db: Session, selected_ids: list[int]) -> tuple[list[dict], list[int]]:
+    """Return recipe-eligible, usable inventory (optionally only `selected_ids`)
+    and the selected ids that are unknown or not eligible."""
     from stock_manager.api.models import Item, Category
 
-    inventory_items = (
+    query = (
         db.query(Item)
         .join(Category, Item.category_id == Category.id)
         .filter(
             Item.status.in_(["active", "expiring soon"]),
             Category.recipe_usage.in_(["always", "conditional"]),
         )
-        .all()
     )
+    wanted = list(dict.fromkeys(selected_ids))  # dedupe, keep order
+    if wanted:
+        query = query.filter(Item.id.in_(wanted))
+    items = query.all()
 
-    inv_dicts = [{"name": i.name, "quantity": i.quantity_value, "unit": i.quantity_unit, "status": i.status, "recipe_usage": i.category.recipe_usage} for i in inventory_items]
-
-    structured = data.structured.model_dump() if data.structured else None
-    nat_lang = data.natural_language
-
-    import asyncio
-    result = await explore_ideas(inv_dicts, structured=structured, natural_language=nat_lang)
-    return result
+    found = {i.id for i in items}
+    bad_ids = [i for i in wanted if i not in found]
+    inv_dicts = [
+        {"name": i.name, "quantity": i.quantity_value, "unit": i.quantity_unit,
+         "status": i.status, "recipe_usage": i.category.recipe_usage}
+        for i in items
+    ]
+    return inv_dicts, bad_ids
 
 
 @router.post("/explore/expand", response_model=ExpandResponse)

@@ -131,9 +131,18 @@ def _parse_explore_response(raw: str) -> Optional[list[dict]]:
         else:
             return None
 
-    ideas = data.get("ideas", [])
+    # Accept {"ideas": [...]} or a bare list of ideas (#45).
+    if isinstance(data, list):
+        ideas = data
+    elif isinstance(data, dict):
+        ideas = data.get("ideas", [])
+    else:
+        return None
     if not isinstance(ideas, list) or not ideas:
         return None
+
+    from pydantic import ValidationError
+    from stock_manager.api.recipe_schemas import ExploreIdea
 
     validated = []
     for idea in ideas:
@@ -150,6 +159,13 @@ def _parse_explore_response(raw: str) -> Optional[list[dict]]:
         idea.setdefault("cuisine_group", None)
         idea.setdefault("cuisine", None)
         idea.setdefault("cooking_method", None)
+        try:
+            # Drop ideas whose fields have the wrong types instead of failing
+            # response validation with a 500.
+            ExploreIdea(**idea)
+        except (ValidationError, TypeError):
+            logger.warning("Skipping malformed explore idea: %r", idea.get("title"))
+            continue
         validated.append(idea)
 
     return validated if validated else None
@@ -216,6 +232,9 @@ async def expand_to_recipe_draft(idea: dict) -> dict:
         else:
             data = json.loads(raw)
     except Exception:
+        data = None
+    if not isinstance(data, dict):
+        # Unparseable, or valid JSON that is not an object (e.g. a list).
         data = {"title": idea.get("title", ""), "ingredients": [], "steps": []}
 
     data.setdefault("title", idea.get("title", ""))

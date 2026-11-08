@@ -87,10 +87,35 @@ Generate creative cooking ideas from your current inventory. Unlike Today Recomm
 
 ### How It Works
 
-1. Sends your current inventory to the AI provider
-2. Optionally accepts structured preferences (flavors, cuisine, cooking methods, max time)
-3. Optionally accepts natural language prompts (e.g., "I want something light for dinner")
-4. Returns a list of creative cooking ideas with reasoning
+1. Sends your recipe-eligible inventory (active / expiring soon) to the AI provider
+2. Uses **one** input, chosen by `mode`:
+   - `structured`: preferences (flavors, cuisine, cooking methods, max time, …)
+   - `natural_language`: a free-text prompt (e.g., "I want something light for dinner")
+3. Returns a list of creative cooking ideas with reasoning
+
+### Request rules
+
+| `mode` | Required | Must be empty / null |
+|---|---|---|
+| `structured` | `structured` (object; `{}` is fine) | `natural_language` |
+| `natural_language` | `natural_language` (non-blank text) | `structured` |
+
+A mismatch returns `422`.
+
+`structured.inventory_item_ids` (optional): when non-empty, only those stock items are sent
+to the AI. Each id must be an active / expiring-soon item in a category with
+`recipe_usage` `always` or `conditional`; otherwise the request returns `400` and lists the bad ids.
+Empty or omitted → all eligible inventory.
+
+```json
+{"mode": "structured", "structured": {"inventory_item_ids": [12, 15], "flavors": ["spicy"]}}
+```
+
+### AI response handling
+
+The AI may answer with `{"ideas": [...]}` or a bare list of ideas; both work. Ideas without a
+title or with wrong field types are dropped. If nothing usable comes back, the response is `200`
+with `ideas: []` and the warning `"Failed to parse AI response."` (never a `500`).
 
 ### Expand Idea to Draft
 
