@@ -105,8 +105,25 @@ Ties in score are ordered by recipe id, so the list order is stable.
 
 After choosing a recipe:
 
-- **Consume Preview** (`GET /api/recipes/{id}/consume-preview`): Suggests which inventory items match the recipe's ingredients and could be consumed.
+- **Consume Preview** (`GET /api/recipes/{id}/consume-preview`): Suggests which inventory items match the recipe's ingredients and could be consumed. Nothing is changed.
 - **Cook** (`POST /api/recipes/{id}/cook`): Marks the recipe as cooked. The user confirms which items to consume, and inventory quantities are updated accordingly.
+
+#### Suggested amounts and units
+
+Each suggestion carries the amount in the **stock item's unit** (`unit`), because that is what
+Cook deducts. Units are compared, never converted:
+
+| Recipe amount | Stock unit | `suggested_quantity` | `needs_user_input` |
+| --- | --- | --- | --- |
+| `2 个` | `个` | `2` | `false` |
+| `500克` | `g` | `500` (aliases: 克/g, 千克/公斤/kg, 毫升/ml, 升/l, 个/pcs) | `false` |
+| `3 个` | `个`, only 1 in stock | `1` (capped at stock) | `false` |
+| `500 g` | `个` | `null` | `true` |
+| `适量`, `1/2`, `2` (no unit), none | any | `null` | `true` |
+
+When `needs_user_input` is `true`, the app must ask the user how much to deduct (in `unit`).
+`recipe_quantity` is the recipe amount as written (e.g. `500克`), for display; `confidence` is
+`high` when an amount is suggested and `low` otherwise.
 
 ---
 

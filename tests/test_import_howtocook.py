@@ -21,8 +21,9 @@ RECIPE_MD = """# {title}的做法
 
 ## 必备原料和工具
 
-- 鸡蛋
+- 鸡蛋 2个
 - 盐
+- 番茄（1个）
 
 ## 计算
 
@@ -51,7 +52,8 @@ NON_RECIPES = [
 
 
 def _counts(**overrides):
-    base = {"imported": 0, "existing": 0, "fixed": 0, "errors": 0, "non_recipe": 0, "pruned": 0}
+    base = {"imported": 0, "existing": 0, "fixed": 0, "quantities_fixed": 0,
+            "errors": 0, "non_recipe": 0, "pruned": 0}
     base.update(overrides)
     return base
 
@@ -144,7 +146,10 @@ class TestImport:
         }
         recipe = session.query(Recipe).filter_by(source_path="dishes/meat_dish/口水鸡/口水鸡.md").one()
         assert recipe.title == "口水鸡的做法"
-        assert [i.ingredient_name for i in recipe.ingredients] == ["鸡蛋", "盐"]
+        # Number and unit are stored separately, without leftover "（）" (#47).
+        assert [(i.ingredient_name, i.quantity, i.unit) for i in recipe.ingredients] == [
+            ("鸡蛋", "2", "个"), ("盐", None, None), ("番茄", "1", "个"),
+        ]
         assert len(recipe.steps) == 2
 
     def test_rerun_fixes_old_categories_and_adds_nothing(self, importer, repo, db):
@@ -163,6 +168,35 @@ class TestImport:
         assert _categories(session)["dishes/meat_dish/口水鸡/口水鸡.md"] == "meat_dish"
         assert _categories(session)["dishes/dessert/焦糖布丁/焦糖布丁.md"] == "dessert"
         assert session.query(Recipe).count() == 4
+
+    def test_rerun_splits_old_quantities(self, importer, repo, db):
+        from stock_manager.api.models import RecipeIngredient
+
+        url, session = db
+        importer.import_howtocook(str(repo), url)
+        # Rows written by the old importer kept the unit inside the quantity
+        # and left empty brackets in the name.
+        for ing in session.query(RecipeIngredient).filter_by(ingredient_name="鸡蛋").all():
+            ing.quantity = "2个"
+        for ing in session.query(RecipeIngredient).filter_by(ingredient_name="番茄").all():
+            ing.ingredient_name = "番茄（）"
+        salts = session.query(RecipeIngredient).filter_by(ingredient_name="盐").order_by(RecipeIngredient.id).all()
+        plain, odd = salts[0], salts[1]
+        # Brackets in a name with no unit were never cut by the importer.
+        plain.ingredient_name = "葱（）"
+        # A user-edited value that is not "<number><unit>" is left alone.
+        odd.quantity, odd.unit = "少许个", "个"
+        session.commit()
+
+        result = importer.import_howtocook(str(repo), url)
+
+        assert result == _counts(existing=4, quantities_fixed=8)
+        session.expire_all()
+        eggs = session.query(RecipeIngredient).filter_by(ingredient_name="鸡蛋").all()
+        assert {(i.quantity, i.unit) for i in eggs} == {("2", "个")}
+        assert session.query(RecipeIngredient).filter_by(ingredient_name="番茄").count() == 4
+        assert session.get(RecipeIngredient, odd.id).quantity == "少许个"
+        assert session.get(RecipeIngredient, plain.id).ingredient_name == "葱（）"
 
     def test_third_run_changes_nothing(self, importer, repo, db):
         url, _ = db

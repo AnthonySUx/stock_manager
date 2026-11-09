@@ -9,7 +9,9 @@ file in the project root, or falls back to the default MySQL connection.
 
 Re-running is safe: recipes already imported (same source_path) are skipped,
 but their category is corrected if it differs from the dishes/ directory
-(older versions stored the dish folder name for nested recipes).
+(older versions stored the dish folder name for nested recipes), and old
+ingredient quantities like "500克" are split into "500" + unit "克" (and
+names left as "番茄（）" lose the empty brackets).
 """
 import argparse
 import os
@@ -158,6 +160,11 @@ def parse_recipe_md(filepath: str) -> dict:
     }
 
 
+def _drop_empty_brackets(name: str) -> str:
+    """"番茄（2个）" minus the quantity leaves "番茄（）"; drop the brackets."""
+    return re.sub(r"[（(]\s*[）)]", "", name).strip()
+
+
 def _parse_ingredients(text: str) -> list[dict]:
     """Parse ingredient section into structured list."""
     results = []
@@ -184,18 +191,16 @@ def _parse_ingredients(text: str) -> list[dict]:
             r"([\d.]+)\s*(克|毫升|升|斤|两|kg|g|ml|l|勺|汤匙|茶匙|根|条|片|个|只|颗|包|袋|把|捆|块|份|碗|盒|瓶|罐|扎|打)",
             line,
         )
-        quantity = qty_match.group(0) if qty_match else ""
-
-        # Remove the quantity from ingredient name
+        # Remove "500克" from the name; store 500 and 克 separately (#47).
         name = line
-        if quantity:
-            name = name.replace(quantity, "", 1).strip()
+        if qty_match:
+            name = _drop_empty_brackets(name.replace(qty_match.group(0), "", 1))
         # Clean up leading punctuation/spaces
         name = re.sub(r"^[\s,，、；;]+", "", name)
 
         results.append({
             "ingredient_name": name or line,
-            "quantity": quantity or None,
+            "quantity": qty_match.group(1) if qty_match else None,
             "unit": qty_match.group(2) if qty_match else None,
             "is_seasoning": is_seasoning,
             "is_optional": False,
@@ -278,6 +283,7 @@ def import_howtocook(howtocook_path: str, db_url: str = "", prune_non_recipes: b
     existing_count = 0
     fixed_count = 0
     error_count = 0
+    quantity_fixed_count = 0
 
     for md_file in sorted(md_files):
         # Check if already imported (by source_path)
@@ -293,8 +299,9 @@ def import_howtocook(howtocook_path: str, db_url: str = "", prune_non_recipes: b
             if existing.category != category:
                 print(f"  ↻ {rel_path}: category {existing.category!r} → {category!r}")
                 existing.category = category
-                session.commit()
                 fixed_count += 1
+            quantity_fixed_count += _split_old_quantities(existing)
+            session.commit()
             continue
 
         try:
@@ -358,11 +365,37 @@ def import_howtocook(howtocook_path: str, db_url: str = "", prune_non_recipes: b
     session.close()
     print(
         f"\nImport complete: {imported_count} imported, {existing_count} existing "
-        f"({fixed_count} categories fixed), {error_count} errors"
+        f"({fixed_count} categories fixed, {quantity_fixed_count} quantities split), "
+        f"{error_count} errors"
     )
     return {"imported": imported_count, "existing": existing_count,
-            "fixed": fixed_count, "errors": error_count,
-            "non_recipe": non_recipe, "pruned": pruned}
+            "fixed": fixed_count, "quantities_fixed": quantity_fixed_count,
+            "errors": error_count, "non_recipe": non_recipe, "pruned": pruned}
+
+
+def _split_old_quantities(recipe) -> int:
+    """Fix ingredients written by older imports; returns how many changed.
+
+    Quantity "500克" with unit "克" becomes "500", and a name left as
+    "番茄（）" after the quantity was cut out becomes "番茄".
+    """
+    fixed = 0
+    for ing in recipe.ingredients:
+        changed = False
+        unit = (ing.unit or "").strip()
+        quantity = (ing.quantity or "").strip()
+        if unit and quantity.endswith(unit):
+            number = quantity[: -len(unit)].strip()
+            if re.fullmatch(r"[\d.]+", number):
+                ing.quantity = number
+                changed = True
+        if ing.unit:  # only rows whose quantity was cut out of the name
+            name = _drop_empty_brackets(ing.ingredient_name)
+            if name and name != ing.ingredient_name:
+                ing.ingredient_name = name
+                changed = True
+        fixed += changed
+    return fixed
 
 
 def _handle_non_recipe_rows(session, prune: bool) -> tuple[int, int]:
