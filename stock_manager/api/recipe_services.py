@@ -1,6 +1,6 @@
 """Business logic for recipe features."""
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from sqlalchemy import func
@@ -356,7 +356,8 @@ def fork_recipe(db: Session, recipe_id: int) -> Optional[Recipe]:
         source_name="User",
         source_url=original.source_url,
         title=original.title,
-        category=original.category,
+        # Forks drop source_path, so store the dish category resolved from it.
+        category=recipe_dish_category(original),
         description=original.description,
         difficulty=original.difficulty,
         servings=original.servings,
@@ -456,22 +457,100 @@ def record_recommendations(db: Session, recipe_ids: list[int]):
 
 # ─── Rule-based recommendations ─────────────────────────────────
 
+# Recipes cooked within this many days are down-weighted (#46).
+RECENT_COOKED_DAYS = 7
+
+# Today Recommendations scenes -> HowToCook `dishes/<dir>` names (#46).
+# Verified against Anduin2017/HowToCook `dishes/` on 2026-11-09:
+# aquatic, breakfast, condiment, dessert, drink, meat_dish, semi-finished,
+# soup, staple, template, vegetable_dish.
+RECOMMENDATION_SCENES = ("all", "breakfast", "meal", "dessert_drink")
+SCENE_DISH_CATEGORIES = {
+    "breakfast": {"breakfast"},
+    "meal": {"meat_dish", "vegetable_dish", "aquatic", "soup", "staple", "semi-finished"},
+    "dessert_drink": {"dessert", "drink"},
+}
+# Directories that exist but belong to no scene (shown only under "all").
+_UNSCENED_DISH_CATEGORIES = {"condiment"}
+# dishes/ directories that do not hold recipes.
+_NON_RECIPE_DISH_DIRS = {"template"}
+_KNOWN_DISH_CATEGORIES = set().union(*SCENE_DISH_CATEGORIES.values()) | _UNSCENED_DISH_CATEGORIES
+# Free-text categories users may type for their own recipes.
+_CATEGORY_ALIASES = {
+    "早餐": "breakfast", "早饭": "breakfast",
+    "荤菜": "meat_dish", "素菜": "vegetable_dish", "水产": "aquatic",
+    "汤": "soup", "汤羹": "soup", "主食": "staple", "半成品": "semi-finished",
+    "甜品": "dessert", "甜点": "dessert", "饮品": "drink", "饮料": "drink",
+    "调料": "condiment", "酱料": "condiment",
+}
+
+
+def recipe_dish_category(recipe: Recipe) -> Optional[str]:
+    """Return the HowToCook-style dish category of a recipe, if known.
+
+    HowToCook recipes use the first directory under `dishes/` in
+    `source_path` (some recipes are nested one level deeper, e.g.
+    `dishes/meat_dish/口水鸡/口水鸡.md`, so the folder right above the file is
+    not reliable). Other recipes use `category`, with Chinese aliases.
+    """
+    parts = (recipe.source_path or "").replace("\\", "/").split("/")
+    if len(parts) >= 3 and parts[0] == "dishes":
+        return parts[1]
+    raw = (recipe.category or "").strip()
+    if not raw:
+        return None
+    return _CATEGORY_ALIASES.get(raw, raw.lower())
+
+
+def is_recommendable(recipe: Recipe) -> bool:
+    """False for HowToCook rows that are not dishes (tips/, .github/, template),
+    which older importers stored as recipes."""
+    if recipe.source_type != "howtocook":
+        return True
+    parts = (recipe.source_path or "").replace("\\", "/").split("/")
+    return len(parts) >= 3 and parts[0] == "dishes" and parts[1] not in _NON_RECIPE_DISH_DIRS
+
+
+def recipe_matches_scene(recipe: Recipe, scene: str) -> bool:
+    """True if the recipe belongs in the given Today Recommendations scene.
+
+    Nothing is excluded for good: every recipe appears under "all". The
+    user's own recipes (user-created / AI-saved) with no or an unknown
+    category count as a meal.
+    """
+    if scene == "all":
+        return True
+    category = recipe_dish_category(recipe)
+    if category in SCENE_DISH_CATEGORIES[scene]:
+        return True
+    return (
+        scene == "meal"
+        and recipe.source_type != "howtocook"
+        and category not in _KNOWN_DISH_CATEGORIES
+    )
+
+
 
 def get_recommendations(
     db: Session,
     limit: int = 10,
+    scene: str = "all",
 ) -> list[dict]:
     """Generate rule-based recipe recommendations from inventory.
 
+    Read-only: calling it does not change any data, so the same inventory
+    and history always give the same list (#46).
+
     Scoring:
-    - Matched ingredient: +10
-    - Expiring ingredient: +40
+    - Matched ingredient: +10 (conditional category: +6)
+    - Expiring ingredient: +40 (conditional category: +20)
     - Missing ingredient: -5
     - Favorite recipe: +15
-    - Recently recommended: -10 (diversity boost)
-    - Not recommended in history: +5 (novelty)
+    - Cooked in the last RECENT_COOKED_DAYS days: -10
+    - Not cooked in the last RECENT_COOKED_DAYS days: +5
     """
-    today = date.today()
+    if scene not in RECOMMENDATION_SCENES:
+        raise ValueError(f"Unknown scene '{scene}'")
     warning_days = 2
 
     # Gather active inventory - only recipe eligible
@@ -513,15 +592,15 @@ def get_recommendations(
         raw = ingredient_name.strip().lower()
         return raw in always_names or _normalize_name(ingredient_name).lower() in always_norm
 
-    # Get all recipes with their ingredients
-    recipes = db.query(Recipe).all()
+    # Get all recipes in this scene
+    recipes = [r for r in db.query(Recipe).order_by(Recipe.id).all() if is_recommendable(r) and recipe_matches_scene(r, scene)]
 
-    # Get recent recommendations (last 7 days)
-    seven_days_ago = today - timedelta(days=7)
-    recent_rec_ids = set(
+    # Recipes actually cooked recently (written by POST /recipes/{id}/cook)
+    cooked_since = datetime.utcnow() - timedelta(days=RECENT_COOKED_DAYS)
+    recent_cooked_ids = set(
         row[0] for row in db.query(RecipeUsageHistory.recipe_id).filter(
-            RecipeUsageHistory.event_type == "recommended",
-            RecipeUsageHistory.created_at >= seven_days_ago,
+            RecipeUsageHistory.event_type == "cooked",
+            RecipeUsageHistory.created_at >= cooked_since,
         ).all()
     )
 
@@ -568,10 +647,10 @@ def get_recommendations(
         score -= len(missing) * 5
         if recipe.id in fav_ids:
             score += 15
-        if recipe.id in recent_rec_ids:
-            score -= 10
+        if recipe.id in recent_cooked_ids:
+            score -= 10  # cooked recently: give other dishes a turn
         else:
-            score += 5  # novelty bonus
+            score += 5  # not cooked recently
 
         if score < 0:
             continue
@@ -584,12 +663,13 @@ def get_recommendations(
             "expiring_inventory_items": expiring_used,
             "missing_ingredients": missing,
             "is_favorite": recipe.id in fav_ids,
-            "is_new_suggestion": recipe.id not in recent_rec_ids,
+            "is_new_suggestion": recipe.id not in recent_cooked_ids,
             "source_type": recipe.source_type,
         })
 
 
-    scored.sort(key=lambda x: x["score"], reverse=True)
+    # Highest score first; ties keep recipe id order, so results are stable.
+    scored.sort(key=lambda x: (-x["score"], x["recipe_id"]))
     return scored[:limit]
 
 

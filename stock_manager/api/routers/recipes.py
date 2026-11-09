@@ -1,7 +1,7 @@
 """FastAPI router for recipe features."""
 import asyncio
 import logging
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -34,7 +34,6 @@ from stock_manager.api.recipe_services import (
     get_recipe,
     get_recipes,
     get_recommendations,
-    record_recommendations,
     has_been_cooked,
     is_favorite,
     remove_favorite,
@@ -120,10 +119,16 @@ def list_recipes(
 
 
 @router.get("/recommendations", response_model=RecipeRecommendationResponse)
-def rule_recommendations(limit: int = Query(10, ge=1, le=50),
-    db: Session = Depends(get_session)):
-    results = get_recommendations(db, limit=limit)
-    record_recommendations(db, [r["recipe_id"] for r in results])
+def rule_recommendations(
+    limit: int = Query(10, ge=1, le=50),
+    scene: Literal["all", "breakfast", "meal", "dessert_drink"] = Query(
+        "all", description="breakfast | meal (lunch/dinner) | dessert_drink | all"
+    ),
+    db: Session = Depends(get_session),
+):
+    """Today Recommendations (local scoring). Read-only: refreshing does not
+    change scores; recipes cooked in the last 7 days are down-weighted."""
+    results = get_recommendations(db, limit=limit, scene=scene)
     return RecipeRecommendationResponse(source_notice=HOWTOCOOK_SOURCE.notice,
         recommendations=[RecipeRecommendation(**r) for r in results])
 

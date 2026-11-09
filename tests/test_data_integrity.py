@@ -33,7 +33,7 @@ def test_foreign_keys_are_enforced_in_tests(db_session):
 
 class TestRecipeDelete:
     def _user_recipe(self, client, title="自制菜"):
-        response = client.post("/api/recipes", json={"title": title})
+        response = client.post("/api/recipes", json={"title": title, "category": "meat_dish"})
         assert response.status_code == 201
         return response.json()["id"]
 
@@ -55,7 +55,7 @@ class TestRecipeDelete:
         from stock_manager.api.recipe_schemas import RecipeCreate
         from stock_manager.api.recipe_services import create_recipe
 
-        base_id = create_recipe(db_session, RecipeCreate(title="AI 菜"), source_type="ai_saved").id
+        base_id = create_recipe(db_session, RecipeCreate(title="AI 菜", category="meat_dish"), source_type="ai_saved").id
         fork = client.post(f"/api/recipes/{base_id}/fork")
         assert fork.status_code == 200
         fork_id = fork.json()["id"]

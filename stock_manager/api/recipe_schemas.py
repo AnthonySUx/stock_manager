@@ -1,8 +1,15 @@
 """Pydantic schemas for recipe features."""
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+# Dish categories = HowToCook `dishes/<dir>` names (template excluded), so user
+# recipes and imported ones share one vocabulary (#46).
+RecipeCategory = Literal[
+    "breakfast", "meat_dish", "vegetable_dish", "aquatic", "soup", "staple",
+    "semi-finished", "dessert", "drink", "condiment",
+]
 
 
 class IngredientSchema(BaseModel):
@@ -22,7 +29,8 @@ class StepSchema(BaseModel):
 
 class RecipeCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
-    category: Optional[str] = Field(None, max_length=100)
+    # Required for new recipes so Today Recommendations can place them in a scene.
+    category: RecipeCategory
     description: Optional[str] = None
     difficulty: Optional[str] = Field(None, max_length=50)
     servings: Optional[str] = Field(None, max_length=50)
@@ -34,7 +42,7 @@ class RecipeCreate(BaseModel):
 
 class RecipeUpdate(BaseModel):
     title: Optional[str] = Field(None, min_length=1, max_length=255)
-    category: Optional[str] = Field(None, max_length=100)
+    category: Optional[RecipeCategory] = None
     description: Optional[str] = None
     difficulty: Optional[str] = Field(None, max_length=50)
     servings: Optional[str] = Field(None, max_length=50)
@@ -42,6 +50,14 @@ class RecipeUpdate(BaseModel):
     raw_markdown: Optional[str] = None
     ingredients: Optional[list[IngredientSchema]] = None
     steps: Optional[list[StepSchema]] = None
+
+    @field_validator("title", "category", mode="before")
+    @classmethod
+    def reject_null(cls, value, info):
+        """Omit a field to keep it; null would clear a required value."""
+        if value is None:
+            raise ValueError(f"{info.field_name} cannot be null")
+        return value
 
 
 class RecipeResponse(BaseModel):
