@@ -197,7 +197,9 @@ python scripts/import_howtocook.py /path/to/HowToCook
 
 Running the import again on an existing database is safe: recipes already imported are skipped,
 and their `category` is corrected to the `dishes/` directory (older versions stored the dish
-folder name, e.g. `口水鸡` instead of `meat_dish`). The summary line reports how many were fixed.
+folder name, e.g. `口水鸡` instead of `meat_dish`). Ingredient quantities from older imports
+(`500克` with unit `克`) are split into `500` + `克`, and names left as `番茄（）` lose the empty
+brackets, so consume preview can use them. The summary line reports how many were fixed.
 
 Only `dishes/**/*.md` is imported (`dishes/template/` is skipped). Older versions also imported
 `tips/` and `.github/` files; the import lists any such rows. They are never recommended, and

@@ -142,8 +142,13 @@ class ConsumePreviewItem(BaseModel):
     item_name: str
     available_quantity: float
     available_unit: str
-    suggested_quantity: float = 1.0
-    unit: str = ""
+    # The recipe amount as written ("500克"); shown to help the user decide.
+    recipe_quantity: Optional[str] = None
+    # Set only when the recipe unit matches the stock unit (#47); null means
+    # the user must enter the amount (needs_user_input is then true).
+    suggested_quantity: Optional[float] = None
+    unit: str = ""  # stock unit, the unit the amount is deducted in
+    needs_user_input: bool = False
     status: str = "active"
     current_expiration_date: Optional[str] = None
     confidence: str = "high"

@@ -16,6 +16,7 @@ from stock_manager.api.models import (
     Item,
 )
 from stock_manager.api.recipe_schemas import RecipeCreate, RecipeUpdate
+from stock_manager.api.quantity import parse_quantity, same_unit
 
 
 DEFAULT_SYNONYM_MAP: dict[str, list[str]] = {
@@ -676,6 +677,17 @@ def get_recommendations(
 # ─── Consume Preview and Cook ─────────────────────────────────────
 
 
+def _recipe_quantity_text(quantity: Optional[str], unit: Optional[str]) -> Optional[str]:
+    """The recipe amount as written, e.g. "500克" or "2 个"; None if absent."""
+    q = (quantity or "").strip()
+    u = (unit or "").strip()
+    if not q:
+        return None
+    if u and not q.endswith(u):
+        return f"{q} {u}"
+    return q
+
+
 def get_consume_preview(db: Session, recipe_id: int) -> Optional[dict]:
     """Preview which inventory items would be consumed for a recipe.
     Returns suggestions without modifying any data.
@@ -724,13 +736,13 @@ def get_consume_preview(db: Session, recipe_id: int) -> Optional[dict]:
                     best_match = item
 
         if best_match is not None:
-            try:
-                suggested_qty = float(ing.quantity) if ing.quantity else 1.0
-            except (ValueError, TypeError):
-                suggested_qty = 1.0
-
-            if suggested_qty > best_match.quantity_value:
-                suggested_qty = best_match.quantity_value
+            # Suggest only when the recipe amount is in the stock's own unit;
+            # otherwise the user decides how much to deduct (#47).
+            number, recipe_unit = parse_quantity(ing.quantity, ing.unit)
+            if number is not None and number > 0 and same_unit(recipe_unit, best_match.quantity_unit):
+                suggested_qty = min(number, best_match.quantity_value)
+            else:
+                suggested_qty = None
 
             suggestions.append({
                 "ingredient_name": ing.ingredient_name,
@@ -738,11 +750,14 @@ def get_consume_preview(db: Session, recipe_id: int) -> Optional[dict]:
                 "item_name": best_match.name,
                 "available_quantity": best_match.quantity_value,
                 "available_unit": best_match.quantity_unit,
+                "recipe_quantity": _recipe_quantity_text(ing.quantity, ing.unit),
                 "suggested_quantity": suggested_qty,
-                "unit": ing.unit or best_match.quantity_unit or "",
+                # Amounts are deducted in the stock unit.
+                "unit": best_match.quantity_unit,
+                "needs_user_input": suggested_qty is None,
                 "status": best_match.status,
                 "current_expiration_date": best_match.current_expiration_date,
-                "confidence": "high",
+                "confidence": "high" if suggested_qty is not None else "low",
             })
             items.remove(best_match)
         else:
