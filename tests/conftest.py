@@ -1,4 +1,13 @@
-"""Pytest configuration: test database and FastAPI client fixtures."""
+"""Pytest configuration: test database and FastAPI client fixtures.
+
+Tests run on in-memory SQLite by default. Set TEST_DATABASE_URL to run them
+on another database, e.g. a throwaway MySQL database (all tables in it are
+dropped after each test):
+
+    TEST_DATABASE_URL="mysql+pymysql://root@localhost/stock_manager_test?unix_socket=/tmp/mysql.sock" pytest
+"""
+
+import os
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,21 +19,23 @@ from stock_manager.api.db import get_session
 from stock_manager.api.main import app
 from stock_manager.api.models import Base
 
-TEST_DATABASE_URL = "sqlite://"
+TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL") or "sqlite://"
+IS_SQLITE = TEST_DATABASE_URL.startswith("sqlite")
 
 test_engine = create_engine(
     TEST_DATABASE_URL,
-    connect_args={"check_same_thread": False},
+    connect_args={"check_same_thread": False} if IS_SQLITE else {},
     poolclass=StaticPool,
 )
 
 
-@event.listens_for(test_engine, "connect")
-def _enable_sqlite_foreign_keys(dbapi_connection, _record):
-    """Enforce foreign keys like MySQL does (SQLite has them off by default)."""
-    cursor = dbapi_connection.cursor()
-    cursor.execute("PRAGMA foreign_keys=ON")
-    cursor.close()
+if IS_SQLITE:
+    @event.listens_for(test_engine, "connect")
+    def _enable_sqlite_foreign_keys(dbapi_connection, _record):
+        """Enforce foreign keys like MySQL does (SQLite has them off by default)."""
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
 
 TestingSessionLocal = sessionmaker(
     autocommit=False,

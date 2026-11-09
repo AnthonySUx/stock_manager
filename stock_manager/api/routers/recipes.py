@@ -32,6 +32,7 @@ from stock_manager.api.recipe_services import (
     fork_recipe,
     get_consume_preview,
     get_recipe,
+    get_recipe_flags,
     get_recipes,
     get_recommendations,
     has_been_cooked,
@@ -57,13 +58,13 @@ HOWTOCOOK_SOURCE = SourceResponse(
 )
 
 
-def _recipe_to_summary(recipe, db: Session) -> RecipeSummary:
+def _recipe_to_summary(recipe, favorite_ids: set[int], cooked_ids: set[int]) -> RecipeSummary:
     return RecipeSummary(
         id=recipe.id, source_type=recipe.source_type, source_name=recipe.source_name,
         title=recipe.title, category=recipe.category, difficulty=recipe.difficulty,
         cook_time_minutes=recipe.cook_time_minutes, is_user_created=recipe.is_user_created,
-        base_recipe_id=recipe.base_recipe_id, is_favorite=is_favorite(db, recipe.id),
-        has_been_cooked=has_been_cooked(db, recipe.id),
+        base_recipe_id=recipe.base_recipe_id, is_favorite=recipe.id in favorite_ids,
+        has_been_cooked=recipe.id in cooked_ids,
         created_at=recipe.created_at,
     )
 
@@ -115,7 +116,9 @@ def list_recipes(
 ):
     recipes = get_recipes(db, source_type=source_type, category=category,
         query=query, favorite_only=favorite_only, limit=limit, offset=offset)
-    return [_recipe_to_summary(r, db) for r in recipes]
+    # Flags for the whole page in two queries, not two per recipe (#48).
+    favorite_ids, cooked_ids = get_recipe_flags(db, [r.id for r in recipes])
+    return [_recipe_to_summary(r, favorite_ids, cooked_ids) for r in recipes]
 
 
 @router.get("/recommendations", response_model=RecipeRecommendationResponse)

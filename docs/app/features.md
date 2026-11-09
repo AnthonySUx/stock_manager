@@ -114,6 +114,11 @@ Items are shown as `expiring soon` when within a configurable number of days (de
 - Opened items use the opened expiration date
 - Unopened items use the unopened expiration date
 - Items with `infinite` expiration are excluded
+
+Statuses depend on today's date, so they are recalculated once per request when items are
+listed, searched, cleaned up or reminders are read. The database is written only if a status
+actually changed. `GET /api/items/reminders` returns `expiring soon` items first, then
+`expired` items, each in id order.
 - Consumed and deleted items are excluded
 
 ---

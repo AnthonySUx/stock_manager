@@ -15,6 +15,7 @@ from stock_manager.api.services import (
     delete_items_by_statuses,
     get_item,
     get_items,
+    get_reminder_items,
     search_items as search_items_service,
     update_item,
 )
@@ -79,10 +80,8 @@ def search_items(
 def reminders(
     db: Session = Depends(get_session),
 ):
-    """Return items that are expiring soon or expired."""
-    items = get_items(db, status="expiring soon")
-    expired = get_items(db, status="expired")
-    return items + expired
+    """Return items that are expiring soon (first) or expired, each by id."""
+    return get_reminder_items(db)
 
 
 @router.get("/{item_id}", response_model=schemas.ItemResponse)
