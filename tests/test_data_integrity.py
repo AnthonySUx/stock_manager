@@ -25,6 +25,8 @@ def _create_item(client, db_session, **overrides):
 
 
 def test_foreign_keys_are_enforced_in_tests(db_session):
+    if db_session.bind.dialect.name != "sqlite":
+        pytest.skip("only SQLite needs the foreign_keys pragma")
     assert db_session.execute(text("PRAGMA foreign_keys")).scalar() == 1
 
 

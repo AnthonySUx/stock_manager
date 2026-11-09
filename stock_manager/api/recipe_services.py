@@ -3,7 +3,7 @@ import json
 from datetime import date, datetime, timedelta
 from typing import Optional
 
-from sqlalchemy import func
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from stock_manager.api.models import (
@@ -166,8 +166,21 @@ def get_recipes(
     limit: int = 20,
     offset: int = 0,
 ) -> list[Recipe]:
-    """Return recipes matching filters. Sorted by user relevance when query is provided."""
-    from stock_manager.api.models import RecipeUsageHistory, RecipeFavorite
+    """Return recipes matching filters. Sorted by user relevance when query is provided.
+
+    Filtering, sorting and paging all run in SQL, so only one page of
+    recipes is loaded (#48). Sorting:
+    - no query: favorites, then favorited-or-cooked, then user-created, then id;
+    - query: highest search score first, then id. Score = user-created 100,
+      favorite 80, cooked 60, title equal 50 / contains 40, an ingredient
+      contains it 25, description contains it 10.
+    """
+    fav_ids = select(RecipeFavorite.recipe_id)
+    cooked_ids = select(RecipeUsageHistory.recipe_id).where(
+        RecipeUsageHistory.event_type == "cooked"
+    )
+    is_fav = Recipe.id.in_(fav_ids)
+    is_cooked = Recipe.id.in_(cooked_ids)
 
     q = db.query(Recipe)
 
@@ -182,57 +195,64 @@ def get_recipes(
             | func.lower(func.coalesce(Recipe.description, "")).like(pattern.lower())
         )
     if favorite_only:
-        q = q.filter(Recipe.id.in_(
-            db.query(RecipeFavorite.recipe_id)
-        ))
-
-    results = q.all()
+        q = q.filter(is_fav)
 
     if not query:
-        # Default sorting: favorites and user-created first
-        fav_ids = set(r[0] for r in db.query(RecipeFavorite.recipe_id).all())
-        cooked_ids = set(r[0] for r in db.query(RecipeUsageHistory.recipe_id).filter(
-            RecipeUsageHistory.event_type == "cooked"
-        ).all())
-        results.sort(key=lambda r: (
-            r.id not in fav_ids,
-            r.id not in (fav_ids | cooked_ids),
-            not r.is_user_created,
-            r.id,
-        ))
+        q = q.order_by(
+            case((is_fav, 0), else_=1),
+            case((is_fav | is_cooked, 0), else_=1),
+            case((Recipe.is_user_created, 0), else_=1),
+            Recipe.id,
+        )
     else:
-        # Smart search scoring for queries
         q_lower = query.lower().strip()
-        fav_ids = set(r[0] for r in db.query(RecipeFavorite.recipe_id).all())
-        cooked_ids = set(r[0] for r in db.query(RecipeUsageHistory.recipe_id).filter(
-            RecipeUsageHistory.event_type == "cooked"
-        ).all())
 
-        def search_score(recipe: Recipe) -> int:
-            score = 0
-            title_lower = recipe.title.lower()
-            if recipe.is_user_created:
-                score += 100
-            if recipe.id in fav_ids:
-                score += 80
-            if recipe.id in cooked_ids:
-                score += 60
-            if title_lower == q_lower:
-                score += 50
-            elif q_lower in title_lower:
-                score += 40
-            if recipe.ingredients:
-                for ing in recipe.ingredients:
-                    if q_lower in ing.ingredient_name.lower() or (ing.normalized_name and q_lower in ing.normalized_name.lower()):
-                        score += 25
-                        break
-            if recipe.description and q_lower in recipe.description.lower():
-                score += 10
-            return score
+        def contains(column):
+            # Plain substring test (not LIKE), so % and _ are literal.
+            return func.instr(func.lower(column), q_lower) > 0
 
-        results.sort(key=search_score, reverse=True)
+        title = func.lower(Recipe.title)
+        ingredient_hit = (
+            select(RecipeIngredient.id)
+            .where(
+                RecipeIngredient.recipe_id == Recipe.id,
+                contains(RecipeIngredient.ingredient_name)
+                | contains(func.coalesce(RecipeIngredient.normalized_name, "")),
+            )
+            .exists()
+        )
+        # instr(x, '') is 1, so an empty description must be excluded explicitly.
+        has_description = func.coalesce(Recipe.description, "") != ""
+        score = (
+            case((Recipe.is_user_created, 100), else_=0)
+            + case((is_fav, 80), else_=0)
+            + case((is_cooked, 60), else_=0)
+            + case((title == q_lower, 50), (contains(Recipe.title), 40), else_=0)
+            + case((ingredient_hit, 25), else_=0)
+            + case((has_description & contains(Recipe.description), 10), else_=0)
+        )
+        q = q.order_by(score.desc(), Recipe.id)
 
-    return results[offset:offset+limit]
+    return q.offset(offset).limit(limit).all()
+
+
+def get_recipe_flags(db: Session, recipe_ids: list[int]) -> tuple[set[int], set[int]]:
+    """(favorite ids, cooked ids) among `recipe_ids`, in two queries (#48)."""
+    if not recipe_ids:
+        return set(), set()
+    favorites = {
+        row[0] for row in db.query(RecipeFavorite.recipe_id)
+        .filter(RecipeFavorite.recipe_id.in_(recipe_ids))
+    }
+    cooked = {
+        row[0] for row in db.query(RecipeUsageHistory.recipe_id)
+        .filter(
+            RecipeUsageHistory.recipe_id.in_(recipe_ids),
+            RecipeUsageHistory.event_type == "cooked",
+        )
+        .distinct()
+    }
+    return favorites, cooked
 
 
 def get_recipe(db: Session, recipe_id: int) -> Optional[Recipe]:
@@ -610,12 +630,20 @@ def get_recommendations(
         row[0] for row in db.query(RecipeFavorite.recipe_id).all()
     )
 
+    # All candidate ingredients in one query instead of one per recipe (#48).
+    ingredients_by_recipe: dict[int, list[RecipeIngredient]] = {r.id: [] for r in recipes}
+    if recipes:
+        for ing in (
+            db.query(RecipeIngredient)
+            .filter(RecipeIngredient.recipe_id.in_(list(ingredients_by_recipe)))
+            .order_by(RecipeIngredient.id)
+        ):
+            ingredients_by_recipe[ing.recipe_id].append(ing)
+
     scored: list[dict] = []
 
     for recipe in recipes:
-        ingredients = db.query(RecipeIngredient).filter(
-            RecipeIngredient.recipe_id == recipe.id
-        ).all()
+        ingredients = ingredients_by_recipe[recipe.id]
 
         matched = []
         expiring_used = []

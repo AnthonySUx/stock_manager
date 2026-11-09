@@ -3,7 +3,7 @@
 from datetime import date, datetime, timedelta
 from typing import Optional
 
-from sqlalchemy import func
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from stock_manager.api.models import Item, RestockItem, Setting
@@ -51,7 +51,11 @@ def _get_expiration_warning_days(db: Session) -> int:
 
 
 def refresh_item_statuses(db: Session) -> int:
-    """Refresh all item statuses and return the number of changed rows."""
+    """Refresh all item statuses and return the number of changed rows.
+
+    Commits only when a status actually changed, so a plain read does not
+    write to the database (#48).
+    """
     today = date.today()
     warning_days = _get_expiration_warning_days(db)
     changed = 0
@@ -68,7 +72,8 @@ def refresh_item_statuses(db: Session) -> int:
             item.status = new_status
             changed += 1
 
-    db.commit()
+    if changed:
+        db.commit()
     return changed
 
 
@@ -112,6 +117,21 @@ def get_items(
         query = query.filter(Item.status == status)
 
     return query.order_by(Item.id).all()
+
+
+# Reminders list "expiring soon" first, then "expired"; each by id.
+REMINDER_STATUSES = ("expiring soon", "expired")
+
+
+def get_reminder_items(db: Session) -> list[Item]:
+    """Items that are expiring soon or expired: one refresh, one query (#48)."""
+    refresh_item_statuses(db)
+    return (
+        db.query(Item)
+        .filter(Item.status.in_(REMINDER_STATUSES))
+        .order_by(case((Item.status == REMINDER_STATUSES[0], 0), else_=1), Item.id)
+        .all()
+    )
 
 
 def search_items(
