@@ -12,6 +12,15 @@ from uuid import uuid4
 logger = logging.getLogger(__name__)
 
 
+def _recipe_category_values() -> tuple[str, ...]:
+    from typing import get_args
+    from stock_manager.api.recipe_schemas import RecipeCategory
+    return get_args(RecipeCategory)
+
+
+_RECIPE_CATEGORIES = _recipe_category_values()
+
+
 async def _call_ai(prompt: str, system_prompt: str) -> Optional[str]:
     import httpx
     base_url = os.getenv("AI_BASE_URL", "https://api.deepseek.com")
@@ -196,11 +205,13 @@ async def expand_to_recipe_draft(idea: dict) -> dict:
         "RULES:\n"
         "1. Estimate realistic ingredient quantities for 2 servings.\n"
         "2. Include clear step-by-step instructions.\n"
-        "3. Output ONLY valid JSON.\n\n"
+        "3. Set category to exactly one of: " + ", ".join(_RECIPE_CATEGORIES) + ".\n"
+        "4. Output ONLY valid JSON.\n\n"
         "OUTPUT FORMAT:\n"
         "```json\n"
         "{\n"
         '  "title": "Dish Name",\n'
+        '  "category": "meat_dish",\n'
         '  "description": "Description",\n'
         '  "difficulty": "easy",\n'
         '  "servings": "2 servings",\n'
@@ -238,6 +249,8 @@ async def expand_to_recipe_draft(idea: dict) -> dict:
         data = {"title": idea.get("title", ""), "ingredients": [], "steps": []}
 
     data.setdefault("title", idea.get("title", ""))
+    if data.get("category") not in _RECIPE_CATEGORIES:
+        data["category"] = None  # the user must pick one before saving
     data.setdefault("description", idea.get("description", ""))
     data.setdefault("ingredients", [])
     data.setdefault("steps", [])

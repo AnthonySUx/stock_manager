@@ -36,9 +36,34 @@ Users can favorite/unfavorite recipes. Favorites are prioritized in search resul
 
 ## Today Recommendations
 
-`GET /api/recipes/recommendations`
+`GET /api/recipes/recommendations?scene=<scene>&limit=<n>`
 
-Generates a daily list of recipes to cook based on current inventory.
+Generates a daily list of recipes to cook based on current inventory. The call is
+**read-only**: refreshing the page gives the same list until inventory, favorites or
+cooking history change.
+
+### Scenes (`scene`, default `all`)
+
+| `scene` | Recipe `category` (HowToCook `dishes/` directory) |
+|---|---|
+| `breakfast` | `breakfast` |
+| `meal` (lunch / dinner) | `meat_dish`, `vegetable_dish`, `aquatic`, `soup`, `staple`, `semi-finished` |
+| `dessert_drink` | `dessert`, `drink` |
+| `all` | everything |
+
+New user recipes must have a `category` from this list (plus `condiment`): `POST /api/recipes`
+without it, or with another value, returns `422`; `PATCH` cannot set it to `null`. AI drafts from
+`explore/expand` suggest a category; an invalid suggestion becomes `null` so the user picks one.
+Older user recipes saved before this rule keep working: free-text categories such as 早餐 / 甜品 /
+饮品 are mapped, and ones with no or an unknown category count as `meal`.
+
+Nothing is excluded for good: desserts and drinks are recommended under `dessert_drink` and `all`.
+`condiment` only appears under `all`. An unknown `scene` returns `422`. HowToCook rows that are
+not dishes (`tips/`, `.github/`, `dishes/template/`, imported by older importer versions) are never
+recommended.
+
+For HowToCook recipes the directory is read from `source_path` (`dishes/<dir>/...`), because
+many recipes are nested one level deeper (`dishes/meat_dish/口水鸡/口水鸡.md`).
 
 ### How It Works
 
@@ -55,8 +80,8 @@ Generates a daily list of recipes to cook based on current inventory.
 | Per expiring-soon inventory ingredient | +40 (additional) |
 | Per missing required ingredient | −5 |
 | Recipe is favorited | +15 |
-| Recommended in last 7 days | −10 (diversity) |
-| Not recommended in last 7 days | +5 (novelty) |
+| Cooked in the last 7 days | −10 (give other dishes a turn) |
+| Not cooked in the last 7 days | +5 |
 
 Ingredients matched from `conditional` categories (drinks, snacks, frozen, canned, etc.) get reduced weight: +6 instead of +10, and +20 instead of +40 when expiring. Whether an ingredient counts as `always` is checked after synonym resolution, so `西红柿` in a vegetables category keeps full weight when it matches a recipe's `番茄`.
 
@@ -68,7 +93,13 @@ This is **deterministic**, not AI-based. It covers common names in Chinese, Engl
 
 ### Recommendation History
 
-Each call to `GET /api/recipes/recommendations` records the returned recipes in the usage history (`recommended` events). Recipes recommended in the last 7 days receive a scoring penalty to ensure diversity. Over time, the same recipes won't dominate daily recommendations.
+History comes from cooking, not from viewing. `POST /api/recipes/{id}/cook` writes a `cooked`
+event; recipes cooked in the last 7 days (`RECENT_COOKED_DAYS`) get −10 instead of +5, so a dish
+you just made is pushed down for a week. `GET /api/recipes/recommendations` writes nothing.
+`is_new_suggestion` is `true` when the recipe was not cooked in that window. Older `recommended`
+events (written before this change) are ignored.
+
+Ties in score are ordered by recipe id, so the list order is stable.
 
 ### Consume Preview and Cook
 

@@ -6,6 +6,10 @@ Usage:
 
 If --db-url is not provided, the script reads DATABASE_URL from the .env
 file in the project root, or falls back to the default MySQL connection.
+
+Re-running is safe: recipes already imported (same source_path) are skipped,
+but their category is corrected if it differs from the dishes/ directory
+(older versions stored the dish folder name for nested recipes).
 """
 import argparse
 import os
@@ -18,15 +22,41 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from dotenv import load_dotenv
 
-# Load .env from project root
-env_path = PROJECT_ROOT / ".env"
-if env_path.exists():
-    load_dotenv(env_path)
+
+def _load_env() -> None:
+    """Load .env from the project root (only when run as a script)."""
+    from dotenv import load_dotenv
+    env_path = PROJECT_ROOT / ".env"
+    if env_path.exists():
+        load_dotenv(env_path)
 
 
 # ─── Markdown parser ─────────────────────────────────────────────
+
+
+NON_RECIPE_DISH_DIRS = {"template"}
+
+
+def howtocook_category(filepath) -> str:
+    """Return the first directory under `dishes/`, or "" if there is none."""
+    parts = [p.lower() if p.lower() == "dishes" else p for p in Path(filepath).parts[:-1]]
+    if "dishes" in parts:
+        index = parts.index("dishes")
+        if index + 1 < len(parts):
+            return parts[index + 1]
+    return ""
+
+
+def is_recipe_path(rel_path) -> bool:
+    """True for dishes/<category>/.../*.md, except the dishes/template/ example."""
+    parts = Path(rel_path).parts
+    return (
+        len(parts) >= 3
+        and parts[0] == "dishes"
+        and parts[1] not in NON_RECIPE_DISH_DIRS
+        and parts[-1].endswith(".md")
+    )
 
 
 def parse_recipe_md(filepath: str) -> dict:
@@ -56,17 +86,10 @@ def parse_recipe_md(filepath: str) -> dict:
         filename = Path(filepath).stem
         title = filename.replace("-", " ").replace("_", " ").title()
 
-    # Extract category from path
-    rel_path = Path(filepath)
-    category = ""
-    for part in rel_path.parts:
-        if part.lower() in ("dishes",):
-            continue
-        if part.endswith(".md"):
-            continue
-        if rel_path.parent.name.lower() != "dishes":
-            category = rel_path.parent.name
-            break
+    # Category = first directory under dishes/ (e.g. dishes/meat_dish/口水鸡/口水鸡.md
+    # -> meat_dish). Some recipes sit one level deeper, so the folder right above
+    # the file is the dish name, not the category (#46).
+    category = howtocook_category(filepath)
 
     # Parse sections
     ingredients = []
@@ -213,8 +236,13 @@ def _get_db_session(db_url: str):
     return session_local()
 
 
-def import_howtocook(howtocook_path: str, db_url: str = ""):
-    """Import all HowToCook recipes into the database."""
+def import_howtocook(howtocook_path: str, db_url: str = "", prune_non_recipes: bool = False):
+    """Import all HowToCook recipes into the database.
+
+    HowToCook rows that are not recipes (imported from tips/, .github/ or
+    dishes/template/ by older versions) are listed; with
+    `prune_non_recipes=True` they are deleted, with their favorites and history.
+    """
     if not db_url:
         db_url = os.getenv(
             "DATABASE_URL",
@@ -226,24 +254,16 @@ def import_howtocook(howtocook_path: str, db_url: str = ""):
         print(f"Error: {howtocook_path} is not a directory")
         sys.exit(1)
 
-    md_files = list(howtocook_dir.rglob("*.md"))
-
-    # Filter out root-level README, LICENSE, etc.
+    # Only dishes/ holds recipes; tips/, .github/ and the root files are articles
+    # or templates, and dishes/template/ is the example for contributors.
+    dishes_dir = howtocook_dir / "dishes"
+    if not dishes_dir.is_dir():
+        print(f"Error: {dishes_dir} not found (expected the HowToCook repository root)")
+        sys.exit(1)
     md_files = [
-        f for f in md_files
-        if "dishes" in str(f) or f.parent.name != howtocook_dir.name
+        f for f in dishes_dir.rglob("*.md")
+        if is_recipe_path(f.relative_to(howtocook_dir))
     ]
-
-    # Also exclude common non-recipe files
-    exclude_files = {"README.md", "CONTRIBUTING.md", "LICENSE", "CODE_OF_CONDUCT.md"}
-    md_files = [f for f in md_files if f.name not in exclude_files]
-
-    if not md_files:
-        print(f"No recipe markdown files found under {howtocook_path}")
-        print("Looking for files in 'dishes/' subdirectory...")
-        dishes_dir = howtocook_dir / "dishes"
-        if dishes_dir.is_dir():
-            md_files = list(dishes_dir.rglob("*.md"))
 
     print(f"Found {len(md_files)} recipe files")
 
@@ -256,6 +276,7 @@ def import_howtocook(howtocook_path: str, db_url: str = ""):
 
     imported_count = 0
     existing_count = 0
+    fixed_count = 0
     error_count = 0
 
     for md_file in sorted(md_files):
@@ -268,6 +289,12 @@ def import_howtocook(howtocook_path: str, db_url: str = ""):
         ).first()
         if existing:
             existing_count += 1
+            category = howtocook_category(md_file.relative_to(howtocook_dir)) or None
+            if existing.category != category:
+                print(f"  ↻ {rel_path}: category {existing.category!r} → {category!r}")
+                existing.category = category
+                session.commit()
+                fixed_count += 1
             continue
 
         try:
@@ -287,7 +314,9 @@ def import_howtocook(howtocook_path: str, db_url: str = ""):
                 source_path=rel_path,
                 license_name=license_name,
                 title=recipe_data["title"],
-                category=recipe_data["category"] or None,
+                # From the path relative to the repo root, so folders above it
+                # (e.g. ~/dishes/HowToCook) cannot be mistaken for dishes/.
+                category=howtocook_category(md_file.relative_to(howtocook_dir)) or None,
                 description=recipe_data["description"] or None,
                 difficulty=recipe_data["difficulty"] or None,
                 servings=recipe_data["servings"] or None,
@@ -325,8 +354,42 @@ def import_howtocook(howtocook_path: str, db_url: str = ""):
             error_count += 1
             print(f"  ✗ {rel_path}: {e}")
 
+    non_recipe, pruned = _handle_non_recipe_rows(session, prune_non_recipes)
     session.close()
-    print(f"\nImport complete: {imported_count} imported, {existing_count} existing, {error_count} errors")
+    print(
+        f"\nImport complete: {imported_count} imported, {existing_count} existing "
+        f"({fixed_count} categories fixed), {error_count} errors"
+    )
+    return {"imported": imported_count, "existing": existing_count,
+            "fixed": fixed_count, "errors": error_count,
+            "non_recipe": non_recipe, "pruned": pruned}
+
+
+def _handle_non_recipe_rows(session, prune: bool) -> tuple[int, int]:
+    """List (and optionally delete) HowToCook rows that are not recipes."""
+    from stock_manager.api.models import Recipe, RecipeFavorite, RecipeUsageHistory
+
+    rows = [
+        r for r in session.query(Recipe).filter(Recipe.source_type == "howtocook").all()
+        if not is_recipe_path(r.source_path or "")
+    ]
+    if not rows:
+        return 0, 0
+    print(f"\n{len(rows)} HowToCook row(s) are not recipes (tips/, .github/, template):")
+    for r in rows:
+        print(f"  - {r.source_path}")
+    if not prune:
+        print("They are not recommended. Re-run with --prune-non-recipes to delete them.")
+        return len(rows), 0
+
+    ids = [r.id for r in rows]
+    session.query(RecipeFavorite).filter(RecipeFavorite.recipe_id.in_(ids)).delete(synchronize_session=False)
+    session.query(RecipeUsageHistory).filter(RecipeUsageHistory.recipe_id.in_(ids)).delete(synchronize_session=False)
+    for r in rows:
+        session.delete(r)  # ingredients and steps cascade; forks keep a NULL link
+    session.commit()
+    print(f"Deleted {len(rows)} non-recipe row(s).")
+    return len(rows), len(rows)
 
 
 def main():
@@ -335,12 +398,18 @@ def main():
     )
     parser.add_argument("howtocook_path", help="Path to HowToCook repository root")
     parser.add_argument(
+        "--prune-non-recipes",
+        action="store_true",
+        help="Delete previously imported rows that are not recipes (tips/, .github/, template)",
+    )
+    parser.add_argument(
         "--db-url",
         default="",
         help="Database URL (default: from .env or default MySQL connection)",
     )
     args = parser.parse_args()
-    import_howtocook(args.howtocook_path, args.db_url)
+    _load_env()
+    import_howtocook(args.howtocook_path, args.db_url, args.prune_non_recipes)
 
 
 if __name__ == "__main__":

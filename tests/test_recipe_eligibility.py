@@ -47,6 +47,7 @@ def _create_item(client, db_session, name, slug, quantity=5):
 def _create_recipe(client, title, ingredient_names):
     payload = {
         "title": title,
+        "category": "meat_dish",
         "ingredients": [
             {"ingredient_name": n, "quantity": "1", "unit": "个"} for n in ingredient_names
         ],

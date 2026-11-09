@@ -195,6 +195,18 @@ Re-import HowToCook recipes if you need them:
 python scripts/import_howtocook.py /path/to/HowToCook
 ```
 
+Running the import again on an existing database is safe: recipes already imported are skipped,
+and their `category` is corrected to the `dishes/` directory (older versions stored the dish
+folder name, e.g. `口水鸡` instead of `meat_dish`). The summary line reports how many were fixed.
+
+Only `dishes/**/*.md` is imported (`dishes/template/` is skipped). Older versions also imported
+`tips/` and `.github/` files; the import lists any such rows. They are never recommended, and
+you can delete them (with their favorites and history) by adding `--prune-non-recipes`:
+
+```bash
+python scripts/import_howtocook.py /path/to/HowToCook --prune-non-recipes
+```
+
 ### 3.6 Network Exposure and Testing on a Real Phone
 
 By default the API listens on `127.0.0.1`, so only this machine can reach it:
