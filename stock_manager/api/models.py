@@ -1,6 +1,6 @@
 """SQLAlchemy ORM models for Stock Manager."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     Column,
@@ -14,6 +14,16 @@ from sqlalchemy import (
     func,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
+
+
+def utcnow() -> datetime:
+    """Current UTC time as a naive datetime (#49).
+
+    The DateTime columns are timezone-naive and every stored value is UTC, so
+    the timezone is dropped after reading the clock in UTC. Replaces the
+    deprecated datetime.utcnow().
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class Base(DeclarativeBase):
@@ -34,8 +44,8 @@ class Category(Base):
     recipe_usage = Column(String(20), nullable=False, default="never", server_default="never")
     is_system = Column(Boolean, nullable=False, default=False, server_default="0")
     sort_order = Column(Integer, nullable=False, default=0, server_default="0")
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow, server_default=func.now())
-    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, server_default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime, nullable=False, default=utcnow, server_default=func.now())
+    updated_at = Column(DateTime, nullable=False, default=utcnow, server_default=func.now(), onupdate=utcnow)
 
     parent = relationship("Category", remote_side="Category.id", back_populates="children")
     children = relationship("Category", back_populates="parent")
@@ -66,15 +76,15 @@ class Item(Base):
     created_at = Column(
         DateTime,
         nullable=False,
-        default=datetime.utcnow,
+        default=utcnow,
         server_default=func.now(),
     )
     updated_at = Column(
         DateTime,
         nullable=False,
-        default=datetime.utcnow,
+        default=utcnow,
         server_default=func.now(),
-        onupdate=func.now(),
+        onupdate=utcnow,
     )
 
     # Relationship
@@ -98,7 +108,7 @@ class RestockItem(Base):
     created_at = Column(
         DateTime,
         nullable=False,
-        default=datetime.utcnow,
+        default=utcnow,
         server_default=func.now(),
     )
     done_at = Column(DateTime, nullable=True)
@@ -116,9 +126,9 @@ class Setting(Base):
     updated_at = Column(
         DateTime,
         nullable=False,
-        default=datetime.utcnow,
+        default=utcnow,
         server_default=func.now(),
-        onupdate=func.now(),
+        onupdate=utcnow,
     )
 
 
@@ -144,8 +154,8 @@ class Recipe(Base):
     raw_markdown = Column(Text, nullable=True)
     is_user_created = Column(Boolean, nullable=False, default=False)
     base_recipe_id = Column(Integer, ForeignKey("recipes.id"), nullable=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow, server_default=func.now())
-    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, server_default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime, nullable=False, default=utcnow, server_default=func.now())
+    updated_at = Column(DateTime, nullable=False, default=utcnow, server_default=func.now(), onupdate=utcnow)
 
     ingredients = relationship("RecipeIngredient", back_populates="recipe", cascade="all, delete-orphan")
     steps = relationship("RecipeStep", back_populates="recipe", cascade="all, delete-orphan", order_by="RecipeStep.step_number")
@@ -187,7 +197,7 @@ class RecipeFavorite(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     recipe_id = Column(Integer, ForeignKey("recipes.id"), nullable=False)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow, server_default=func.now())
+    created_at = Column(DateTime, nullable=False, default=utcnow, server_default=func.now())
     note = Column(String(500), nullable=True)
 
     recipe = relationship("Recipe")
@@ -200,7 +210,7 @@ class RecipeUsageHistory(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     recipe_id = Column(Integer, ForeignKey("recipes.id"), nullable=False)
     event_type = Column(String(20), nullable=False)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow, server_default=func.now())
+    created_at = Column(DateTime, nullable=False, default=utcnow, server_default=func.now())
     metadata_json = Column(Text, nullable=True)
 
     recipe = relationship("Recipe")
@@ -213,5 +223,5 @@ class AIRecipeRecommendation(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     request_context_json = Column(Text, nullable=True)
     response_json = Column(Text, nullable=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow, server_default=func.now())
+    created_at = Column(DateTime, nullable=False, default=utcnow, server_default=func.now())
     model_name = Column(String(255), nullable=True)

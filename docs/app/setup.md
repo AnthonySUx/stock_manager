@@ -197,9 +197,14 @@ python scripts/import_howtocook.py /path/to/HowToCook
 
 Running the import again on an existing database is safe: recipes already imported are skipped,
 and their `category` is corrected to the `dishes/` directory (older versions stored the dish
-folder name, e.g. `口水鸡` instead of `meat_dish`). Ingredient quantities from older imports
-(`500克` with unit `克`) are split into `500` + `克`, and names left as `番茄（）` lose the empty
-brackets, so consume preview can use them. The summary line reports how many were fixed.
+folder name, e.g. `口水鸡` instead of `meat_dish`). Their ingredient lists are re-parsed from the
+markdown, so rows from older imports (`500克` stored as the quantity, names like `番茄（）` or
+`鲤鱼（约 ，…）`, duplicated ingredients) become the same as a fresh import. HowToCook recipes
+cannot be edited in the app, so nothing user-made is overwritten. The summary line reports how
+many were fixed.
+
+Ingredient names drop bracketed notes (`鲤鱼（约 1.5 斤，…）` → `鲤鱼`, with quantity `1.5 斤`);
+the full text is kept in the recipe's markdown.
 
 Only `dishes/**/*.md` is imported (`dishes/template/` is skipped). Older versions also imported
 `tips/` and `.github/` files; the import lists any such rows. They are never recommended, and
@@ -248,6 +253,25 @@ There is one token per installation (one household). There are no per-member acc
 Missing or wrong tokens return `401` with `WWW-Authenticate: Bearer`.
 
 For local development only, `API_AUTH_DISABLED=true` skips the check. Do not combine it with `API_HOST=0.0.0.0`.
+
+### 3.8 Tests and Checks
+
+CI runs the same checks on every pull request:
+
+```bash
+python3 -m pip install -e ".[dev]"
+python3 -m ruff check stock_manager scripts tests
+python3 -m pytest -q --cov --cov-report=term-missing
+```
+
+Tests use in-memory SQLite and never touch your MySQL data. Coverage counts the API only
+(the legacy CLI is excluded); the run fails if it drops below `fail_under` in `pyproject.toml`.
+To run the suite on MySQL instead, point `TEST_DATABASE_URL` at an empty, throwaway database
+(all its tables are dropped after each test):
+
+```bash
+TEST_DATABASE_URL="mysql+pymysql://root@localhost/stock_manager_test?unix_socket=/tmp/mysql.sock" python3 -m pytest -q
+```
 
 ---
 

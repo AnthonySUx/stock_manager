@@ -15,7 +15,6 @@ def make_item_create_payload(**overrides):
     payload = {
         "name": "牛奶",
         # category_id should be provided via overrides from seeded categories
-    "owner": "me",
         "owner": "me",
         "purchase_date": today.isoformat(),
         "quantity_value": 2,
@@ -40,7 +39,6 @@ def make_item_model_data(**overrides):
     data = {
         "name": "牛奶",
         # category_id should be provided via overrides from seeded categories
-    "owner": "me",
         "owner": "me",
         "purchase_date": today.isoformat(),
         "quantity_value": 2,

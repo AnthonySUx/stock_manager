@@ -201,14 +201,33 @@ class RestockItemResponse(BaseModel):
 # ─── Settings ────────────────────────────────────────────────────
 
 
+# `default_database` was removed in #49: the API always uses MySQL. Old
+# clients that still send it are not rejected; the field is ignored.
+MAX_REMINDER_DAYS = 365
+
+
 class SettingResponse(BaseModel):
-    default_database: str
     expiration_reminder_days: str
 
 
 class SettingUpdate(BaseModel):
-    default_database: Optional[str] = None
+    # Whole days, 0-365, as a number or a numeric string. Stored and returned
+    # as a string. Invalid values are a 422 (they used to become 2 silently).
     expiration_reminder_days: Optional[str] = None
+
+    @field_validator("expiration_reminder_days", mode="before")
+    @classmethod
+    def check_reminder_days(cls, value):
+        if value is None:
+            return None
+        # str() first: True, 1.5 and lists all fail the digit check below.
+        text = str(value).strip()
+        if not text.isascii() or not text.isdigit():
+            raise ValueError("expiration_reminder_days must be a whole number of days")
+        days = int(text)
+        if days > MAX_REMINDER_DAYS:
+            raise ValueError(f"expiration_reminder_days must be between 0 and {MAX_REMINDER_DAYS}")
+        return str(days)
 
 
 # ─── Generic ─────────────────────────────────────────────────────

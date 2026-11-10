@@ -9,15 +9,14 @@ file in the project root, or falls back to the default MySQL connection.
 
 Re-running is safe: recipes already imported (same source_path) are skipped,
 but their category is corrected if it differs from the dishes/ directory
-(older versions stored the dish folder name for nested recipes), and old
-ingredient quantities like "500克" are split into "500" + unit "克" (and
-names left as "番茄（）" lose the empty brackets).
+(older versions stored the dish folder name for nested recipes), and their
+ingredient list is re-parsed from the markdown, so older rows ("500克" as a
+quantity, "番茄（）" names, duplicates) end up the same as a fresh import.
 """
 import argparse
 import os
 import re
 import sys
-import glob
 from pathlib import Path
 
 # Add project root to sys.path
@@ -102,7 +101,6 @@ def parse_recipe_md(filepath: str) -> dict:
     cook_time = None
 
     current_section = None
-    step_counter = 0
     buffer = []
 
     for line in lines:
@@ -160,14 +158,31 @@ def parse_recipe_md(filepath: str) -> dict:
     }
 
 
-def _drop_empty_brackets(name: str) -> str:
-    """"番茄（2个）" minus the quantity leaves "番茄（）"; drop the brackets."""
-    return re.sub(r"[（(]\s*[）)]", "", name).strip()
+def _strip_bracket_notes(name: str) -> str:
+    """Drop bracketed notes from an ingredient name (#49).
+
+    "剑骨鱼或鲤鱼（约 1.5 斤，让店家处理内脏）" → "剑骨鱼或鲤鱼", and "番茄（2个）"
+    → "番茄". The quantity inside the note is read before this, and the full
+    text stays in raw_markdown. Nested brackets (a markdown link inside a
+    note) are removed from the inside out. If nothing is left, the note text
+    itself is the name: "（色拉油 或 菜籽油）" → "色拉油 或 菜籽油".
+    """
+    stripped = name
+    while True:
+        shorter = re.sub(r"[（(][^（()）]*[）)]", "", stripped)
+        if shorter == stripped:
+            break
+        stripped = shorter
+    stripped = stripped.strip()
+    if stripped:
+        return stripped
+    return re.sub(r"[（()）]", " ", name).strip()
 
 
 def _parse_ingredients(text: str) -> list[dict]:
     """Parse ingredient section into structured list."""
     results = []
+    seen: set[str] = set()
     for line in text.split("\n"):
         line = line.strip()
         if not line:
@@ -194,12 +209,18 @@ def _parse_ingredients(text: str) -> list[dict]:
         # Remove "500克" from the name; store 500 and 克 separately (#47).
         name = line
         if qty_match:
-            name = _drop_empty_brackets(name.replace(qty_match.group(0), "", 1))
+            name = name.replace(qty_match.group(0), "", 1)
+        name = _strip_bracket_notes(name)
         # Clean up leading punctuation/spaces
-        name = re.sub(r"^[\s,，、；;]+", "", name)
+        name = re.sub(r"^[\s,，、；;]+", "", name) or line
+
+        # Some recipes list an ingredient twice (口水鸡: 花椒); keep the first.
+        if name in seen:
+            continue
+        seen.add(name)
 
         results.append({
-            "ingredient_name": name or line,
+            "ingredient_name": name,
             "quantity": qty_match.group(1) if qty_match else None,
             "unit": qty_match.group(2) if qty_match else None,
             "is_seasoning": is_seasoning,
@@ -234,7 +255,7 @@ def _parse_steps(text: str) -> list[dict]:
 def _get_db_session(db_url: str):
     """Create a SQLAlchemy session."""
     from sqlalchemy import create_engine
-    from sqlalchemy.orm import Session, sessionmaker
+    from sqlalchemy.orm import sessionmaker
 
     engine = create_engine(db_url, pool_pre_ping=True)
     session_local = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -283,7 +304,7 @@ def import_howtocook(howtocook_path: str, db_url: str = "", prune_non_recipes: b
     existing_count = 0
     fixed_count = 0
     error_count = 0
-    quantity_fixed_count = 0
+    synced_count = 0
 
     for md_file in sorted(md_files):
         # Check if already imported (by source_path)
@@ -300,7 +321,16 @@ def import_howtocook(howtocook_path: str, db_url: str = "", prune_non_recipes: b
                 print(f"  ↻ {rel_path}: category {existing.category!r} → {category!r}")
                 existing.category = category
                 fixed_count += 1
-            quantity_fixed_count += _split_old_quantities(existing)
+            try:
+                parsed = parse_recipe_md(str(md_file))["ingredients"]
+            except Exception as e:  # keep going; report like a failed import
+                session.rollback()
+                error_count += 1
+                print(f"  ✗ {rel_path}: {e}")
+                continue
+            if _sync_ingredients(session, existing, parsed):
+                print(f"  ↻ {rel_path}: ingredients re-parsed")
+                synced_count += 1
             session.commit()
             continue
 
@@ -365,37 +395,40 @@ def import_howtocook(howtocook_path: str, db_url: str = "", prune_non_recipes: b
     session.close()
     print(
         f"\nImport complete: {imported_count} imported, {existing_count} existing "
-        f"({fixed_count} categories fixed, {quantity_fixed_count} quantities split), "
+        f"({fixed_count} categories fixed, {synced_count} ingredient lists re-parsed), "
         f"{error_count} errors"
     )
     return {"imported": imported_count, "existing": existing_count,
-            "fixed": fixed_count, "quantities_fixed": quantity_fixed_count,
+            "fixed": fixed_count, "ingredients_synced": synced_count,
             "errors": error_count, "non_recipe": non_recipe, "pruned": pruned}
 
 
-def _split_old_quantities(recipe) -> int:
-    """Fix ingredients written by older imports; returns how many changed.
+_INGREDIENT_FIELDS = ("ingredient_name", "quantity", "unit", "is_seasoning", "is_optional", "sort_order")
 
-    Quantity "500克" with unit "克" becomes "500", and a name left as
-    "番茄（）" after the quantity was cut out becomes "番茄".
+
+def _sync_ingredients(session, recipe, parsed: list[dict]) -> bool:
+    """Make an existing HowToCook recipe's ingredients match a fresh parse.
+
+    HowToCook recipes cannot be edited in the app, so their ingredient rows
+    are always what the importer wrote. Older importers stored "500克" as
+    the quantity, left "番茄（）" / "（约 ，…）" in names and kept duplicates;
+    rewriting the rows gives the same result as a fresh import. Returns
+    True when the rows changed.
     """
-    fixed = 0
-    for ing in recipe.ingredients:
-        changed = False
-        unit = (ing.unit or "").strip()
-        quantity = (ing.quantity or "").strip()
-        if unit and quantity.endswith(unit):
-            number = quantity[: -len(unit)].strip()
-            if re.fullmatch(r"[\d.]+", number):
-                ing.quantity = number
-                changed = True
-        if ing.unit:  # only rows whose quantity was cut out of the name
-            name = _drop_empty_brackets(ing.ingredient_name)
-            if name and name != ing.ingredient_name:
-                ing.ingredient_name = name
-                changed = True
-        fixed += changed
-    return fixed
+    from stock_manager.api.models import RecipeIngredient
+
+    current = sorted(recipe.ingredients, key=lambda i: (i.sort_order, i.id))
+    as_rows = [tuple(getattr(i, f) for f in _INGREDIENT_FIELDS) for i in current]
+    wanted = [tuple(p[f] for f in _INGREDIENT_FIELDS) for p in parsed]
+    if as_rows == wanted:
+        return False
+    for ing in current:
+        session.delete(ing)
+    session.flush()
+    for p in parsed:
+        session.add(RecipeIngredient(recipe_id=recipe.id, **{f: p[f] for f in _INGREDIENT_FIELDS}))
+    session.expire(recipe, ["ingredients"])
+    return True
 
 
 def _handle_non_recipe_rows(session, prune: bool) -> tuple[int, int]:

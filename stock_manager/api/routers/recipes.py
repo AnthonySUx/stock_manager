@@ -26,11 +26,9 @@ from stock_manager.api.recipe_schemas import (
 )
 from stock_manager.api.recipe_services import (
     add_favorite,
-    cook_recipe_and_consume,
     create_recipe,
     delete_recipe,
     fork_recipe,
-    get_consume_preview,
     get_recipe,
     get_recipe_flags,
     get_recipes,
@@ -150,16 +148,8 @@ def ai_today_recommendations(limit: int = Query(15, ge=1, le=50),
             summary="No matching recipes found.", source_notice=HOWTOCOOK_SOURCE.notice,
             recommendations=[])
     try:
-        from stock_manager.api.models import Item, Category
-        inventory = (
-            db.query(Item)
-            .join(Category, Item.category_id == Category.id)
-            .filter(
-                Item.status.in_(["active", "expiring soon"]),
-                Category.recipe_usage.in_(["always", "conditional"]),
-            )
-            .all()
-        )
+        from stock_manager.api.category_services import query_recipe_candidate_items
+        inventory = query_recipe_candidate_items(db).all()
         inv_names = list(set(i.name.strip() for i in inventory))
         exp_names = list(set(i.name.strip() for i in inventory if i.status == "expiring soon"))
         ai_result = asyncio.run(get_ai_recommendations(
@@ -213,16 +203,10 @@ async def explore_recipes_endpoint(
 def _load_explore_inventory(db: Session, selected_ids: list[int]) -> tuple[list[dict], list[int]]:
     """Return recipe-eligible, usable inventory (optionally only `selected_ids`)
     and the selected ids that are unknown or not eligible."""
-    from stock_manager.api.models import Item, Category
+    from stock_manager.api.category_services import query_recipe_candidate_items
+    from stock_manager.api.models import Item
 
-    query = (
-        db.query(Item)
-        .join(Category, Item.category_id == Category.id)
-        .filter(
-            Item.status.in_(["active", "expiring soon"]),
-            Category.recipe_usage.in_(["always", "conditional"]),
-        )
-    )
+    query = query_recipe_candidate_items(db)
     wanted = list(dict.fromkeys(selected_ids))  # dedupe, keep order
     if wanted:
         query = query.filter(Item.id.in_(wanted))

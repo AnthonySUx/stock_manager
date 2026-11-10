@@ -1,12 +1,12 @@
 """Business logic layer for the Stock Manager API."""
 
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Optional
 
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
-from stock_manager.api.models import Item, RestockItem, Setting
+from stock_manager.api.models import Item, RestockItem, Setting, utcnow
 
 
 # ─── Status Calculation ──────────────────────────────────────────
@@ -147,13 +147,14 @@ def search_items(
     refresh_item_statuses(db)
 
     from stock_manager.api.models import Category
-    pattern = f"%{keyword}%"
+    from stock_manager.api.text_search import contains_ci
+
     query = db.query(Item).outerjoin(Category, Item.category_id == Category.id).filter(
-        func.lower(Item.name).like(pattern.lower())
-        | func.lower(Category.name).like(pattern.lower())
-        | func.lower(Item.owner).like(pattern.lower())
-        | func.lower(Item.location).like(pattern.lower())
-        | func.lower(func.coalesce(Item.notes, "")).like(pattern.lower())
+        contains_ci(Item.name, keyword)
+        | contains_ci(Category.name, keyword)
+        | contains_ci(Item.owner, keyword)
+        | contains_ci(Item.location, keyword)
+        | contains_ci(func.coalesce(Item.notes, ""), keyword)
     )
 
     if owner is not None:
@@ -328,7 +329,7 @@ def update_restock_item(
 
     # Handle done_at
     if item_data.get("status") == "done" and item.done_at is None:
-        item.done_at = datetime.utcnow()
+        item.done_at = utcnow()
     elif item_data.get("status") == "pending":
         item.done_at = None
 
@@ -344,7 +345,7 @@ def mark_restock_item_done(db: Session, item_id: int) -> bool:
         return False
 
     item.status = "done"
-    item.done_at = datetime.utcnow()
+    item.done_at = utcnow()
     db.commit()
     return True
 
@@ -398,7 +399,7 @@ def complete_restock_purchase(
     if remaining > 0:
         values = {RestockItem.quantity_value: remaining}
     else:
-        values = {RestockItem.status: "done", RestockItem.done_at: datetime.utcnow()}
+        values = {RestockItem.status: "done", RestockItem.done_at: utcnow()}
 
     try:
         updated = guard.update(values, synchronize_session=False)
@@ -441,23 +442,21 @@ def delete_restock_items_by_status(db: Session, status: str) -> int:
 # ─── Settings ────────────────────────────────────────────────────
 
 
+DEFAULT_SETTINGS = {"expiration_reminder_days": "2"}
+
+
 def get_settings(db: Session) -> dict[str, str]:
-    """Return current settings."""
-    defaults = {
-        "default_database": "stock.db",
-        "expiration_reminder_days": "2",
-    }
-
-    rows = db.query(Setting).all()
-    for row in rows:
-        defaults[row.key] = row.value
-
-    return defaults
+    """Return current settings. Old rows such as `default_database` may be
+    included; SettingResponse returns only the known keys."""
+    settings = dict(DEFAULT_SETTINGS)
+    for row in db.query(Setting):
+        settings[row.key] = row.value
+    return settings
 
 
 def update_settings(db: Session, settings: dict[str, str]) -> dict[str, str]:
     """Update settings and return the current state."""
-    now = datetime.utcnow()
+    now = utcnow()
 
     for key, value in settings.items():
         if value is None:

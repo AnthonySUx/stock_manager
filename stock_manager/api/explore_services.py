@@ -5,7 +5,6 @@ Both modes are converted into an AI prompt that generates idea candidates.
 """
 import json
 import logging
-import os
 from typing import Optional
 from uuid import uuid4
 
@@ -23,14 +22,16 @@ _RECIPE_CATEGORIES = _recipe_category_values()
 
 async def _call_ai(prompt: str, system_prompt: str) -> Optional[str]:
     import httpx
-    base_url = os.getenv("AI_BASE_URL", "https://api.deepseek.com")
-    api_key = os.getenv("AI_API_KEY", "")
-    model = os.getenv("AI_MODEL", "deepseek-chat")
-    timeout = int(os.getenv("AI_TIMEOUT_SECONDS", "60"))
-    temperature = float(os.getenv("AI_TEMPERATURE", "0.2"))
-    enabled = os.getenv("AI_RECIPE_ENABLED", "false").lower() == "true"
+    from stock_manager.api.ai_recipe_service import load_ai_config
 
-    if not enabled or not api_key:
+    config = load_ai_config()
+    base_url = config["base_url"]
+    api_key = config["api_key"]
+    model = config["model"]
+    timeout = config["timeout"]
+    temperature = config["temperature"]
+
+    if not config["enabled"] or not api_key:
         logger.info("AI not configured, skipping")
         return None
 
