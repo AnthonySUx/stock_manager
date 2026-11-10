@@ -15,6 +15,7 @@ from stock_manager.api.models import (
     RecipeUsageHistory,
 )
 from stock_manager.api.recipe_services import get_recipes
+from stock_manager.api.text_search import contains_ci
 from tests.conftest import test_engine
 from tests.helpers import make_item_create_payload
 
@@ -132,10 +133,10 @@ def _old_get_recipes(db, *, source_type=None, category=None, query=None,
     if category:
         q = q.filter(func.lower(Recipe.category) == category.lower())
     if query:
-        pattern = f"%{query}%"
+        # Since #49 the filter matches literally (no LIKE wildcards).
         q = q.filter(
-            func.lower(Recipe.title).like(pattern.lower())
-            | func.lower(func.coalesce(Recipe.description, "")).like(pattern.lower())
+            contains_ci(Recipe.title, query)
+            | contains_ci(func.coalesce(Recipe.description, ""), query)
         )
     if favorite_only:
         q = q.filter(Recipe.id.in_(db.query(RecipeFavorite.recipe_id)))

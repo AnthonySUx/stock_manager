@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Start the Stock Manager API backend server.
-# Prerequisites: Docker MySQL running, Python deps installed.
+# Prerequisites: MySQL running (Docker or Homebrew), Python deps installed.
 
 set -euo pipefail
 
@@ -10,7 +10,9 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_DIR"
 
 echo "Starting Stock Manager API..."
-echo "Make sure Docker MySQL is running: docker compose up -d"
+echo "Make sure MySQL is running (docs/app/setup.md 2.3):"
+echo "  Docker:   docker compose up -d"
+echo "  Homebrew: brew services start mysql"
 echo ""
 
 # Default: only this machine can reach the API (iOS Simulator and Android

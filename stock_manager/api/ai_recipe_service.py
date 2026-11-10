@@ -13,8 +13,12 @@ import httpx
 logger = logging.getLogger(__name__)
 
 
-def _load_config() -> dict:
-    """Load AI configuration from environment."""
+def load_ai_config() -> dict:
+    """AI settings from the environment, read on each call.
+
+    The single reader for every AI feature (recommendations, Explore), so
+    they always agree on whether AI is enabled and which model to use.
+    """
     return {
         "enabled": os.getenv("AI_RECIPE_ENABLED", "false").lower() == "true",
         "base_url": os.getenv("AI_BASE_URL", "https://api.deepseek.com"),
@@ -144,7 +148,7 @@ async def get_ai_recommendations(
 
     Returns None if AI is disabled, misconfigured, or returns invalid output.
     """
-    config = _load_config()
+    config = load_ai_config()
     if not config["enabled"] or not config["api_key"]:
         return None
 

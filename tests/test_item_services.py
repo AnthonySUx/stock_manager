@@ -2,15 +2,14 @@
 
 from datetime import date, timedelta
 
+from tests.helpers import make_item_model_data
+
 
 def _cat_id(db_session, slug):
     """Helper to get category ID by slug."""
     from stock_manager.api.category_services import get_category_by_slug
     cat = get_category_by_slug(db_session, slug)
     return cat.id if cat else None
-
-
-from tests.helpers import make_item_model_data
 
 
 class TestCreateAndGetItem:

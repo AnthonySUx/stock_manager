@@ -158,8 +158,8 @@ class TestDoneRestockItem:
 
         # Stock should have quantity=5
         stock_response = client.get("/api/items")
-        names = [item["name"] for item in stock_response.json() if item["name"] == "鸡蛋"]
-        assert any(item["quantity_value"] == 5 for item in stock_response.json())
+        eggs = [item for item in stock_response.json() if item["name"] == "鸡蛋"]
+        assert any(item["quantity_value"] == 5 for item in eggs)
 
         # Original restock item should still be pending with remaining quantity
         get_response = client.get(f"/api/restock/{created['id']}")

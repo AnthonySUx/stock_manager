@@ -34,7 +34,8 @@ Displays current stock with:
 
 ### Search and Filter
 
-- **Search**: by name, category, owner, location, notes
+- **Search**: by name, category, owner, location, notes. Case-insensitive, and the keyword
+  is matched literally: `%` and `_` are ordinary characters (recipe search works the same way).
 - **Filters**: by category, owner, location, status
 
 ### Edit
@@ -114,23 +115,26 @@ Items are shown as `expiring soon` when within a configurable number of days (de
 - Opened items use the opened expiration date
 - Unopened items use the unopened expiration date
 - Items with `infinite` expiration are excluded
+- Consumed and deleted items are excluded
 
 Statuses depend on today's date, so they are recalculated once per request when items are
 listed, searched, cleaned up or reminders are read. The database is written only if a status
 actually changed. `GET /api/items/reminders` returns `expiring soon` items first, then
 `expired` items, each in id order.
-- Consumed and deleted items are excluded
 
 ---
 
 ## Settings
 
-Manage global app-level settings:
+Manage global app-level settings (`GET` / `PATCH /api/settings`), stored in the database:
 
-- `default_database`: default SQLite database path (CLI only)
-- `expiration_reminder_days`: number of days before expiration to trigger `expiring soon` status
+- `expiration_reminder_days`: number of days before expiration to trigger `expiring soon` status.
+  A whole number from 0 to 365, sent as a number or a numeric string and returned as a string.
+  Other values are rejected with `422`.
 
-Settings are stored in a user-level `settings.json` file.
+`default_database` was removed from the API (the app always uses MySQL); a client that still
+sends it is not rejected, the field is ignored. The legacy CLI keeps its own `settings.json`
+with `default_database` (see `docs/cli.md`).
 
 ---
 

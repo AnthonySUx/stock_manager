@@ -366,8 +366,10 @@ def query_recipe_candidate_items(
     db: Session,
     include_conditional: bool = True,
 ):
-    """Return inventory items eligible for recipe features.
-    
+    """Query for usable stock that recipe features may use (active or
+    expiring soon, category not 'never'). Shared by recommendations,
+    consume preview and Explore so they always agree.
+
     Always returns items with recipe_usage='always'.
     Optionally includes 'conditional' items.
     Never includes 'never' items.
@@ -382,40 +384,3 @@ def query_recipe_candidate_items(
             Category.recipe_usage.in_(usages),
         )
     )
-
-
-def get_recipe_candidate_inventory(db: Session, include_conditional: bool = True) -> dict:
-    """Return recipe-candidate inventory grouped by recipe_usage.
-    
-    Returns: {"regular": [...], "occasional": [...]}
-    """
-    from stock_manager.api.models import Item
-    items = (
-        db.query(Item)
-        .join(Category, Item.category_id == Category.id)
-        .filter(
-            Item.status.in_(["active", "expiring soon"]),
-            Category.recipe_usage.in_(RECIPE_ALLOWED_USAGES),
-        )
-        .all()
-    )
-
-    regular = []
-    occasional = []
-    for item in items:
-        d = {
-            "id": item.id,
-            "name": item.name,
-            "quantity_value": item.quantity_value,
-            "quantity_unit": item.quantity_unit,
-            "status": item.status,
-            "current_expiration_date": item.current_expiration_date,
-            "category_name": item.category.name,
-            "recipe_usage": item.category.recipe_usage,
-        }
-        if item.category.recipe_usage == RECIPE_USAGE_ALWAYS:
-            regular.append(d)
-        else:
-            occasional.append(d)
-
-    return {"regular": regular, "occasional": occasional}

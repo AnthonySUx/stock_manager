@@ -1,6 +1,5 @@
 """Business logic for recipe features."""
-import json
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Optional
 
 from sqlalchemy import case, func, select
@@ -12,11 +11,12 @@ from stock_manager.api.models import (
     RecipeIngredient,
     RecipeStep,
     RecipeUsageHistory,
-    AIRecipeRecommendation,
     Item,
+    utcnow,
 )
 from stock_manager.api.recipe_schemas import RecipeCreate, RecipeUpdate
 from stock_manager.api.quantity import parse_quantity, same_unit
+from stock_manager.api.text_search import contains_ci
 
 
 DEFAULT_SYNONYM_MAP: dict[str, list[str]] = {
@@ -189,10 +189,9 @@ def get_recipes(
     if category:
         q = q.filter(func.lower(Recipe.category) == category.lower())
     if query:
-        pattern = f"%{query}%"
         q = q.filter(
-            func.lower(Recipe.title).like(pattern.lower())
-            | func.lower(func.coalesce(Recipe.description, "")).like(pattern.lower())
+            contains_ci(Recipe.title, query)
+            | contains_ci(func.coalesce(Recipe.description, ""), query)
         )
     if favorite_only:
         q = q.filter(is_fav)
@@ -572,20 +571,10 @@ def get_recommendations(
     """
     if scene not in RECOMMENDATION_SCENES:
         raise ValueError(f"Unknown scene '{scene}'")
-    warning_days = 2
 
     # Gather active inventory - only recipe eligible
-    from stock_manager.api.models import Category
-    from stock_manager.api.category_services import RECIPE_USAGE_ALWAYS, RECIPE_USAGE_CONDITIONAL
-    items = (
-        db.query(Item)
-        .join(Category, Item.category_id == Category.id)
-        .filter(
-            Item.status.in_(["active", "expiring soon"]),
-            Category.recipe_usage.in_([RECIPE_USAGE_ALWAYS, RECIPE_USAGE_CONDITIONAL]),
-        )
-        .all()
-    )
+    from stock_manager.api.category_services import RECIPE_USAGE_ALWAYS, query_recipe_candidate_items
+    items = query_recipe_candidate_items(db).all()
 
     inventory_names = set()
     expiring_names = set()
@@ -617,7 +606,7 @@ def get_recommendations(
     recipes = [r for r in db.query(Recipe).order_by(Recipe.id).all() if is_recommendable(r) and recipe_matches_scene(r, scene)]
 
     # Recipes actually cooked recently (written by POST /recipes/{id}/cook)
-    cooked_since = datetime.utcnow() - timedelta(days=RECENT_COOKED_DAYS)
+    cooked_since = utcnow() - timedelta(days=RECENT_COOKED_DAYS)
     recent_cooked_ids = set(
         row[0] for row in db.query(RecipeUsageHistory.recipe_id).filter(
             RecipeUsageHistory.event_type == "cooked",
@@ -648,7 +637,6 @@ def get_recommendations(
         matched = []
         expiring_used = []
         missing = []
-        missing_main = []
 
         for ing in ingredients:
             ing_norm = _normalize_name(ing.ingredient_name).lower()
@@ -729,17 +717,8 @@ def get_consume_preview(db: Session, recipe_id: int) -> Optional[dict]:
     ).all()
 
     # Get active inventory - exclude never recipe_usage
-    from stock_manager.api.models import Category
-    from stock_manager.api.category_services import RECIPE_ALLOWED_USAGES
-    items = (
-        db.query(Item)
-        .join(Category, Item.category_id == Category.id)
-        .filter(
-            Item.status.in_(["active", "expiring soon"]),
-            Category.recipe_usage.in_(RECIPE_ALLOWED_USAGES),
-        )
-        .all()
-    )
+    from stock_manager.api.category_services import query_recipe_candidate_items
+    items = query_recipe_candidate_items(db).all()
 
     suggestions = []
     unmatched = []

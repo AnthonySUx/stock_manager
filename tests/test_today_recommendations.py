@@ -99,9 +99,7 @@ class TestRecommendationHistory:
         assert after["score"] == before["score"] - 15
 
     def test_cooking_older_than_window_has_no_penalty(self, client, db_session):
-        from datetime import datetime
-
-        from stock_manager.api.models import RecipeUsageHistory
+        from stock_manager.api.models import RecipeUsageHistory, utcnow
         from stock_manager.api.recipe_services import RECENT_COOKED_DAYS
 
         _create_item(client, db_session, "鸡蛋", "eggs")
@@ -110,7 +108,7 @@ class TestRecommendationHistory:
 
         db_session.add(RecipeUsageHistory(
             recipe_id=recipe["id"], event_type="cooked",
-            created_at=datetime.utcnow() - timedelta(days=RECENT_COOKED_DAYS + 1),
+            created_at=utcnow() - timedelta(days=RECENT_COOKED_DAYS + 1),
         ))
         db_session.commit()
 
@@ -228,7 +226,7 @@ class TestDeprecatedAIToday:
 
         import stock_manager.api.ai_recipe_service as ai_service
 
-        monkeypatch.setattr(ai_service, "_load_config", lambda: {
+        monkeypatch.setattr(ai_service, "load_ai_config", lambda: {
             "enabled": True,
             "base_url": "http://ai.invalid",
             "api_key": "test-key",
