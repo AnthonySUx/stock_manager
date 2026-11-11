@@ -18,6 +18,7 @@ from sqlalchemy.pool import StaticPool
 from stock_manager.api.db import get_session
 from stock_manager.api.main import app
 from stock_manager.api.models import Base
+from stock_manager.api.schema_version import stamp_head
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL") or "sqlite://"
 IS_SQLITE = TEST_DATABASE_URL.startswith("sqlite")
@@ -48,6 +49,10 @@ TestingSessionLocal = sessionmaker(
 def db_session():
     """Provide a clean database session for each test."""
     Base.metadata.create_all(bind=test_engine)
+    with test_engine.begin() as connection:
+        # The API refuses to start unless the schema is at the newest Alembic
+        # revision; the tables above match it (checked in test_migrations.py).
+        stamp_head(connection)
     session = TestingSessionLocal()
     from stock_manager.api.category_services import seed_default_categories
     seed_default_categories(session)

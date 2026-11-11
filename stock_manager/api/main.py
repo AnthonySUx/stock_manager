@@ -7,8 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from stock_manager import __version__
 from stock_manager.api.auth import check_auth_config, require_api_token
+from stock_manager.api.schema_version import check_schema_current
 from stock_manager.api.db import engine
-from stock_manager.api.models import Base
 from stock_manager.api.routers import items, restock, settings, recipes, categories
 
 description = """
@@ -21,9 +21,13 @@ Stock Manager API — manage family stock, expiration reminders, and restocking 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Check auth config, then create database tables if they do not exist."""
+    """Check auth config and the schema version, then seed default categories.
+
+    Tables are created and upgraded by Alembic (`alembic upgrade head`), not
+    here (#49).
+    """
     check_auth_config()
-    Base.metadata.create_all(bind=engine)
+    check_schema_current(engine)
     from sqlalchemy.orm import sessionmaker
     from stock_manager.api.category_services import seed_default_categories
     SeedSession = sessionmaker(bind=engine)
