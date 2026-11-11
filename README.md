@@ -17,6 +17,7 @@ docker compose up -d
 
 # 2. Backend
 source .venv/bin/activate
+alembic upgrade head   # create / upgrade the tables
 uvicorn stock_manager.api.main:app --reload --host 127.0.0.1 --port 8000
 
 # 3. Frontend

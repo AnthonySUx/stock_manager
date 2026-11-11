@@ -13,6 +13,7 @@ echo "Starting Stock Manager API..."
 echo "Make sure MySQL is running (docs/app/setup.md 2.3):"
 echo "  Docker:   docker compose up -d"
 echo "  Homebrew: brew services start mysql"
+echo "After pulling schema changes, run: python3 -m alembic upgrade head"
 echo ""
 
 # Default: only this machine can reach the API (iOS Simulator and Android

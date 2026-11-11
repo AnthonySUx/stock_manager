@@ -64,6 +64,17 @@ The response `detail` is a list; each entry names the field (`loc`) and the reas
 
 Set `API_TOKEN` in `.env` (see [Setup §3.7](setup.md#37-api-authentication)), or set `API_AUTH_DISABLED=true` for local development only.
 
+### Backend fails to start: `... Run `alembic upgrade head` ...`
+
+The database is not at the newest schema revision: it is empty, was created before migrations
+were added, or you pulled a change with a new migration. Run `alembic upgrade head` in the
+project directory, then start the backend again. Existing data is kept
+(see [Setup §3.5](setup.md#35-database-migrations-alembic)).
+
+`alembic: command not found`: run `pip install -e .` (Alembic is a backend dependency). If it is
+installed but its script directory is not on `PATH` (pip warns "installed in
+'~/Library/Python/3.11/bin' which is not on PATH"), use `python3 -m alembic upgrade head`.
+
 ### Connection refused
 
 Backend not running. Start it with uvicorn.
