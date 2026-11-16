@@ -1,5 +1,4 @@
 """FastAPI router for recipe features."""
-import asyncio
 import logging
 from typing import Literal, Optional
 
@@ -8,7 +7,6 @@ from sqlalchemy.orm import Session
 
 from stock_manager.api.db import get_session
 from stock_manager.api.recipe_schemas import (
-    AIRecipeRecommendationResponse,
     ConsumePreviewResponse,
     CookRecipeRequest,
     CookRecipeResponse,
@@ -38,7 +36,6 @@ from stock_manager.api.recipe_services import (
     remove_favorite,
     update_recipe,
 )
-from stock_manager.api.ai_recipe_service import get_ai_recommendations
 
 router = APIRouter(tags=["Recipes"])
 logger = logging.getLogger(__name__)
@@ -107,7 +104,7 @@ def list_sources():
 
 @router.get("", response_model=list[RecipeSummary])
 def list_recipes(
-    source_type: Optional[str] = Query(None, pattern="^(howtocook|user|ai_saved)$"),
+    source_type: Optional[str] = Query(None, pattern="^(howtocook|user)$"),
     category: Optional[str] = None, query: Optional[str] = None,
     favorite_only: bool = False, limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0), db: Session = Depends(get_session),
@@ -132,42 +129,6 @@ def rule_recommendations(
     results = get_recommendations(db, limit=limit, scene=scene)
     return RecipeRecommendationResponse(source_notice=HOWTOCOOK_SOURCE.notice,
         recommendations=[RecipeRecommendation(**r) for r in results])
-
-
-@router.post("/ai/today", response_model=AIRecipeRecommendationResponse, deprecated=True)
-def ai_today_recommendations(limit: int = Query(15, ge=1, le=50),
-    db: Session = Depends(get_session)):
-    """Deprecated for MVP (PR #14): use GET /api/recipes/recommendations.
-
-    Kept for compatibility only. The returned list is always the rule-based
-    result; AI (when enabled) contributes the summary only.
-    """
-    rule_results = get_recommendations(db, limit=limit)
-    if not rule_results:
-        return AIRecipeRecommendationResponse(mode="rule_based_fallback",
-            summary="No matching recipes found.", source_notice=HOWTOCOOK_SOURCE.notice,
-            recommendations=[])
-    try:
-        from stock_manager.api.category_services import query_recipe_candidate_items
-        inventory = query_recipe_candidate_items(db).all()
-        inv_names = list(set(i.name.strip() for i in inventory))
-        exp_names = list(set(i.name.strip() for i in inventory if i.status == "expiring soon"))
-        ai_result = asyncio.run(get_ai_recommendations(
-            # Pass full rule results: the prompt builder reads expiring_inventory_items.
-            candidates=rule_results,
-            inventory_items=inv_names, expiring_soon_items=exp_names,
-            favorite_ids=[r["recipe_id"] for r in rule_results if r.get("is_favorite")],
-        ))
-        if ai_result is not None:
-            return AIRecipeRecommendationResponse(mode="ai",
-                summary=ai_result.get("summary"), source_notice=HOWTOCOOK_SOURCE.notice,
-                recommendations=[RecipeRecommendation(**r) for r in rule_results])
-    except Exception:
-        logger.exception("AI today recommendations failed; falling back to rule-based results")
-    return AIRecipeRecommendationResponse(mode="rule_based_fallback",
-        summary="AI not available.", source_notice=HOWTOCOOK_SOURCE.notice,
-        recommendations=[RecipeRecommendation(**r) for r in rule_results])
-
 
 
 @router.post("/explore", response_model=ExploreResponse)

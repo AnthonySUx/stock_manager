@@ -11,7 +11,7 @@ Users can:
 - Browse recipes sorted by relevance
 - Search recipes by title or description
 - View recipe details (categories, difficulty, servings, cook time, ingredients, steps)
-- Filter by source type (`howtocook`, `user`, `ai_saved`)
+- Filter by source type (`howtocook`, `user`). Saved AI drafts are `user` recipes.
 - Filter by category
 - Show only favorites
 - Create personal recipes
@@ -159,11 +159,19 @@ Empty or omitted → all eligible inventory.
 {"mode": "structured", "structured": {"inventory_item_ids": [12, 15], "flavors": ["spicy"]}}
 ```
 
-### AI response handling
+### AI response handling and errors
 
 The AI may answer with `{"ideas": [...]}` or a bare list of ideas; both work. Ideas without a
-title or with wrong field types are dropped. If nothing usable comes back, the response is `200`
-with `ideas: []` and the warning `"Failed to parse AI response."` (never a `500`).
+title or with wrong field types are dropped; as long as one idea is usable the response is `200`.
+
+Errors (Explore and Expand), with a JSON body `{"code": "..."}`:
+
+| Status | `code` | When | What the app should do |
+|---|---|---|---|
+| `503` | `ai_unavailable` | AI is not configured or is disabled | Hide or disable AI features (see `GET /api/capabilities`); retrying does not help |
+| `502` | `ai_upstream_error` | The provider timed out, failed, or returned nothing usable | Offer "retry" |
+
+Never a `500`.
 
 ### Expand Idea to Draft
 
@@ -171,21 +179,35 @@ with `ideas: []` and the warning `"Failed to parse AI response."` (never a `500`
 
 Select an explore idea and expand it into a structured recipe draft with estimated ingredients and steps. The draft is **not saved automatically** — the frontend should let users review and optionally save it via the recipe creation API.
 
+When the AI fails, Expand returns `502` / `503` like Explore. There is no fallback draft (it used
+to return just the title with no ingredients or steps); the user can retry or create the recipe
+by hand.
+
 ### AI Boundary
 
 Currently AI is used **only** for Explore Recipes. Today Recommendations use local scoring (decided in PR #14).
 
-- If AI is disabled or fails, Explore endpoints return descriptive error messages
-- `POST /api/recipes/ai/today` is **deprecated** (shown as deprecated in `/docs`). It is kept only for compatibility. Its list is always the rule-based result: when AI is enabled, AI adds only the `summary`, and on any failure it returns `mode="rule_based_fallback"`. New frontend code should call `GET /api/recipes/recommendations`.
-- AI configuration uses the following environment variables:
-
-Example:
+- `GET /api/capabilities` (needs the API token) tells the app what is available:
+  `{"ai": {"text": true, "vision": false, "asr": false}}`. `text` is true when AI is enabled and
+  configured; use it to decide whether to show Explore. `vision` and `asr` turn on with intake
+  (#63) and speech (#32).
+- If AI is disabled or fails, Explore and Expand return `503` / `502` (see above).
+- `POST /api/recipes/ai/today` was removed in #66 (deprecated since PR #14). Use
+  `GET /api/recipes/recommendations`.
+- All AI calls go through one client (`stock_manager/api/ai_client.py`). It asks for JSON output
+  (`response_format: json_object`) and also accepts JSON in a code fence.
+- AI configuration uses the following environment variables. They are read once at startup:
+  restart the backend after changing them. An invalid number is logged and turns AI off.
 
 | Variable | Default | Description |
 |---|---|---|
 | `AI_RECIPE_ENABLED` | `false` | Enable AI features |
 | `AI_BASE_URL` | `https://api.deepseek.com` | AI provider base URL |
 | `AI_API_KEY` | — | API key |
-| `AI_MODEL` | `deepseek-chat` | Model name |
-| `AI_TIMEOUT_SECONDS` | `60` | Request timeout |
+| `AI_MODEL` | `deepseek-flash` | Model name (`deepseek-chat` is retired) |
 | `AI_TEMPERATURE` | `0.2` | Response temperature |
+| `AI_TIMEOUT_SECONDS` | `30` | Timeout per text request |
+| `AI_IMAGE_TIMEOUT_SECONDS` | `60` | Timeout per image request |
+| `AI_TOTAL_TIMEOUT_SECONDS` | `45` | Upper bound for one text call, retry included |
+| `AI_IMAGE_TOTAL_TIMEOUT_SECONDS` | `75` | Upper bound for one image call, retry included |
+| `AI_MAX_RETRIES` | `1` | Retries after a connection error, `429` or `5xx`. Timeouts are not retried |

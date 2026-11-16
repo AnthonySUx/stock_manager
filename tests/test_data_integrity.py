@@ -53,14 +53,15 @@ class TestRecipeDelete:
         assert db_session.query(RecipeUsageHistory).filter_by(recipe_id=recipe_id).count() == 0
 
     def test_delete_recipe_that_has_forks(self, client, db_session):
-        """An AI-saved recipe can be forked and then deleted; the fork stays."""
-        from stock_manager.api.recipe_schemas import RecipeCreate
-        from stock_manager.api.recipe_services import create_recipe
+        """Deleting a recipe that others were forked from keeps the forks.
 
-        base_id = create_recipe(db_session, RecipeCreate(title="AI 菜", category="meat_dish"), source_type="ai_saved").id
-        fork = client.post(f"/api/recipes/{base_id}/fork")
-        assert fork.status_code == 200
-        fork_id = fork.json()["id"]
+        Only user recipes can be deleted, and forking a user recipe returns it
+        unchanged, so the fork link is set directly (as older data may have).
+        """
+        base_id = self._user_recipe(client, "原菜")
+        fork_id = self._user_recipe(client, "改版")
+        db_session.get(Recipe, fork_id).base_recipe_id = base_id
+        db_session.commit()
 
         assert client.delete(f"/api/recipes/{base_id}").status_code == 200
 

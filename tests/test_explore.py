@@ -1,4 +1,7 @@
-"""Issue #45: Explore robustness and request fields. The AI is always mocked."""
+"""Issues #45 / #66: Explore robustness, request fields and AI errors.
+
+The AI is always mocked (`fake_ai` in conftest).
+"""
 
 import json
 from datetime import date, timedelta
@@ -23,22 +26,6 @@ def _create_item(client, db_session, name, slug, **overrides):
     response = client.post("/api/items", json=payload)
     assert response.status_code == 201, response.text
     return response.json()
-
-
-@pytest.fixture()
-def fake_ai(monkeypatch):
-    """Replace the AI call; `fake_ai.reply` is what the AI 'returns'."""
-    class Fake:
-        reply = None
-        prompts: list = []
-
-    async def _call(prompt, system_prompt):
-        Fake.prompts.append(prompt)
-        return Fake.reply
-
-    Fake.prompts = []
-    monkeypatch.setattr("stock_manager.api.explore_services._call_ai", _call)
-    return Fake
 
 
 def _explore_nl(client, text="今晚吃什么"):
@@ -67,13 +54,16 @@ class TestResponseShapes:
         fake_ai.reply = "Here you go:\n```json\n" + json.dumps([IDEA]) + "\n```"
         assert [i["title"] for i in _explore_nl(client).json()["ideas"]] == ["番茄炒蛋"]
 
-    @pytest.mark.parametrize("reply", ['"just a string"', "42", "null", "not json at all", "{}", "[]"])
-    def test_unusable_reply_is_warning_not_500(self, client, fake_ai, reply):
+    @pytest.mark.parametrize("reply", [
+        '"just a string"', "42", "null", "not json at all", "{}", "[]",
+        json.dumps({"ideas": [{"title": "坏", "matched_ingredients": "番茄"}]}),  # all malformed
+    ])
+    def test_unusable_reply_is_502(self, client, fake_ai, reply):
+        """Nothing usable: 502 so the client can offer a retry (#66)."""
         fake_ai.reply = reply
         response = _explore_nl(client)
-        assert response.status_code == 200
-        assert response.json()["ideas"] == []
-        assert response.json()["warnings"] == ["Failed to parse AI response."]
+        assert response.status_code == 502
+        assert response.json() == {"code": "ai_upstream_error"}
 
     def test_malformed_idea_is_skipped(self, client, fake_ai):
         bad = {"title": "坏数据", "matched_ingredients": "番茄"}  # should be a list
@@ -82,11 +72,11 @@ class TestResponseShapes:
         assert response.status_code == 200
         assert [i["title"] for i in response.json()["ideas"]] == ["番茄炒蛋"]
 
-    def test_expand_with_list_reply_is_not_500(self, client, fake_ai):
+    def test_expand_with_list_reply_is_502_not_a_fallback_draft(self, client, fake_ai):
         fake_ai.reply = json.dumps([{"title": "x"}])
         response = client.post("/api/recipes/explore/expand", json={"idea": IDEA})
-        assert response.status_code == 200
-        assert response.json()["recipe_draft"]["title"] == "番茄炒蛋"
+        assert response.status_code == 502
+        assert response.json() == {"code": "ai_upstream_error"}
 
 
 # ─── 2. Event loop not blocked ────────────────────────────────────
@@ -205,3 +195,52 @@ class TestModeValidation:
         assert response.status_code == 200
         assert response.json()["input_mode"] == "natural_language"
         assert "来点辣的" in fake_ai.prompts[-1]
+
+
+# ─── 5. AI errors (#66) ───────────────────────────────────────────
+
+
+class TestAIErrors:
+    @pytest.mark.parametrize("env", [
+        {"AI_RECIPE_ENABLED": "false", "AI_API_KEY": "k"},
+        {"AI_RECIPE_ENABLED": "true", "AI_API_KEY": ""},
+        {"AI_RECIPE_ENABLED": "true", "AI_API_KEY": "k", "AI_TIMEOUT_SECONDS": "abc"},
+    ])
+    def test_ai_off_is_503(self, client, monkeypatch, env):
+        from stock_manager.api import ai_client
+
+        for key, value in env.items():
+            monkeypatch.setenv(key, value)
+        ai_client.reload_config()
+
+        explore = _explore_nl(client)
+        expand = client.post("/api/recipes/explore/expand", json={"idea": IDEA})
+
+        for response in (explore, expand):
+            assert response.status_code == 503
+            assert response.json() == {"code": "ai_unavailable"}
+
+    def test_provider_failure_is_502(self, client, fake_ai):
+        import httpx
+
+        fake_ai.responses = [httpx.Response(500), httpx.Response(503)]
+        response = _explore_nl(client)
+        assert response.status_code == 502
+        assert response.json() == {"code": "ai_upstream_error"}
+        assert len(fake_ai.requests) == 2  # one retry
+
+    def test_expand_success_still_returns_a_draft(self, client, fake_ai):
+        fake_ai.reply = json.dumps({"title": "番茄炒蛋", "category": "vegetable_dish",
+                                    "ingredients": [{"ingredient_name": "番茄", "quantity": "2"}]})
+        response = client.post("/api/recipes/explore/expand", json={"idea": IDEA})
+        assert response.status_code == 200
+        draft = response.json()["recipe_draft"]
+        assert (draft["title"], draft["category"]) == ("番茄炒蛋", "vegetable_dish")
+
+    def test_requests_use_json_mode_and_the_default_model(self, client, fake_ai):
+        assert _explore_nl(client).status_code == 200
+        payload = fake_ai.requests[-1]
+        assert payload["response_format"] == {"type": "json_object"}
+        assert payload["model"] == "deepseek-flash"
+        # JSON mode needs the word "json" in the prompt.
+        assert "json" in fake_ai.system_prompts[-1].lower()

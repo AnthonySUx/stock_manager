@@ -302,11 +302,11 @@ def create_recipe(db: Session, data: RecipeCreate, source_type: str = "user") ->
 
 
 def update_recipe(db: Session, recipe_id: int, data: RecipeUpdate) -> Optional[Recipe]:
-    """Update a user-created or AI-saved recipe."""
+    """Update a user-created recipe (saved AI drafts are user recipes, #66)."""
     recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
     if recipe is None:
         return None
-    if recipe.source_type not in ("user", "ai_saved"):
+    if recipe.source_type != "user":
         return None  # cannot edit HowToCook recipes directly
 
     update_data = data.model_dump(exclude_unset=True, exclude={"ingredients", "steps"})
@@ -343,11 +343,11 @@ def update_recipe(db: Session, recipe_id: int, data: RecipeUpdate) -> Optional[R
 
 
 def delete_recipe(db: Session, recipe_id: int) -> bool:
-    """Delete a user-created or AI-saved recipe."""
+    """Delete a user-created recipe."""
     recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
     if recipe is None:
         return False
-    if recipe.source_type not in ("user", "ai_saved"):
+    if recipe.source_type != "user":
         return False
     # Remove rows that reference this recipe so the delete does not violate
     # foreign keys (issue #43). Forks are kept: the `forks` backref sets their

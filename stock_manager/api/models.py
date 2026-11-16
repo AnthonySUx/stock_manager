@@ -214,14 +214,3 @@ class RecipeUsageHistory(Base):
     metadata_json = Column(Text, nullable=True)
 
     recipe = relationship("Recipe")
-
-
-class AIRecipeRecommendation(Base):
-    """Saved AI-generated daily recommendation results."""
-    __tablename__ = "ai_recipe_recommendations"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    request_context_json = Column(Text, nullable=True)
-    response_json = Column(Text, nullable=True)
-    created_at = Column(DateTime, nullable=False, default=utcnow, server_default=func.now())
-    model_name = Column(String(255), nullable=True)

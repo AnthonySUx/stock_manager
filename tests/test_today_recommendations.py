@@ -1,4 +1,4 @@
-"""Today recommendations (PR #14 local scoring) and the deprecated /ai/today endpoint.
+"""Today recommendations (PR #14 local scoring).
 
 Covers:
 - synonym matching from DEFAULT_SYNONYM_MAP (inventory 西红柿 matches recipe 番茄)
@@ -7,9 +7,7 @@ Covers:
   down-weighted (#46)
 - scene filter: breakfast / meal / dessert_drink / all, mapped from HowToCook
   `dishes/<dir>` (#46)
-- POST /ai/today reaches the AI layer and returns mode="ai" (regression: KeyError
-  in the prompt builder used to force a silent fallback every time)
-- POST /ai/today is marked deprecated in OpenAPI
+- the deprecated POST /ai/today endpoint is gone (#66)
 """
 
 import json
@@ -208,69 +206,6 @@ class TestScene:
         assert response.status_code == 422
 
 
-class _FakeResponse:
-    def __init__(self, payload):
-        self._payload = payload
-
-    def raise_for_status(self):
-        return None
-
-    def json(self):
-        return self._payload
-
-
-class TestDeprecatedAIToday:
-    def test_ai_path_reaches_ai_and_returns_ai_mode(self, client, db_session, monkeypatch):
-        _create_item(client, db_session, "鸡蛋", "eggs")
-        recipe = _create_recipe(client, "炒鸡蛋", ["鸡蛋"])
-
-        import stock_manager.api.ai_recipe_service as ai_service
-
-        monkeypatch.setattr(ai_service, "load_ai_config", lambda: {
-            "enabled": True,
-            "base_url": "http://ai.invalid",
-            "api_key": "test-key",
-            "model": "test-model",
-            "timeout": 1,
-            "temperature": 0.0,
-        })
-
-        captured = {}
-        ai_content = json.dumps({
-            "summary": "今天做炒鸡蛋",
-            "recommendations": [{"recipe_id": recipe["id"], "reason": "用掉鸡蛋"}],
-        })
-
-        class FakeAsyncClient:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *exc):
-                return False
-
-            async def post(self, url, headers=None, json=None):
-                captured["user_prompt"] = json["messages"][1]["content"]
-                return _FakeResponse({"choices": [{"message": {"content": ai_content}}]})
-
-        monkeypatch.setattr(ai_service.httpx, "AsyncClient", FakeAsyncClient)
-
-        response = client.post("/api/recipes/ai/today")
-        assert response.status_code == 200, response.text
-        data = response.json()
-        assert data["mode"] == "ai"
-        assert data["summary"] == "今天做炒鸡蛋"
-        assert [r["recipe_id"] for r in data["recommendations"]] == [recipe["id"]]
-        assert f"recipe_id={recipe['id']}" in captured["user_prompt"]
-
-    def test_ai_today_marked_deprecated(self, client):
-        spec = client.get("/openapi.json").json()
-        assert spec["paths"]["/api/recipes/ai/today"]["post"].get("deprecated") is True
-        assert not spec["paths"]["/api/recipes/recommendations"]["get"].get("deprecated", False)
-
-
 class TestRecipeCategoryRequired:
     def test_create_without_category_is_422(self, client):
         response = client.post("/api/recipes", json={"title": "无分类"})
@@ -315,19 +250,20 @@ class TestRecipeCategoryRequired:
         assert fork.status_code == 200
         assert fork.json()["category"] == "meat_dish"
 
-    def test_expand_draft_keeps_valid_category_only(self, client, monkeypatch):
-        replies = iter([
+    def test_expand_draft_keeps_valid_category_only(self, client, fake_ai):
+        fake_ai.responses = [
             json.dumps({"title": "蛋挞", "category": "dessert"}),
             json.dumps({"title": "蛋挞", "category": "甜品"}),
-        ])
-
-        async def fake_call_ai(prompt, system_prompt):
-            assert "Set category to exactly one of" in system_prompt
-            return next(replies)
-
-        monkeypatch.setattr("stock_manager.api.explore_services._call_ai", fake_call_ai)
+        ]
         idea = {"idea": {"title": "蛋挞"}}
         first = client.post("/api/recipes/explore/expand", json=idea).json()["recipe_draft"]
         second = client.post("/api/recipes/explore/expand", json=idea).json()["recipe_draft"]
+        assert all("Set category to exactly one of" in p for p in fake_ai.system_prompts)
         assert first["category"] == "dessert"
         assert second["category"] is None
+
+
+def test_ai_today_endpoint_is_removed(client):
+    """Deprecated since PR #14; removed in #66."""
+    assert client.post("/api/recipes/ai/today").status_code in (404, 405)
+    assert "/api/recipes/ai/today" not in client.get("/openapi.json").json()["paths"]

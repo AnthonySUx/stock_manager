@@ -174,3 +174,33 @@ class TestStartupCheck:
                 pass
         # Startup must not have created or changed anything.
         assert _revision(engine) is None
+
+
+# ─── 0002 (#66) ───────────────────────────────────────────────────
+
+
+def test_0002_converts_ai_saved_recipes_and_drops_the_ai_table(fresh_db):
+    url, engine = fresh_db
+    command.upgrade(_alembic(url), "0001")
+    assert "ai_recipe_recommendations" in inspect(engine).get_table_names()
+    with engine.begin() as connection:
+        connection.execute(text(
+            "INSERT INTO recipes (source_type, source_name, title, is_user_created, created_at, updated_at) "
+            "VALUES ('ai_saved', 'AI', 'AI 菜', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP), "
+            "('howtocook', 'HowToCook', '口水鸡', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+        ))
+
+    command.upgrade(_alembic(url), "0002")
+
+    assert "ai_recipe_recommendations" not in inspect(engine).get_table_names()
+    with engine.connect() as connection:
+        rows = connection.execute(text(
+            "SELECT title, source_type, is_user_created FROM recipes ORDER BY title"
+        )).all()
+    assert [(r[0], r[1], bool(r[2])) for r in rows] == [
+        ("AI 菜", "user", True), ("口水鸡", "howtocook", False),
+    ]
+
+    command.downgrade(_alembic(url), "0001")
+    assert "ai_recipe_recommendations" in inspect(engine).get_table_names()
+    assert _revision(engine) == "0001"

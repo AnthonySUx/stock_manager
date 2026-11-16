@@ -101,47 +101,15 @@ class TestRuleRecommendations:
         assert scores[conditional_recipe["id"]] < scores[always_recipe["id"]]
 
 
-class TestAITodayRecommendations:
-    def test_ai_receives_only_eligible_inventory(self, client, mixed_recipe, monkeypatch):
-        captured = {}
-
-        async def fake_get_ai_recommendations(**kwargs):
-            captured.update(kwargs)
-            return None  # force rule-based fallback; no external call
-
-        monkeypatch.setattr(
-            "stock_manager.api.routers.recipes.get_ai_recommendations",
-            fake_get_ai_recommendations,
-        )
-
-        response = client.post("/api/recipes/ai/today")
-        assert response.status_code == 200
-        assert response.json()["mode"] == "rule_based_fallback"
-
-        assert "inventory_items" in captured, "AI path was not reached"
-        sent = set(captured["inventory_items"])
-        assert ALWAYS_NAME in sent
-        assert CONDITIONAL_NAME in sent
-        assert NEVER_NAME not in sent
-
-
 class TestExplore:
-    def test_explore_prompt_contains_only_eligible_inventory(self, client, inventory, monkeypatch):
-        captured = {}
-
-        async def fake_call_ai(prompt, system_prompt):
-            captured["prompt"] = prompt
-            return None  # AI unavailable; no external call
-
-        monkeypatch.setattr("stock_manager.api.explore_services._call_ai", fake_call_ai)
-
+    def test_explore_prompt_contains_only_eligible_inventory(self, client, inventory, fake_ai):
         response = client.post(
             "/api/recipes/explore",
             json={"mode": "natural_language", "natural_language": "今晚吃什么"},
         )
         assert response.status_code == 200
 
-        prompt = captured["prompt"]
+        prompt = fake_ai.prompts[-1]
         assert ALWAYS_NAME in prompt
         assert CONDITIONAL_NAME in prompt
         assert NEVER_NAME not in prompt
