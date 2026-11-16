@@ -102,9 +102,15 @@ API_PORT=8000
 # AI_RECIPE_ENABLED=false
 # AI_BASE_URL=https://api.deepseek.com
 # AI_API_KEY=
-# AI_MODEL=deepseek-chat
-# AI_TIMEOUT_SECONDS=60
+# AI_MODEL=deepseek-flash
 # AI_TEMPERATURE=0.2
+# Timeouts in seconds: per request (text / image), and per call including the retry.
+# AI_TIMEOUT_SECONDS=30
+# AI_IMAGE_TIMEOUT_SECONDS=60
+# AI_TOTAL_TIMEOUT_SECONDS=45
+# AI_IMAGE_TOTAL_TIMEOUT_SECONDS=75
+# Retries after a connection error, 429 or 5xx (timeouts are not retried).
+# AI_MAX_RETRIES=1
 ```
 
 ### 2.3 Start MySQL

@@ -121,13 +121,6 @@ class RecipeRecommendationResponse(BaseModel):
     recommendations: list[RecipeRecommendation] = []
 
 
-class AIRecipeRecommendationResponse(BaseModel):
-    mode: str  # "ai" or "rule_based_fallback"
-    summary: Optional[str] = None
-    source_notice: str = ""
-    recommendations: list[RecipeRecommendation] = []
-
-
 class SourceResponse(BaseModel):
     name: str
     url: str

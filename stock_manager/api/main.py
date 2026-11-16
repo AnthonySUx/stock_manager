@@ -2,14 +2,16 @@
 
 import os
 from contextlib import asynccontextmanager
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from stock_manager import __version__
+from stock_manager.api import ai_client
 from stock_manager.api.auth import check_auth_config, require_api_token
 from stock_manager.api.schema_version import check_schema_current
 from stock_manager.api.db import engine
-from stock_manager.api.routers import items, restock, settings, recipes, categories
+from stock_manager.api.routers import capabilities, categories, items, recipes, restock, settings
 
 description = """
 Stock Manager API — manage family stock, expiration reminders, and restocking lists.
@@ -28,6 +30,7 @@ async def lifespan(app: FastAPI):
     """
     check_auth_config()
     check_schema_current(engine)
+    ai_client.reload_config()  # read and validate AI settings once (#66)
     from sqlalchemy.orm import sessionmaker
     from stock_manager.api.category_services import seed_default_categories
     SeedSession = sessionmaker(bind=engine)
@@ -69,6 +72,14 @@ app.include_router(restock.router, prefix="/api/restock", tags=["Restock Items"]
 app.include_router(settings.router, prefix="/api/settings", tags=["Settings"], dependencies=_auth)
 app.include_router(recipes.router, prefix="/api/recipes", tags=["Recipes"], dependencies=_auth)
 app.include_router(categories.router, prefix="/api/categories", tags=["Categories"], dependencies=_auth)
+app.include_router(capabilities.router, prefix="/api/capabilities", tags=["Capabilities"], dependencies=_auth)
+
+
+@app.exception_handler(ai_client.AIError)
+async def ai_error_handler(request: Request, exc: ai_client.AIError):
+    """AI failures: 503 `ai_unavailable` (not configured) or 502
+    `ai_upstream_error` (provider failed; the client may retry) (#66)."""
+    return JSONResponse(status_code=exc.status_code, content={"code": exc.code})
 
 
 

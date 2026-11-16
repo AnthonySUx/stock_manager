@@ -51,6 +51,6 @@ omit = [
 
 [tool.coverage.report]
 # Current API coverage. CI fails if a change makes it drop; raise it when it grows.
-fail_under = 90
+fail_under = 91
 show_missing = true
 skip_covered = true

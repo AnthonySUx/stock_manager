@@ -3,10 +3,11 @@
 Supports both structured preferences and natural language input.
 Both modes are converted into an AI prompt that generates idea candidates.
 """
-import json
 import logging
 from typing import Optional
 from uuid import uuid4
+
+from stock_manager.api.ai_client import AIUpstreamError, chat_json
 
 logger = logging.getLogger(__name__)
 
@@ -18,43 +19,6 @@ def _recipe_category_values() -> tuple[str, ...]:
 
 
 _RECIPE_CATEGORIES = _recipe_category_values()
-
-
-async def _call_ai(prompt: str, system_prompt: str) -> Optional[str]:
-    import httpx
-    from stock_manager.api.ai_recipe_service import load_ai_config
-
-    config = load_ai_config()
-    base_url = config["base_url"]
-    api_key = config["api_key"]
-    model = config["model"]
-    timeout = config["timeout"]
-    temperature = config["temperature"]
-
-    if not config["enabled"] or not api_key:
-        logger.info("AI not configured, skipping")
-        return None
-
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt},
-        ],
-        "temperature": temperature,
-        "max_tokens": 4096,
-    }
-
-    try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.post(f"{base_url.rstrip('/')}/chat/completions", headers=headers, json=payload)
-            resp.raise_for_status()
-            result = resp.json()
-            return result.get("choices", [{}])[0].get("message", {}).get("content", "")
-    except Exception as e:
-        logger.error("AI call failed: %s", e)
-        return None
 
 
 def _build_explore_prompt(inventory_items: list[dict], structured: Optional[dict], natural_language: Optional[str]) -> tuple[str, str]:
@@ -127,29 +91,20 @@ def _build_explore_prompt(inventory_items: list[dict], structured: Optional[dict
     return system, user
 
 
-def _parse_explore_response(raw: str) -> Optional[list[dict]]:
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        import re
-        match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", raw)
-        if match:
-            try:
-                data = json.loads(match.group(1))
-            except json.JSONDecodeError:
-                return None
-        else:
-            return None
+def _extract_ideas(data) -> list[dict]:
+    """Valid ideas from the parsed AI reply ({"ideas": [...]} or a bare list).
 
-    # Accept {"ideas": [...]} or a bare list of ideas (#45).
+    Malformed ideas are dropped (#45). Raises AIUpstreamError when nothing
+    usable is left, so the client gets 502 and can retry (#66).
+    """
     if isinstance(data, list):
         ideas = data
     elif isinstance(data, dict):
         ideas = data.get("ideas", [])
     else:
-        return None
-    if not isinstance(ideas, list) or not ideas:
-        return None
+        ideas = []
+    if not isinstance(ideas, list):
+        ideas = []
 
     from pydantic import ValidationError
     from stock_manager.api.recipe_schemas import ExploreIdea
@@ -178,28 +133,23 @@ def _parse_explore_response(raw: str) -> Optional[list[dict]]:
             continue
         validated.append(idea)
 
-    return validated if validated else None
+    if not validated:
+        raise AIUpstreamError("AI reply contained no usable ideas")
+    return validated
 
 
 async def explore_ideas(inventory_items: list[dict], structured: Optional[dict] = None, natural_language: Optional[str] = None) -> dict:
+    """Cooking ideas from the AI. Raises AIUnavailableError / AIUpstreamError."""
     input_mode = "structured" if structured else "natural_language"
     system_prompt, user_prompt = _build_explore_prompt(inventory_items, structured, natural_language)
-    raw = await _call_ai(user_prompt, system_prompt)
-
-    if raw is None:
-        return {"mode": "ai", "input_mode": input_mode, "ideas": [], "warnings": ["AI is not configured or unavailable. Unable to generate ideas."]}
-
-    ideas = _parse_explore_response(raw)
-    if ideas is None:
-        return {"mode": "ai", "input_mode": input_mode, "ideas": [], "warnings": ["Failed to parse AI response."]}
-
+    ideas = _extract_ideas(await chat_json(system_prompt, user_prompt))
     for idea in ideas:
         idea["idea_id"] = str(uuid4())[:8]
-
     return {"mode": "ai", "input_mode": input_mode, "ideas": ideas, "warnings": []}
 
 
 async def expand_to_recipe_draft(idea: dict) -> dict:
+    """A recipe draft for one idea. Raises AIUnavailableError / AIUpstreamError."""
     system = (
         "You are a cooking assistant. "
         "Expand a cooking idea into a structured recipe.\n\n"
@@ -232,22 +182,11 @@ async def expand_to_recipe_draft(idea: dict) -> dict:
         "Please expand this into a complete recipe."
     )
 
-    raw = await _call_ai(user, system)
-    if raw is None:
-        return {"recipe_draft": {"title": idea.get("title", ""), "ingredients": [], "steps": [], "warnings": ["AI not available for expansion."]}}
-
-    try:
-        import re
-        match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", raw)
-        if match:
-            data = json.loads(match.group(1))
-        else:
-            data = json.loads(raw)
-    except Exception:
-        data = None
+    data = await chat_json(system, user)
     if not isinstance(data, dict):
-        # Unparseable, or valid JSON that is not an object (e.g. a list).
-        data = {"title": idea.get("title", ""), "ingredients": [], "steps": []}
+        # Valid JSON but not a recipe object (e.g. a list): nothing to show.
+        # There is no fallback draft any more (#66); the client offers a retry.
+        raise AIUpstreamError("AI reply is not a recipe object")
 
     data.setdefault("title", idea.get("title", ""))
     if data.get("category") not in _RECIPE_CATEGORIES:

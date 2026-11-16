@@ -188,7 +188,7 @@ def recipe_library(db_session):
     for i, title in enumerate(TITLES * 2):
         recipe = Recipe(
             title=title,
-            source_type=["howtocook", "user", "ai_saved"][i % 3],
+            source_type="user" if i % 3 == 1 else "howtocook",
             is_user_created=(i % 3 == 1),
             category=["meat_dish", "vegetable_dish", "soup"][i % 4 % 3],
             description=[None, "", "家常 番茄 味道", "TOMATO rich", "含 50% 糖"][i % 5],
