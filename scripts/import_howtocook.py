@@ -10,8 +10,9 @@ file in the project root. It never guesses a local MySQL connection.
 Re-running is safe: recipes already imported (same source_path) are skipped,
 but their category is corrected if it differs from the dishes/ directory
 (older versions stored the dish folder name for nested recipes), and their
-ingredient list is re-parsed from the markdown, so older rows ("500克" as a
-quantity, "番茄（）" names, duplicates) end up the same as a fresh import.
+ingredients and steps are re-parsed from the markdown, so older rows ("500克"
+as a quantity, "番茄（）" names, duplicates, preview images as steps) end up
+the same as a fresh import.
 """
 import argparse
 import os
@@ -179,16 +180,45 @@ def _strip_bracket_notes(name: str) -> str:
     return re.sub(r"[（()）]", " ", name).strip()
 
 
+# A list marker at the start of a line: "-", "*", "+", or "1." / "1)" / "1、"
+# (not followed by a digit, so "3.5 克盐" is a quantity, not item 3). Only the
+# marker is removed, so "1. 2 个鸡蛋打散" keeps its "2".
+_LIST_MARKER_RE = re.compile(r"^(?:[-*+]|\d+[.)、](?!\d))\s*")
+_HORIZONTAL_RULE_RE = re.compile(r"^(?:-{3,}|\*{3,}|_{3,})$")
+_IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+_LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _clean_line(line: str) -> str:
+    """Plain text of one markdown line, or "" when it is not content.
+
+    Images are removed (HowToCook puts preview images inside the steps
+    section), links keep their text, HTML tags and the quote marker are
+    dropped. Sub-headings and table rows are not steps or ingredients.
+    """
+    line = line.strip()
+    if not line or line.startswith(("#", "|")) or _HORIZONTAL_RULE_RE.match(line.replace(" ", "")):
+        return ""
+    line = _IMAGE_RE.sub("", line)
+    line = _LINK_RE.sub(r"\1", line)
+    line = _HTML_TAG_RE.sub("", line)
+    # Quote and list markers can nest (">- 11.硅油纸"): remove them all.
+    while True:
+        stripped = _LIST_MARKER_RE.sub("", line.lstrip(">").strip(), count=1).strip()
+        if stripped == line:
+            break
+        line = stripped
+    # Nothing but punctuation left (e.g. a stray "-"): not content.
+    return line if re.search(r"\w", line) else ""
+
+
 def _parse_ingredients(text: str) -> list[dict]:
     """Parse ingredient section into structured list."""
     results = []
     seen: set[str] = set()
     for line in text.split("\n"):
-        line = line.strip()
-        if not line:
-            continue
-        # Check for markdown list item
-        line = re.sub(r"^[-\*\d+\.\s]+", "", line).strip()
+        line = _clean_line(line)
         if not line:
             continue
         # Skip tool lines
@@ -236,10 +266,7 @@ def _parse_steps(text: str) -> list[dict]:
     results = []
     counter = 1
     for line in text.split("\n"):
-        line = line.strip()
-        if not line:
-            continue
-        line = re.sub(r"^[-\*\d+\.\s]+", "", line).strip()
+        line = _clean_line(line)
         if line:
             results.append({
                 "step_number": counter,
@@ -306,6 +333,7 @@ def import_howtocook(howtocook_path: str, db_url: str = "", prune_non_recipes: b
     fixed_count = 0
     error_count = 0
     synced_count = 0
+    steps_synced_count = 0
 
     for md_file in sorted(md_files):
         # Check if already imported (by source_path)
@@ -323,15 +351,18 @@ def import_howtocook(howtocook_path: str, db_url: str = "", prune_non_recipes: b
                 existing.category = category
                 fixed_count += 1
             try:
-                parsed = parse_recipe_md(str(md_file))["ingredients"]
+                parsed = parse_recipe_md(str(md_file))
             except Exception as e:  # keep going; report like a failed import
                 session.rollback()
                 error_count += 1
                 print(f"  ✗ {rel_path}: {e}")
                 continue
-            if _sync_ingredients(session, existing, parsed):
+            if _sync_ingredients(session, existing, parsed["ingredients"]):
                 print(f"  ↻ {rel_path}: ingredients re-parsed")
                 synced_count += 1
+            if _sync_steps(session, existing, parsed["steps"]):
+                print(f"  ↻ {rel_path}: steps re-parsed")
+                steps_synced_count += 1
             session.commit()
             continue
 
@@ -396,11 +427,13 @@ def import_howtocook(howtocook_path: str, db_url: str = "", prune_non_recipes: b
     session.close()
     print(
         f"\nImport complete: {imported_count} imported, {existing_count} existing "
-        f"({fixed_count} categories fixed, {synced_count} ingredient lists re-parsed), "
+        f"({fixed_count} categories fixed, {synced_count} ingredient lists and "
+        f"{steps_synced_count} step lists re-parsed), "
         f"{error_count} errors"
     )
     return {"imported": imported_count, "existing": existing_count,
             "fixed": fixed_count, "ingredients_synced": synced_count,
+            "steps_synced": steps_synced_count,
             "errors": error_count, "non_recipe": non_recipe, "pruned": pruned}
 
 
@@ -429,6 +462,25 @@ def _sync_ingredients(session, recipe, parsed: list[dict]) -> bool:
     for p in parsed:
         session.add(RecipeIngredient(recipe_id=recipe.id, **{f: p[f] for f in _INGREDIENT_FIELDS}))
     session.expire(recipe, ["ingredients"])
+    return True
+
+
+def _sync_steps(session, recipe, parsed: list[dict]) -> bool:
+    """Same as _sync_ingredients, for steps: older imports kept preview
+    images, headings and HTML as steps. Returns True when the rows changed."""
+    from stock_manager.api.models import RecipeStep
+
+    current = sorted(recipe.steps, key=lambda s: (s.step_number, s.id))
+    if [(s.step_number, s.instruction) for s in current] == [
+        (p["step_number"], p["instruction"]) for p in parsed
+    ]:
+        return False
+    for step in current:
+        session.delete(step)
+    session.flush()
+    for p in parsed:
+        session.add(RecipeStep(recipe_id=recipe.id, step_number=p["step_number"], instruction=p["instruction"]))
+    session.expire(recipe, ["steps"])
     return True
 
 
