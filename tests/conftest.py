@@ -17,6 +17,10 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+# Production requires an explicit database target. Tests install an explicit
+# in-memory value before importing the application and replace its engine below.
+os.environ.setdefault("DATABASE_URL", "sqlite://")
+
 from stock_manager.api.db import get_session
 from stock_manager.api.main import app
 from stock_manager.api.models import Base

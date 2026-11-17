@@ -56,6 +56,10 @@ GRANT ALL PRIVILEGES ON stock_manager.* TO 'stock_user'@'localhost';
 FLUSH PRIVILEGES;
 ```
 
+Homebrew MySQL normally listens on port 3306. If you choose this alternative,
+set `DATABASE_URL` explicitly to port 3306. The checked-in Docker configuration
+uses port 3307 so the two deployments cannot be mistaken for one another.
+
 ---
 
 ## 2. Project Setup
@@ -72,10 +76,11 @@ cd stock_manager
 Create `.env` in the project root:
 
 ```env
-DATABASE_URL=mysql+pymysql://stock_user:stock_password@127.0.0.1:3306/stock_manager
+MYSQL_HOST_PORT=3307
+DATABASE_URL=mysql+pymysql://stock_user:stock_password@127.0.0.1:3307/stock_manager
 
 # Docker MySQL passwords (used when the volume is first created).
-# If you change MYSQL_PASSWORD, change it in DATABASE_URL too.
+# If you change MYSQL_HOST_PORT or MYSQL_PASSWORD, change DATABASE_URL too.
 MYSQL_ROOT_PASSWORD=root_password
 MYSQL_PASSWORD=stock_password
 
@@ -87,7 +92,7 @@ API_TOKEN=paste-a-generated-token-here
 API_HOST=127.0.0.1
 API_PORT=8000
 
-# Browser origins allowed by CORS (Expo web). Native apps are not affected.
+# Browser origins allowed by CORS. Native apps are not affected.
 # CORS_ALLOW_ORIGINS=http://localhost:8081,http://127.0.0.1:8081,http://localhost:19006
 
 # AI recipe recommendations (optional, for Explore Recipes)
@@ -104,6 +109,10 @@ API_PORT=8000
 # Retries after a connection error, 429 or 5xx (timeouts are not retried).
 # AI_MAX_RETRIES=1
 ```
+
+`DATABASE_URL` is mandatory. The backend has no localhost fallback. When
+`MYSQL_HOST_PORT` is present, the backend verifies that the URL uses the same
+port and exits with a configuration error if they differ.
 
 ### 2.3 Start MySQL
 
@@ -238,7 +247,7 @@ python scripts/import_howtocook.py /path/to/HowToCook --prune-non-recipes
 By default the API listens on `127.0.0.1`, so only this machine can reach it:
 
 - iOS Simulator uses `http://localhost:8000/api`.
-- Docker MySQL is published on `127.0.0.1:3306` only.
+- Docker MySQL is published on the project-specific `127.0.0.1:3307` only.
 
 Requests still need the API token (3.7), but anyone on the network can try to reach the API. To test on a real phone, start the backend on the LAN only while you need it:
 

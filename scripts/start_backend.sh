@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Start the Stock Manager API backend server.
-# Prerequisites: MySQL running (Docker or Homebrew), Python deps installed.
+# Prerequisites: explicitly configured MySQL and Python dependencies installed.
 
 set -euo pipefail
 
@@ -10,9 +10,8 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_DIR"
 
 echo "Starting Stock Manager API..."
-echo "Make sure MySQL is running (docs/app/setup.md 2.3):"
-echo "  Docker:   docker compose up -d"
-echo "  Homebrew: brew services start mysql"
+echo "Make sure the configured database is running (Docker: docker compose up -d)."
+echo "DATABASE_URL is required; the Docker template uses project port 3307."
 echo "After pulling schema changes, run: python3 -m alembic upgrade head"
 echo ""
 

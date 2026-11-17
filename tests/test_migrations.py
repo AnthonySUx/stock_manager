@@ -204,3 +204,65 @@ def test_0002_converts_ai_saved_recipes_and_drops_the_ai_table(fresh_db):
     command.downgrade(_alembic(url), "0001")
     assert "ai_recipe_recommendations" in inspect(engine).get_table_names()
     assert _revision(engine) == "0001"
+
+
+# ─── 0003 (legacy structured categories adoption) ────────────────
+
+
+def test_0003_repairs_legacy_category_columns_without_losing_rows(fresh_db):
+    url, engine = fresh_db
+    with engine.begin() as connection:
+        connection.execute(text(
+            "CREATE TABLE categories ("
+            "id INTEGER PRIMARY KEY, name VARCHAR(100) NOT NULL, slug VARCHAR(100) NOT NULL UNIQUE, "
+            "parent_id INTEGER, recipe_usage VARCHAR(20) NOT NULL DEFAULT 'never', "
+            "is_system BOOLEAN NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0, "
+            "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+        ))
+        connection.execute(text(
+            "INSERT INTO categories (id, name, slug) VALUES "
+            "(1, '食品', 'food'), (8, '其他', 'other'), (9, '蔬菜', 'vegetables'), "
+            "(14, '乳制品', 'dairy')"
+        ))
+        connection.execute(text(
+            "CREATE TABLE items ("
+            "id INTEGER PRIMARY KEY, name VARCHAR(255) NOT NULL, category VARCHAR(100) NOT NULL)"
+        ))
+        connection.execute(text(
+            "INSERT INTO items (id, name, category) VALUES "
+            "(1, '牛奶', '乳制品'), (2, '番茄', '蔬菜'), (3, '旧记录', '不存在的分类')"
+        ))
+        connection.execute(text(
+            "CREATE TABLE restock_items ("
+            "id INTEGER PRIMARY KEY, name VARCHAR(255) NOT NULL, category VARCHAR(100))"
+        ))
+        connection.execute(text(
+            "INSERT INTO restock_items (id, name, category) VALUES "
+            "(1, '酸奶', '乳制品'), (2, '待分类', '不存在的分类')"
+        ))
+        connection.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"))
+        connection.execute(text("INSERT INTO alembic_version VALUES ('0002')"))
+
+    command.upgrade(_alembic(url), "head")
+
+    inspector = inspect(engine)
+    assert {column["name"] for column in inspector.get_columns("items")} == {
+        "id", "name", "category_id",
+    }
+    assert {column["name"] for column in inspector.get_columns("restock_items")} == {
+        "id", "name", "category_id",
+    }
+    with engine.connect() as connection:
+        items = connection.execute(text(
+            "SELECT name, category_id FROM items ORDER BY id"
+        )).all()
+        restock = connection.execute(text(
+            "SELECT name, category_id FROM restock_items ORDER BY id"
+        )).all()
+        uncategorized = connection.execute(text(
+            "SELECT id FROM categories WHERE slug = 'uncategorized'"
+        )).scalar_one()
+    assert items == [("牛奶", 14), ("番茄", 9), ("旧记录", uncategorized)]
+    assert restock == [("酸奶", 14), ("待分类", None)]
+    assert _revision(engine) == "0003"

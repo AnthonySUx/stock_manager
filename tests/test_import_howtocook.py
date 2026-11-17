@@ -288,3 +288,9 @@ class TestNonRecipeFiles:
         url, _ = db
         with pytest.raises(SystemExit):
             importer.import_howtocook(str(tmp_path), url)
+
+
+def test_import_requires_an_explicit_database_url(importer, repo, monkeypatch):
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    with pytest.raises(RuntimeError, match="DATABASE_URL is required"):
+        importer.import_howtocook(str(repo))
