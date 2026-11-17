@@ -91,7 +91,8 @@ python3 -c "import secrets; print(secrets.token_urlsafe(32))"
 Open `.env` in a text editor and paste the generated value after `API_TOKEN=`. A minimal local configuration looks like this:
 
 ```dotenv
-DATABASE_URL=mysql+pymysql://stock_user:stock_password@127.0.0.1:3306/stock_manager
+MYSQL_HOST_PORT=3307
+DATABASE_URL=mysql+pymysql://stock_user:stock_password@127.0.0.1:3307/stock_manager
 MYSQL_ROOT_PASSWORD=root_password
 MYSQL_PASSWORD=stock_password
 API_TOKEN=paste-the-generated-token-here
@@ -101,6 +102,7 @@ API_PORT=8000
 
 Important details:
 
+- `MYSQL_HOST_PORT` and the port inside `DATABASE_URL` must match; the project uses 3307 so it cannot be confused with a system MySQL on 3306.
 - `MYSQL_PASSWORD` and the password inside `DATABASE_URL` must match.
 - Docker applies its MySQL passwords only when it creates the database volume for the first time. Changing `.env` later does not change users in an existing MySQL volume.
 - Keep `API_TOKEN` private. The same value is entered into the iOS app on first launch.
@@ -128,7 +130,7 @@ The `stock_manager_mysql` row should say `Up`. MySQL may need several seconds on
 docker compose logs mysql
 ```
 
-The database is published only on `127.0.0.1:3306`, so it is not directly exposed to the local network.
+The database is published only on the project-specific `127.0.0.1:3307`, so it is not directly exposed to the local network and cannot silently fall back to a Homebrew MySQL on port 3306.
 
 ### 5. Create the Python Environment
 
@@ -332,6 +334,17 @@ Start it again with `docker compose up -d`. Avoid `docker compose down -v`: the 
 
 Before updating, make sure local work is committed or otherwise backed up. Then:
 
+Deployments created before the dedicated database port was introduced must add
+these two matching values to `.env` before running Compose:
+
+```dotenv
+MYSQL_HOST_PORT=3307
+DATABASE_URL=mysql+pymysql://stock_user:stock_password@127.0.0.1:3307/stock_manager
+```
+
+Changing the published port recreates only the MySQL container; the named
+`mysql_data` volume and all database records remain in place.
+
 ```bash
 git pull --ff-only
 source .venv/bin/activate
@@ -349,6 +362,11 @@ Restart FastAPI and rebuild the iOS app after the update. Migrations and the nor
 #### Docker says it cannot connect to the daemon
 
 Open Docker Desktop, wait until the engine is running, then retry `docker compose up -d`.
+
+If Compose says `MYSQL_HOST_PORT` is not set, update `.env` from `.env.example`.
+The API also refuses to start when `DATABASE_URL` is absent or its localhost
+port does not match `MYSQL_HOST_PORT`; this prevents accidental connections to
+an unrelated MySQL instance.
 
 #### MySQL reports access denied
 

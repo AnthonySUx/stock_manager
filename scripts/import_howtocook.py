@@ -4,8 +4,8 @@
 Usage:
     python scripts/import_howtocook.py /path/to/HowToCook [--db-url DATABASE_URL]
 
-If --db-url is not provided, the script reads DATABASE_URL from the .env
-file in the project root, or falls back to the default MySQL connection.
+If --db-url is not provided, the script requires DATABASE_URL from the .env
+file in the project root. It never guesses a local MySQL connection.
 
 Re-running is safe: recipes already imported (same source_path) are skipped,
 but their category is corrected if it differs from the dishes/ directory
@@ -270,10 +270,11 @@ def import_howtocook(howtocook_path: str, db_url: str = "", prune_non_recipes: b
     `prune_non_recipes=True` they are deleted, with their favorites and history.
     """
     if not db_url:
-        db_url = os.getenv(
-            "DATABASE_URL",
-            "mysql+pymysql://stock_user:stock_password@127.0.0.1:3306/stock_manager",
-        )
+        db_url = (os.getenv("DATABASE_URL") or "").strip()
+        if not db_url:
+            raise RuntimeError(
+                "DATABASE_URL is required. Copy .env.example to .env or pass --db-url explicitly."
+            )
 
     howtocook_dir = Path(howtocook_path)
     if not howtocook_dir.is_dir():
@@ -471,7 +472,7 @@ def main():
     parser.add_argument(
         "--db-url",
         default="",
-        help="Database URL (default: from .env or default MySQL connection)",
+        help="Database URL (default: required from .env)",
     )
     args = parser.parse_args()
     _load_env()

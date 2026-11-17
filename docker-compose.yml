@@ -13,9 +13,11 @@ services:
       MYSQL_DATABASE: stock_manager
       MYSQL_USER: stock_user
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-stock_password}
-    # Only reachable from this machine, not from the local network.
+    # Only reachable from this machine, not from the local network. Use a
+    # project-specific host port so a local MySQL on the standard 3306 cannot
+    # silently impersonate this database when Docker is stopped.
     ports:
-      - "127.0.0.1:3306:3306"
+      - "127.0.0.1:${MYSQL_HOST_PORT:?Set MYSQL_HOST_PORT in .env (copy .env.example)}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     command:

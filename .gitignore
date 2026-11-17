@@ -24,6 +24,7 @@ Thumbs.db
 
 # Local archives (preserved on this machine, never published)
 _archive/
+AGENTS.md
 
 # Leftovers from the former Expo frontend (not used any more)
 node_modules/
