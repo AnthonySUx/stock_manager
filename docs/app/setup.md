@@ -216,14 +216,15 @@ python3 scripts/import_howtocook.py /path/to/HowToCook
 
 Running the import again on an existing database is safe: recipes already imported are skipped,
 and their `category` is corrected to the `dishes/` directory (older versions stored the dish
-folder name, e.g. `口水鸡` instead of `meat_dish`). Their ingredient lists are re-parsed from the
-markdown, so rows from older imports (`500克` stored as the quantity, names like `番茄（）` or
-`鲤鱼（约 ，…）`, duplicated ingredients) become the same as a fresh import. HowToCook recipes
-cannot be edited in the app, so nothing user-made is overwritten. The summary line reports how
-many were fixed.
+folder name, e.g. `口水鸡` instead of `meat_dish`). Their ingredient and step lists are re-parsed
+from the markdown, so rows from older imports become the same as a fresh import: `500克` stored as
+the quantity, names like `番茄（）` or `鲤鱼（约 ，…）`, duplicated ingredients, and preview images,
+headings or HTML stored as steps. HowToCook recipes cannot be edited in the app, so nothing
+user-made is overwritten. The summary line reports how many were fixed.
 
-Ingredient names drop bracketed notes (`鲤鱼（约 1.5 斤，…）` → `鲤鱼`, with quantity `1.5 斤`);
-the full text is kept in the recipe's markdown.
+Parsing rules: ingredient names drop bracketed notes (`鲤鱼（约 1.5 斤，…）` → `鲤鱼`, with quantity
+`1.5 斤`). In steps and ingredients, images, sub-headings and table rows are skipped, links and
+quotes keep their text, and HTML tags are removed. The full text stays in the recipe's markdown.
 
 Only `dishes/**/*.md` is imported (`dishes/template/` is skipped). Older versions also imported
 `tips/` and `.github/` files; the import lists any such rows. They are never recommended, and

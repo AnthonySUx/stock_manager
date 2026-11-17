@@ -117,3 +117,46 @@ class TestPreviewUnits:
         item = _create_item(client, db_session, "番茄", 3, "个")
         _preview(client, [{"ingredient_name": "番茄", "quantity": "2", "unit": "个"}])
         assert client.get(f"/api/items/{item['id']}").json()["quantity_value"] == 3
+
+
+# ─── Synonyms: stock and recipe may name the same food differently ─
+
+
+class TestPreviewSynonyms:
+    @pytest.mark.parametrize("stock,ingredient", [
+        ("西红柿", "番茄"), ("番茄", "西红柿"), ("土豆", "马铃薯"),
+        ("Tomato", "番茄"), ("西红柿", "tomato"), ("番茄", "番茄"),
+    ])
+    def test_synonyms_match(self, client, db_session, stock, ingredient):
+        item = _create_item(client, db_session, stock, 3, "个")
+        suggestions = _preview(client, [{"ingredient_name": ingredient, "quantity": "2", "unit": "个"}])
+        assert suggestions[ingredient]["item_id"] == item["id"]
+        assert suggestions[ingredient]["suggested_quantity"] == 2
+
+    def test_imported_recipe_without_normalized_name(self, client, db_session):
+        """HowToCook rows have no normalized_name; matching used to need the
+        exact stock name (#66 part 5)."""
+        from stock_manager.api.models import Recipe, RecipeIngredient
+
+        item = _create_item(client, db_session, "番茄", 3, "个")
+        recipe = Recipe(title="西红柿炒鸡蛋的做法", source_type="howtocook", source_name="HowToCook",
+                        source_path="dishes/vegetable_dish/西红柿炒鸡蛋.md", category="vegetable_dish")
+        db_session.add(recipe)
+        db_session.flush()
+        db_session.add(RecipeIngredient(recipe_id=recipe.id, ingredient_name="西红柿", quantity="1",
+                                        unit="个", sort_order=0, is_optional=False, is_seasoning=False))
+        db_session.commit()
+
+        preview = client.get(f"/api/recipes/{recipe.id}/consume-preview").json()
+
+        assert [(s["ingredient_name"], s["item_id"]) for s in preview["suggestions"]] == [("西红柿", item["id"])]
+
+    def test_different_foods_do_not_match(self, client, db_session):
+        _create_item(client, db_session, "土豆", 3, "个")
+        recipe = client.post("/api/recipes", json={
+            "title": "番茄汤", "category": "soup",
+            "ingredients": [{"ingredient_name": "番茄", "quantity": "1", "unit": "个"}],
+        }).json()
+        preview = client.get(f"/api/recipes/{recipe['id']}/consume-preview").json()
+        assert preview["suggestions"] == []
+        assert preview["unmatched_ingredients"] == ["番茄"]

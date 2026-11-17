@@ -33,8 +33,10 @@ RECIPE_MD = """# {title}的做法
 
 ## 操作步骤
 
-- 打散鸡蛋
-- 下锅
+1. 打散鸡蛋
+2. 下锅
+
+![{title}-预览图-1](./1.jpeg)
 """
 
 FILES = {
@@ -54,7 +56,7 @@ NON_RECIPES = [
 
 
 def _counts(**overrides):
-    base = {"imported": 0, "existing": 0, "fixed": 0, "ingredients_synced": 0,
+    base = {"imported": 0, "existing": 0, "fixed": 0, "ingredients_synced": 0, "steps_synced": 0,
             "errors": 0, "non_recipe": 0, "pruned": 0}
     base.update(overrides)
     return base
@@ -169,6 +171,47 @@ class TestParseIngredients:
         ]
 
 
+class TestParseSteps:
+    def test_only_real_steps_are_kept(self, importer):
+        text = "\n".join([
+            "1. 西红柿切丁",
+            "2. 2 个鸡蛋打散",          # a number right after the marker stays
+            "3) 加入 [水淀粉](./水淀粉.md) 搅拌",
+            "* 撒上<b>葱花</b>",
+            "> 小贴士：火不要太大",
+            "### 装盘",                 # sub-heading: not a step
+            "| 步骤 | 时间 |",            # table row: not a step
+            "![预览图](./1.jpeg)",      # image only: not a step
+            "盛出前![图](./2.jpg)尝一下咸淡",
+            "<img src='./3.jpg' />",
+        ])
+        assert [(s["step_number"], s["instruction"]) for s in importer._parse_steps(text)] == [
+            (1, "西红柿切丁"),
+            (2, "2 个鸡蛋打散"),
+            (3, "加入 水淀粉 搅拌"),
+            (4, "撒上葱花"),
+            (5, "小贴士：火不要太大"),
+            (6, "盛出前尝一下咸淡"),
+        ]
+
+    @pytest.mark.parametrize("line,expected", [
+        (">- 11.硅油纸：防粘", "硅油纸：防粘"),   # list item inside a quote
+        ("1. 3.5 克盐", "3.5 克盐"),           # "3." followed by a digit is not a marker
+        ("- 1.5 kg 牛肉", "1.5 kg 牛肉"),
+        ("10、 出锅", "出锅"),
+        ("---", ""), ("* * *", ""), ("___", ""),  # horizontal rules
+        ("- -", ""), ("-", ""), ("- ：", ""), ("（）", ""),  # nothing but punctuation
+    ])
+    def test_clean_line_edge_cases(self, importer, line, expected):
+        assert importer._clean_line(line) == expected
+
+    def test_ingredient_starting_with_a_number_keeps_its_quantity(self, importer):
+        rows = importer._parse_ingredients("* 5 g 盐\n* 2个鸡蛋\n![图](./a.png)")
+        assert [(r["ingredient_name"], r["quantity"], r["unit"]) for r in rows] == [
+            ("盐", "5", "g"), ("鸡蛋", "2", "个"),
+        ]
+
+
 class TestImport:
     def test_fresh_import_stores_dishes_directory(self, importer, repo, db):
         url, session = db
@@ -230,6 +273,26 @@ class TestImport:
 
         assert result == _counts(existing=4, ingredients_synced=2)
         assert _ingredient_rows(session) == fresh
+
+    def test_rerun_reparses_old_step_rows(self, importer, repo, db):
+        from stock_manager.api.models import RecipeStep
+
+        url, session = db
+        importer.import_howtocook(str(repo), url)
+        session.expire_all()
+        fresh = sorted((s.recipe_id, s.step_number, s.instruction) for s in session.query(RecipeStep))
+        assert not any("![" in step[2] for step in fresh)
+
+        # Older imports kept the preview image as an extra step.
+        recipe = session.query(Recipe).order_by(Recipe.id).first()
+        session.add(RecipeStep(recipe_id=recipe.id, step_number=3, instruction="![预览图](./1.jpeg)"))
+        session.commit()
+
+        result = importer.import_howtocook(str(repo), url)
+
+        assert result == _counts(existing=4, steps_synced=1)
+        session.expire_all()
+        assert sorted((s.recipe_id, s.step_number, s.instruction) for s in session.query(RecipeStep)) == fresh
 
     def test_third_run_changes_nothing(self, importer, repo, db):
         url, _ = db

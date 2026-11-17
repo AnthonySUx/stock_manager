@@ -704,6 +704,15 @@ def _recipe_quantity_text(quantity: Optional[str], unit: Optional[str]) -> Optio
     return q
 
 
+def _name_keys(name: Optional[str]) -> set[str]:
+    """Lower-cased forms a name matches by: as written and its synonym-map
+    canonical name. Empty for a missing name."""
+    text = (name or "").strip()
+    if not text:
+        return set()
+    return {text.lower(), _normalize_name(text).lower()}
+
+
 def get_consume_preview(db: Session, recipe_id: int) -> Optional[dict]:
     """Preview which inventory items would be consumed for a recipe.
     Returns suggestions without modifying any data.
@@ -726,14 +735,16 @@ def get_consume_preview(db: Session, recipe_id: int) -> Optional[dict]:
     for ing in ingredients:
         if ing.is_seasoning or ing.is_optional:
             continue
-        ing_lower = ing.ingredient_name.strip().lower()
-        norm_lower = (ing.normalized_name or "").strip().lower()
+        # Both sides go through the synonym map, so stock named 西红柿 matches a
+        # recipe that says 番茄 (and the other way round), like recommendations.
+        # (normalized_name is always _normalize_name(ingredient_name), so it
+        # adds nothing here.)
+        ing_keys = _name_keys(ing.ingredient_name)
 
         # Find best matching inventory item
         best_match = None
         for item in items:
-            item_lower = item.name.strip().lower()
-            if item_lower == ing_lower or item_lower == norm_lower or norm_lower == item_lower:
+            if _name_keys(item.name) & ing_keys:
                 if best_match is None:
                     best_match = item
                 # Prefer expiring soon

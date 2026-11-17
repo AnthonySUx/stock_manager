@@ -1,10 +1,10 @@
 # Stock Manager
 
-This is a family inventory management application with a mobile frontend, FastAPI backend, MySQL database, and legacy local CLI support. It helps users track household stock, owners, locations, quantities, purchase dates, expiration dates, and consumption status. The app supports restocking workflows, reminders for expiring items, cleanup of outdated records, and settings for user-level preferences. It also includes recipe management, stock-based recipe recommendations, AI-assisted recipe exploration, and cooking flows that can optionally deduct used ingredients from inventory.
+This is a family inventory management application with a native iOS app (SwiftUI), FastAPI backend, MySQL database, and legacy local CLI support. It helps users track household stock, owners, locations, quantities, purchase dates, expiration dates, and consumption status. The app supports restocking workflows, reminders for expiring items, cleanup of outdated records, and settings for user-level preferences. It also includes recipe management, stock-based recipe recommendations, AI-assisted recipe exploration, and cooking flows that can optionally deduct used ingredients from inventory.
 
 | Interface | Status | Database | Docs |
 |---|---|---|---|
-| Mobile App + API | **Primary** | MySQL | [docs/app.md](docs/app.md) |
+| iOS App + API | **Primary** | MySQL | [docs/app.md](docs/app.md) |
 | CLI | Legacy / optional | SQLite | [docs/cli.md](docs/cli.md) |
 
 ---
@@ -106,7 +106,7 @@ Important details:
 - Keep `API_TOKEN` private. The same value is entered into the iOS app on first launch.
 - `API_AUTH_DISABLED=true` is only for isolated local development. Do not use it while exposing the API to a phone or another computer.
 
-AI exploration is optional. Ordinary recipe browsing and stock-based recommendations work without an AI key. To enable AI exploration later, add the documented `AI_RECIPE_*` values from [`.env.example`](.env.example).
+AI exploration is optional. Ordinary recipe browsing and stock-based recommendations work without an AI key. To enable AI exploration later, set `AI_RECIPE_ENABLED=true` and `AI_API_KEY` (plus the optional `AI_*` settings documented in [`.env.example`](.env.example)), then restart FastAPI: AI settings are read once at startup. The app checks `GET /api/capabilities` to decide whether to show Explore.
 
 ### 4. Start MySQL
 
@@ -129,6 +129,8 @@ docker compose logs mysql
 ```
 
 The database is published only on `127.0.0.1:3306`, so it is not directly exposed to the local network.
+
+Using Homebrew MySQL instead of Docker also works: see [docs/app/setup.md](docs/app/setup.md) §1.4 (Option B) and §2.3. Create the database and user to match `DATABASE_URL`, then continue with step 5.
 
 ### 5. Create the Python Environment
 
@@ -393,7 +395,7 @@ For more detail, see [the backend setup guide](docs/app/setup.md), [iOS-specific
 - **Restock List** — Plan and track restock purchases
 - **Recipe Library** — Browse, search, favorite, create, fork recipes
 - **Today Recommendations** — Daily recipe suggestions based on current inventory
-- **Explore Recipes** — AI-powered creative recipe ideas based structured or nature language requirements
+- **Explore Recipes** — AI-powered recipe ideas from structured preferences or a natural-language request
 
 See [docs/app.md](docs/app.md) for the full App documentation.
 
@@ -424,6 +426,9 @@ docs/
   app/recipes.md        Recipe library, recommendations, explore
   app/troubleshooting.md Common issues
   cli.md                Legacy CLI documentation
+ios/
+  README.md             iOS app: running, signing, build and test
+  STATE_MACHINES.md     iOS state conventions for async, navigation and forms
 ```
 
 ---
