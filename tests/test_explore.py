@@ -78,6 +78,35 @@ class TestResponseShapes:
         assert response.status_code == 502
         assert response.json() == {"code": "ai_upstream_error"}
 
+    def test_expand_normalizes_common_ai_field_variants(self, client, fake_ai):
+        fake_ai.reply = json.dumps(
+            {
+                "title": "快捷蛋料理",
+                "ingredients": [{"name": "鸡蛋", "quantity": 2, "unit": "个"}],
+                "steps": [{"text": "打散鸡蛋"}, {"instruction": "煎熟"}],
+            }
+        )
+
+        response = client.post("/api/recipes/explore/expand", json={"idea": IDEA})
+
+        assert response.status_code == 200
+        draft = response.json()["recipe_draft"]
+        assert draft["ingredients"] == [
+            {
+                "ingredient_name": "鸡蛋",
+                "normalized_name": None,
+                "quantity": "2",
+                "unit": "个",
+                "is_optional": False,
+                "is_seasoning": False,
+                "sort_order": 0,
+            }
+        ]
+        assert draft["steps"] == [
+            {"step_number": 1, "instruction": "打散鸡蛋"},
+            {"step_number": 2, "instruction": "煎熟"},
+        ]
+
 
 # ─── 2. Event loop not blocked ────────────────────────────────────
 

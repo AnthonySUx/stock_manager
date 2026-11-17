@@ -16,19 +16,19 @@ This page is the entry point for the App documentation.
 | Resource | URL |
 |---|---|
 | API Docs (Swagger) | http://localhost:8000/docs |
-| Frontend | Expo Go (see [Setup](app/setup.md)) |
+| Frontend | Native SwiftUI for iOS 17+ (see [Setup](app/setup.md)) |
 | Backend | http://localhost:8000 |
 
 ## Architecture
 
 ```
 ┌─────────────┐     ┌──────────────┐     ┌───────┐
-│ Expo App    │────▶│ FastAPI      │────▶│ MySQL │
-│ (React Ntv) │     │ (uvicorn)    │     │       │
+│ SwiftUI App │────▶│ FastAPI      │────▶│ MySQL │
+│ (iOS 17+)   │     │ (uvicorn)    │     │       │
 └─────────────┘     └──────────────┘     └───────┘
 ```
 
-- **Frontend**: Expo / React Native (TypeScript)
+- **Frontend**: Native SwiftUI (iOS 17+, iPhone and iPad)
 - **Backend**: FastAPI (Python 3.10+)
 - **Database**: MySQL 8 (via Docker or Homebrew)
 - **AI**: Optional provider integration (DeepSeek by default) — only used for Explore Recipes now
@@ -58,14 +58,10 @@ stock_manager/
       restock.py          # Restock endpoints
       recipes.py          # Recipe + Recommendations + Explore endpoints
       settings.py         # Settings endpoints
-frontend/                 # Expo + React Native app
-  src/
-    screens/              # All screens
-    navigation/           # Tab + Stack navigation
-    api/                  # API client
-    types/                # TypeScript types
-    components/           # Reusable components
-    theme/                # App theme
+ios/                      # Native SwiftUI app
+  StockManager/           # App, features, models, and API client
+  StockManagerTests/      # Unit and API-contract tests
+  StockManagerUITests/    # End-to-end UI tests
 scripts/                  # Helper scripts
 docker-compose.yml        # MySQL 8
 ```

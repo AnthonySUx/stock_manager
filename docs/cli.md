@@ -164,6 +164,6 @@ stock_manager/
   database.py      # SQLite database layer
   config.py        # Configuration
 scripts/           # Helper scripts
-frontend/          # Expo + React Native app
+ios/               # Native SwiftUI app
 docker-compose.yml # MySQL 8 (for App/API only)
 ```
