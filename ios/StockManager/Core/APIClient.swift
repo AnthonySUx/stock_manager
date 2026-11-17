@@ -1,0 +1,195 @@
+import Foundation
+
+enum APIClientError: LocalizedError, Equatable {
+    case invalidURL
+    case invalidResponse
+    case unauthorized
+    case server(status: Int, message: String)
+    case decoding(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidURL: "服务器地址无效"
+        case .invalidResponse: "服务器返回了无效响应"
+        case .unauthorized: "API 令牌无效或缺失"
+        case .server(_, let message): message
+        case .decoding(let message): "无法解析服务器数据：\(message)"
+        }
+    }
+}
+
+struct ItemFilters: Equatable {
+    var categoryId: Int?; var owner: String?; var location: String?; var status: ItemStatus?
+}
+
+protocol APIClientProtocol: Sendable {
+    func health() async throws -> HealthResponse
+    func settings() async throws -> AppSettings
+    func updateSettings(days: Int) async throws -> AppSettings
+
+    func items(filters: ItemFilters) async throws -> [StockItem]
+    func searchItems(_ keyword: String, filters: ItemFilters) async throws -> [StockItem]
+    func item(id: Int) async throws -> StockItem
+    func reminders() async throws -> [StockItem]
+    func createItem(_ body: ItemCreate) async throws -> StockItem
+    func updateItem(id: Int, _ body: ItemUpdate) async throws -> StockItem
+    func consumeItem(id: Int, _ body: ConsumeRequest) async throws -> StockItem
+    func deleteItem(id: Int) async throws
+    func cleanItems(statuses: [ItemStatus]) async throws -> String
+
+    func categories(tree: Bool) async throws -> [Category]
+    func createCategory(_ body: CategoryCreate) async throws -> Category
+    func updateCategory(id: Int, _ body: CategoryUpdate) async throws -> Category
+    func deleteCategory(id: Int) async throws
+
+    func restockItems(status: String?) async throws -> [RestockItem]
+    func createRestock(_ body: RestockCreate) async throws -> RestockItem
+    func updateRestock(id: Int, _ body: RestockUpdate) async throws -> RestockItem
+    func completeRestock(id: Int, _ body: RestockDone) async throws -> String
+    func deleteRestock(id: Int) async throws
+    func cleanRestock() async throws -> String
+
+    func recipes(query: String?, source: String?, category: String?, favoritesOnly: Bool, limit: Int, offset: Int) async throws -> [RecipeSummary]
+    func recipe(id: Int) async throws -> Recipe
+    func createRecipe(_ body: RecipeWrite) async throws -> Recipe
+    func updateRecipe(id: Int, _ body: RecipeWrite) async throws -> Recipe
+    func deleteRecipe(id: Int) async throws
+    func forkRecipe(id: Int) async throws -> Recipe
+    func setFavorite(id: Int, favorite: Bool) async throws
+    func recommendations(scene: String) async throws -> RecommendationResponse
+    func recipeSources() async throws -> [SourceInfo]
+    func consumePreview(recipeId: Int) async throws -> ConsumePreview
+    func cook(recipeId: Int, _ body: CookRequest) async throws -> CookResponse
+    func explore(_ body: ExploreRequest) async throws -> ExploreResponse
+    func expand(_ idea: ExploreIdea) async throws -> RecipeDraft
+}
+
+struct APIClient: APIClientProtocol {
+    let baseURL: URL
+    let token: String
+    var session: URLSession = .shared
+
+    func health() async throws -> HealthResponse { try await send("health", authenticated: false) }
+    func settings() async throws -> AppSettings { try await send("settings") }
+    func updateSettings(days: Int) async throws -> AppSettings {
+        try await send("settings", method: "PATCH", body: SettingsUpdate(expirationReminderDays: String(days)))
+    }
+
+    func items(filters: ItemFilters = .init()) async throws -> [StockItem] {
+        try await send("items", query: filterQuery(filters))
+    }
+    func searchItems(_ keyword: String, filters: ItemFilters = .init()) async throws -> [StockItem] {
+        try await send("items/search", query: [URLQueryItem(name: "keyword", value: keyword)] + filterQuery(filters))
+    }
+    func item(id: Int) async throws -> StockItem { try await send("items/\(id)") }
+    func reminders() async throws -> [StockItem] { try await send("items/reminders") }
+    func createItem(_ body: ItemCreate) async throws -> StockItem { try await send("items", method: "POST", body: body) }
+    func updateItem(id: Int, _ body: ItemUpdate) async throws -> StockItem { try await send("items/\(id)", method: "PATCH", body: body) }
+    func consumeItem(id: Int, _ body: ConsumeRequest) async throws -> StockItem { try await send("items/\(id)/consume", method: "POST", body: body) }
+    func deleteItem(id: Int) async throws { let _: MessageResponse = try await send("items/\(id)", method: "DELETE") }
+    func cleanItems(statuses: [ItemStatus]) async throws -> String {
+        let response: MessageResponse = try await send("items/clean", method: "POST", query: statuses.map { .init(name: "statuses", value: $0.rawValue) })
+        return response.message
+    }
+
+    func categories(tree: Bool) async throws -> [Category] { try await send(tree ? "categories" : "categories/flat") }
+    func createCategory(_ body: CategoryCreate) async throws -> Category { try await send("categories", method: "POST", body: body) }
+    func updateCategory(id: Int, _ body: CategoryUpdate) async throws -> Category { try await send("categories/\(id)", method: "PATCH", body: body) }
+    func deleteCategory(id: Int) async throws { let _: MessageResponse = try await send("categories/\(id)", method: "DELETE") }
+
+    func restockItems(status: String? = nil) async throws -> [RestockItem] {
+        try await send("restock", query: status.map { [.init(name: "status", value: $0)] } ?? [])
+    }
+    func createRestock(_ body: RestockCreate) async throws -> RestockItem { try await send("restock", method: "POST", body: body) }
+    func updateRestock(id: Int, _ body: RestockUpdate) async throws -> RestockItem { try await send("restock/\(id)", method: "PATCH", body: body) }
+    func completeRestock(id: Int, _ body: RestockDone) async throws -> String {
+        let response: MessageResponse = try await send("restock/\(id)/done", method: "POST", body: body); return response.message
+    }
+    func deleteRestock(id: Int) async throws { let _: MessageResponse = try await send("restock/\(id)", method: "DELETE") }
+    func cleanRestock() async throws -> String {
+        let response: MessageResponse = try await send("restock/clean", method: "POST"); return response.message
+    }
+
+    func recipes(query: String?, source: String?, category: String?, favoritesOnly: Bool, limit: Int = 20, offset: Int = 0) async throws -> [RecipeSummary] {
+        var params = [URLQueryItem(name: "limit", value: String(limit)), .init(name: "offset", value: String(offset))]
+        if let query, !query.isEmpty { params.append(.init(name: "query", value: query)) }
+        if let source { params.append(.init(name: "source_type", value: source)) }
+        if let category { params.append(.init(name: "category", value: category)) }
+        if favoritesOnly { params.append(.init(name: "favorite_only", value: "true")) }
+        return try await send("recipes", query: params)
+    }
+    func recipe(id: Int) async throws -> Recipe { try await send("recipes/\(id)") }
+    func createRecipe(_ body: RecipeWrite) async throws -> Recipe { try await send("recipes", method: "POST", body: body) }
+    func updateRecipe(id: Int, _ body: RecipeWrite) async throws -> Recipe { try await send("recipes/\(id)", method: "PATCH", body: body) }
+    func deleteRecipe(id: Int) async throws { let _: MessageResponse = try await send("recipes/\(id)", method: "DELETE") }
+    func forkRecipe(id: Int) async throws -> Recipe { try await send("recipes/\(id)/fork", method: "POST") }
+    func setFavorite(id: Int, favorite: Bool) async throws {
+        let _: MessageResponse = try await send("recipes/\(id)/favorite", method: favorite ? "POST" : "DELETE")
+    }
+    func recommendations(scene: String) async throws -> RecommendationResponse {
+        try await send("recipes/recommendations", query: [.init(name: "scene", value: scene)])
+    }
+    func recipeSources() async throws -> [SourceInfo] { try await send("recipes/sources") }
+    func consumePreview(recipeId: Int) async throws -> ConsumePreview { try await send("recipes/\(recipeId)/consume-preview") }
+    func cook(recipeId: Int, _ body: CookRequest) async throws -> CookResponse { try await send("recipes/\(recipeId)/cook", method: "POST", body: body) }
+    func explore(_ body: ExploreRequest) async throws -> ExploreResponse { try await send("recipes/explore", method: "POST", body: body, timeout: 70) }
+    func expand(_ idea: ExploreIdea) async throws -> RecipeDraft {
+        let response: ExpandResponse = try await send("recipes/explore/expand", method: "POST", body: ExpandRequest(idea: idea), timeout: 70)
+        return response.recipeDraft
+    }
+
+    private func filterQuery(_ filters: ItemFilters) -> [URLQueryItem] {
+        var result: [URLQueryItem] = []
+        if let value = filters.categoryId { result.append(.init(name: "category", value: String(value))) }
+        if let value = filters.owner, !value.isEmpty { result.append(.init(name: "owner", value: value)) }
+        if let value = filters.location, !value.isEmpty { result.append(.init(name: "location", value: value)) }
+        if let value = filters.status { result.append(.init(name: "status", value: value.rawValue)) }
+        return result
+    }
+
+    private func send<Response: Decodable>(_ path: String, method: String = "GET", query: [URLQueryItem] = [], authenticated: Bool = true, timeout: TimeInterval = 15) async throws -> Response {
+        try await send(path, method: method, query: query, authenticated: authenticated, bodyData: nil, timeout: timeout)
+    }
+    private func send<Response: Decodable, Body: Encodable>(_ path: String, method: String, query: [URLQueryItem] = [], authenticated: Bool = true, body: Body, timeout: TimeInterval = 15) async throws -> Response {
+        let encoder = JSONEncoder(); encoder.keyEncodingStrategy = .convertToSnakeCase
+        return try await send(path, method: method, query: query, authenticated: authenticated, bodyData: encoder.encode(body), timeout: timeout)
+    }
+    private func send<Response: Decodable>(_ path: String, method: String, query: [URLQueryItem], authenticated: Bool = true, bodyData: Data?, timeout: TimeInterval = 15) async throws -> Response {
+        var components = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)
+        if !query.isEmpty { components?.queryItems = query }
+        guard let url = components?.url else { throw APIClientError.invalidURL }
+        var request = URLRequest(url: url); request.httpMethod = method; request.timeoutInterval = timeout
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if bodyData != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+        if authenticated { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        request.httpBody = bodyData
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIClientError.invalidResponse }
+        if http.statusCode == 401 { throw APIClientError.unauthorized }
+        guard 200..<300 ~= http.statusCode else {
+            throw APIClientError.server(status: http.statusCode, message: Self.errorMessage(data, status: http.statusCode))
+        }
+        do {
+            let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
+            return try decoder.decode(Response.self, from: data)
+        } catch {
+            throw APIClientError.decoding(error.localizedDescription)
+        }
+    }
+
+    static func errorMessage(_ data: Data, status: Int) -> String {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let detail = object["detail"] else {
+            return "请求失败（\(status)）"
+        }
+        if let text = detail as? String { return text }
+        if let list = detail as? [[String: Any]] {
+            return list.compactMap { item in
+                let location = (item["loc"] as? [Any])?.map(String.init(describing:)).joined(separator: ".")
+                let message = item["msg"] as? String
+                return [location, message].compactMap { $0 }.joined(separator: "：")
+            }.joined(separator: "\n")
+        }
+        return "请求失败（\(status)）"
+    }
+}
+

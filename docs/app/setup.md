@@ -1,6 +1,6 @@
 # Setup
 
-Prerequisites, database configuration, and steps to run the backend and frontend.
+Prerequisites, database configuration, and steps to run the backend and native iOS app.
 
 ---
 
@@ -19,13 +19,9 @@ brew install python@3.13
 python3 --version
 ```
 
-### 1.3 Node.js + npm
+### 1.3 Xcode
 
-```bash
-brew install node
-node --version
-npm --version
-```
+Install Xcode from the Mac App Store, open it once, and allow it to install its additional components. The app requires iOS 17 or later.
 
 ### 1.4 MySQL
 
@@ -59,10 +55,6 @@ CREATE USER 'stock_user'@'localhost' IDENTIFIED BY 'stock_password';
 GRANT ALL PRIVILEGES ON stock_manager.* TO 'stock_user'@'localhost';
 FLUSH PRIVILEGES;
 ```
-
-### 1.5 Expo Go
-
-Install from App Store / Google Play.
 
 ---
 
@@ -245,7 +237,7 @@ python scripts/import_howtocook.py /path/to/HowToCook --prune-non-recipes
 
 By default the API listens on `127.0.0.1`, so only this machine can reach it:
 
-- iOS Simulator (`http://localhost:8000/api`) and Android Emulator (`http://10.0.2.2:8000/api`) work as usual.
+- iOS Simulator uses `http://localhost:8000/api`.
 - Docker MySQL is published on `127.0.0.1:3306` only.
 
 Requests still need the API token (3.7), but anyone on the network can try to reach the API. To test on a real phone, start the backend on the LAN only while you need it:
@@ -254,7 +246,7 @@ Requests still need the API token (3.7), but anyone on the network can try to re
 API_HOST=0.0.0.0 ./scripts/start_backend.sh
 ```
 
-Then set `frontend/app.json` → `expo.extra.apiBaseUrl` to `http://YOUR_MAC_IP:8000/api`. Anyone on the same network can reach the API while it runs this way.
+In the iOS connection screen, use `http://YOUR_MAC_IP:8000/api`. Anyone on the same network can reach the API while it runs this way.
 
 Bulk cleanup endpoints only delete finished records: `POST /api/items/clean` accepts `consumed` and `expired`, and `POST /api/restock/clean` accepts `done`. Other statuses return `400`.
 
@@ -275,7 +267,7 @@ There is one token per installation (one household). There are no per-member acc
    ```
 
 2. Restart the backend. If `API_TOKEN` is empty, the backend refuses to start with an explanatory error.
-3. Give the same token to the app (see the frontend notes in issue #41).
+3. Enter the same token in the iOS app's connection screen.
 
 Missing or wrong tokens return `401` with `WWW-Authenticate: Bearer`.
 
@@ -302,40 +294,37 @@ TEST_DATABASE_URL="mysql+pymysql://root@localhost/stock_manager_test?unix_socket
 
 ---
 
-## 4. Frontend (Expo + React Native)
+## 4. Native iOS App
 
-### 4.1 Install Dependencies
+### 4.1 Open the Project
 
 ```bash
-cd frontend
-npm install --legacy-peer-deps
+open ios/StockManager.xcodeproj
 ```
 
-### 4.2 Configure API URL
+In Xcode, select the `StockManager` scheme and an iPhone or iPad Simulator running iOS 17 or later, then press `Command-R`.
 
-Edit `frontend/app.json` → `expo.extra.apiBaseUrl`:
+### 4.2 Connect
 
 | Environment | Value |
 |---|---|
 | iOS Simulator | `http://localhost:8000/api` |
 | Real device | `http://YOUR_MAC_IP:8000/api` |
 
-Find your Mac IP:
+Enter the shared `API_TOKEN` from `.env`, then tap **测试并连接**. The app stores the token in Keychain. Find the Mac IP for a real device with:
 
 ```bash
 ipconfig getifaddr en0
 ```
 
-### 4.3 Start Expo
+### 4.3 Build and Test from Terminal
 
 ```bash
-npx expo start -c
+./ios/scripts/build.sh build
+./ios/scripts/build.sh test
 ```
 
-### 4.4 Open in Expo Go
-
-- iOS Simulator: Press `i` in the terminal
-- Real device: Scan the QR code
+See the root [README](../../README.md#native-ios-deployment-step-by-step) for the complete first-time walkthrough, device signing, and troubleshooting.
 
 ---
 
@@ -351,7 +340,5 @@ source .venv/bin/activate
 alembic upgrade head   # no-op unless you pulled a new migration
 uvicorn stock_manager.api.main:app --reload --host 127.0.0.1 --port 8000
 
-# Terminal 3: Frontend
-cd /path/to/stock_manager/frontend
-npx expo start -c
+# Then launch StockManager from Xcode or the installed iOS app.
 ```

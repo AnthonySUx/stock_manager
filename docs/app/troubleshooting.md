@@ -8,38 +8,15 @@ Common issues and solutions.
 
 Docker is not installed. Install Docker Desktop or use Homebrew MySQL as an alternative.
 
-### SDK / Expo Go version mismatch
+### Xcode cannot find a compatible Simulator
 
-Check `frontend/package.json`:
+Install an iOS 17 or later Simulator runtime from Xcode settings. Make sure the installed Xcode and macOS/CoreSimulator versions are compatible.
 
-```json
-"expo": "~55.0.0",
-"react": "19.2.0",
-"react-native": "0.83.2"
-```
+### Xcode asks for a development team
 
-Reinstall if needed:
+Simulator builds do not need a paid Apple Developer account. For a physical device, select your own team under the StockManager target's **Signing & Capabilities** settings.
 
-```bash
-rm -rf node_modules package-lock.json
-npm install --legacy-peer-deps
-```
-
-### React Native codegen error (`RCTModalHostViewNativeComponent`)
-
-React Native version is too new. Install the correct version:
-
-```bash
-npm install react-native@0.83.2 --legacy-peer-deps
-```
-
-### Port 8081 already in use
-
-Kill the old process:
-
-```bash
-kill $(lsof -t -i :8081)
-```
+Do not commit a personal signing certificate or provisioning profile. A shared Team ID is not required for Simulator builds.
 
 ### `failed to load items`
 
@@ -86,24 +63,10 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-### Frontend module not found
+### SwiftUI app does not build
 
 ```bash
-rm -rf node_modules package-lock.json
-npm install --legacy-peer-deps
+./ios/scripts/build.sh build
 ```
 
-### TypeScript errors
-
-```bash
-cd frontend
-npx tsc --noEmit
-```
-
-### Expo shows old code
-
-Clear cache:
-
-```bash
-npx expo start -c
-```
+Read the first Xcode compiler error rather than later cascading errors. If the error mentions an unavailable Simulator or CoreSimulator mismatch, update the Xcode runtime instead of changing the app's deployment target.

@@ -187,16 +187,85 @@ async def expand_to_recipe_draft(idea: dict) -> dict:
         # Valid JSON but not a recipe object (e.g. a list): nothing to show.
         # There is no fallback draft any more (#66); the client offers a retry.
         raise AIUpstreamError("AI reply is not a recipe object")
+    return {
+        "recipe_draft": _normalize_recipe_draft(
+            data,
+            idea,
+            warning="This is an AI-generated recipe draft. Please confirm ingredients and steps before saving.",
+        )
+    }
 
-    data.setdefault("title", idea.get("title", ""))
-    if data.get("category") not in _RECIPE_CATEGORIES:
-        data["category"] = None  # the user must pick one before saving
-    data.setdefault("description", idea.get("description", ""))
-    data.setdefault("ingredients", [])
-    data.setdefault("steps", [])
-    data["warnings"] = ["This is an AI-generated recipe draft. Please confirm ingredients and steps before saving."]
-    data["difficulty"] = data.get("difficulty", "medium")
-    data["servings"] = data.get("servings", "2 servings")
-    data["cook_time_minutes"] = data.get("cook_time_minutes", idea.get("estimated_time_minutes", 30))
 
-    return {"recipe_draft": data}
+def _text_or_none(value) -> Optional[str]:
+    """Return a trimmed string for AI scalar output, otherwise None."""
+    if value is None:
+        return None
+    if isinstance(value, (str, int, float)) and not isinstance(value, bool):
+        text = str(value).strip()
+        return text or None
+    return None
+
+
+def _normalize_recipe_draft(data: dict, idea: dict, warning: str) -> dict:
+    """Convert unpredictable AI JSON into a stable RecipeCreate-compatible draft."""
+    raw_ingredients = data.get("ingredients")
+    ingredients = []
+    if isinstance(raw_ingredients, list):
+        for index, raw in enumerate(raw_ingredients):
+            if not isinstance(raw, dict):
+                continue
+            name = _text_or_none(raw.get("ingredient_name") or raw.get("name"))
+            if not name:
+                continue
+            ingredients.append(
+                {
+                    "ingredient_name": name,
+                    "normalized_name": _text_or_none(raw.get("normalized_name")),
+                    "quantity": _text_or_none(raw.get("quantity")),
+                    "unit": _text_or_none(raw.get("unit")),
+                    "is_optional": raw.get("is_optional") is True,
+                    "is_seasoning": raw.get("is_seasoning") is True,
+                    "sort_order": index,
+                }
+            )
+
+    raw_steps = data.get("steps")
+    steps = []
+    if isinstance(raw_steps, list):
+        for index, raw in enumerate(raw_steps):
+            if not isinstance(raw, dict):
+                continue
+            instruction = _text_or_none(
+                raw.get("instruction") or raw.get("description") or raw.get("text")
+            )
+            if not instruction:
+                continue
+            number = raw.get("step_number")
+            if not isinstance(number, int) or isinstance(number, bool) or number <= 0:
+                number = index + 1
+            steps.append({"step_number": number, "instruction": instruction})
+
+    category = data.get("category")
+    if category not in _RECIPE_CATEGORIES:
+        category = None
+    cook_time = data.get("cook_time_minutes")
+    if not isinstance(cook_time, int) or isinstance(cook_time, bool) or cook_time < 0:
+        cook_time = idea.get("estimated_time_minutes")
+    if not isinstance(cook_time, int) or isinstance(cook_time, bool) or cook_time < 0:
+        cook_time = 30
+
+    return {
+        "title": _text_or_none(data.get("title"))
+        or _text_or_none(idea.get("title"))
+        or "",
+        "category": category,
+        "description": _text_or_none(data.get("description"))
+        or _text_or_none(idea.get("description")),
+        "difficulty": _text_or_none(data.get("difficulty")) or "medium",
+        "servings": _text_or_none(data.get("servings")) or "2 servings",
+        "cook_time_minutes": cook_time,
+        "raw_markdown": _text_or_none(data.get("raw_markdown")),
+        "ingredients": ingredients,
+        "steps": steps,
+        "warnings": [warning],
+    }
