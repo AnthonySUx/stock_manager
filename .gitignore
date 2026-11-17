@@ -25,13 +25,9 @@ Thumbs.db
 # Local archives (preserved on this machine, never published)
 _archive/
 
-# Expo / React Native
+# Leftovers from the former Expo frontend (not used any more)
 node_modules/
-frontend/node_modules/
-frontend/.expo/
-frontend/dist/
-frontend/web-build/
-frontend/*.tsbuildinfo
+.expo/
 
 # Coverage
 .coverage
