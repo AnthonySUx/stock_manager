@@ -35,25 +35,41 @@ jobs:
       - name: Check Python compilation
         run: python3 -m compileall -q stock_manager scripts
 
-  frontend:
-    name: Frontend
-    runs-on: ubuntu-latest
+  ios:
+    # The Expo frontend was replaced by the native app in ios/ (42714d3).
+    name: iOS
+    runs-on: macos-latest
+    timeout-minutes: 30
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+      - name: Show Xcode version
+        run: xcodebuild -version
 
-      - name: Install frontend dependencies
-        working-directory: frontend
-        run: npm ci
+      - name: Build
+        run: ./ios/scripts/build.sh build
 
-      - name: Run TypeScript check
-        working-directory: frontend
-        run: npm run typecheck
+      - name: Unit and UI tests
+        # Runner images do not always have the "iPhone 17" Simulator that
+        # build.sh defaults to, so use the newest available iPhone. The live
+        # backend UI test skips itself without STOCK_MANAGER_UI_URL / _TOKEN.
+        run: |
+          DEVICE_ID=$(xcrun simctl list devices available --json | python3 -c '
+          import json, re, sys
+          devices = json.load(sys.stdin)["devices"]
+          found = []
+          for runtime, items in devices.items():
+              match = re.search(r"iOS-(\d+)-(\d+)", runtime)
+              if not match:
+                  continue
+              version = (int(match.group(1)), int(match.group(2)))
+              found += [(version, d["name"], d["udid"]) for d in items if d["name"].startswith("iPhone")]
+          if not found:
+              sys.exit("no available iPhone Simulator")
+          version, name, udid = max(found)
+          print(f"Using {name} (iOS {version[0]}.{version[1]})", file=sys.stderr)
+          print(udid)
+          ')
+          IOS_TEST_DESTINATION="platform=iOS Simulator,id=$DEVICE_ID" ./ios/scripts/build.sh test
