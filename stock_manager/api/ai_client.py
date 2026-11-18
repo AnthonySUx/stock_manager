@@ -360,24 +360,36 @@ def _read_chunk(data: str, stats: CallStats, reply: _Reply, on_text: Optional[Te
         _add_content(content, stats, reply, on_text)
 
 
+def _round_error(total: float) -> AIUpstreamError:
+    return AIUpstreamError(f"AI call exceeded {total:g}s", "timeout_round")
+
+
 async def _read_stream(
     response: httpx.Response, config: AIConfig, stats: CallStats, reply: _Reply,
-    on_text: Optional[TextCallback],
+    on_text: Optional[TextCallback], total: float,
 ) -> None:
-    """Read server-sent events until [DONE], enforcing the first-token and
-    idle limits. Keep-alive comments do not count as data."""
+    """Read server-sent events until [DONE], enforcing the first-token, idle
+    and round limits. Keep-alive comments do not count as data.
+
+    The round limit is checked here too, not only by the caller's wait_for:
+    on Python 3.11 a cancellation that races with a chunk arriving in the
+    inner wait_for can be lost, and the stream would then run on.
+    """
     lines = response.aiter_lines()
     last_data = stats.now()
     while True:
         if stats.first_data is None:
-            remaining = config.first_token_timeout - stats.now()
+            stall_left = config.first_token_timeout - stats.now()
         else:
-            remaining = last_data + config.idle_timeout - stats.now()
+            stall_left = last_data + config.idle_timeout - stats.now()
+        round_left = total - stats.now()
         try:
-            line = await asyncio.wait_for(lines.__anext__(), max(remaining, 0.001))
+            line = await asyncio.wait_for(lines.__anext__(), max(min(stall_left, round_left), 0.001))
         except StopAsyncIteration:
             return
         except asyncio.TimeoutError as exc:
+            if round_left <= stall_left:
+                raise _round_error(total) from exc
             raise _stall_error(stats, config) from exc
         if not line.startswith("data:"):
             continue  # blank separators, comments (": keep-alive"), event names
@@ -398,8 +410,8 @@ def _stall_error(stats: CallStats, config: AIConfig) -> AIUpstreamError:
 
 
 async def _request(
-    config: AIConfig, payload: dict, stream: bool, timeout: float, stats: CallStats,
-    reply: _Reply, on_text: Optional[TextCallback],
+    config: AIConfig, payload: dict, stream: bool, timeout: float, total: float,
+    stats: CallStats, reply: _Reply, on_text: Optional[TextCallback],
 ) -> None:
     """Send the request, retrying connection errors, 429 and 5xx once (by
     default) while no content has arrived. Timeouts are not retried."""
@@ -429,7 +441,7 @@ async def _request(
                             f"AI returned HTTP {response.status_code}{_error_detail(response)}", "http_error"
                         )
                     if stream and "text/event-stream" in response.headers.get("content-type", ""):
-                        await _read_stream(response, config, stats, reply, on_text)
+                        await _read_stream(response, config, stats, reply, on_text, total)
                         return
                     # Not streamed (images, AI_STREAM=false, or a provider that
                     # ignores `stream`): one JSON body.
@@ -508,9 +520,9 @@ async def chat_json(
         return error
 
     try:
-        await asyncio.wait_for(_request(config, payload, stream, timeout, stats, reply, on_text), total)
+        await asyncio.wait_for(_request(config, payload, stream, timeout, total, stats, reply, on_text), total)
     except asyncio.TimeoutError as exc:
-        raise fail(AIUpstreamError(f"AI call exceeded {total:g}s", "timeout_round")) from exc
+        raise fail(_round_error(total)) from exc
     except AIUpstreamError as exc:
         raise fail(exc)
 
