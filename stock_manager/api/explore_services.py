@@ -4,12 +4,13 @@ Supports both structured preferences and natural language input.
 Both modes are converted into an AI prompt that generates idea candidates.
 """
 import asyncio
+import contextlib
 import json
 import logging
-from typing import Optional
+from dataclasses import dataclass, field as dc_field
+from typing import AsyncIterator, Optional
 from uuid import uuid4
 
-from stock_manager.api import ai_client
 from stock_manager.api.ai_client import AIUpstreamError, chat_json
 from stock_manager.api.ai_output import (
     COOKING_METHODS,
@@ -24,6 +25,7 @@ from stock_manager.api.ai_output import (
     dedupe_warnings,
     needs_repair,
 )
+from stock_manager.api.json_stream import ArrayItemStream
 from stock_manager.api.localization import LANGUAGE_NAMES
 
 logger = logging.getLogger(__name__)
@@ -57,8 +59,11 @@ def _feedback(problems: list[str], instruction: str) -> str:
 
 
 def _repair_messages(previous_reply, feedback: str) -> list[dict]:
+    """The model's previous reply (text, or parsed JSON) and the problems."""
+    if not isinstance(previous_reply, str):
+        previous_reply = json.dumps(previous_reply, ensure_ascii=False)
     return [
-        {"role": "assistant", "content": json.dumps(previous_reply, ensure_ascii=False)},
+        {"role": "assistant", "content": previous_reply},
         {"role": "user", "content": feedback},
     ]
 
@@ -151,35 +156,181 @@ def _build_explore_prompt(
     return system, user
 
 
-def _extract_ideas(data, locale: str, inventory: Inventory) -> tuple[list[dict], list[dict], list[str]]:
-    """Valid ideas from the parsed AI reply ({"ideas": [...]} or a bare list),
-    plus warnings and the problems of the dropped ideas (for a repair round).
-
-    Malformed ideas and ideas in the wrong language are dropped (#45, #65).
-    """
+def _extract_ideas(data) -> list:
+    """The raw idea list from a parsed reply ({"ideas": [...]} or a bare list)."""
     if isinstance(data, list):
         ideas = data
     elif isinstance(data, dict):
         ideas = data.get("ideas", [])
     else:
         ideas = []
-    if not isinstance(ideas, list):
-        ideas = []
+    return ideas if isinstance(ideas, list) else []
 
-    warnings: list[dict] = []
-    problems: list[str] = []
-    validated = []
-    for position, raw in enumerate(ideas, 1):
-        idea = clean_idea(raw, locale, inventory, warnings, problems, position)
-        if idea is not None:
-            validated.append(idea)
-    if not ideas:
-        problems.append('The reply must be {"ideas": [...]} with at least one idea.')
-    return validated, warnings, problems
+
+def _summary(problems: list[str], limit: int = 5) -> str:
+    """The first problems, for the server log when a request ends in 502."""
+    if not problems:
+        return "no details"
+    more = len(problems) - limit
+    return " | ".join(problems[:limit]) + (f" | (+{more} more)" if more > 0 else "")
 
 
 def _is_drop_warning(w: dict) -> bool:
     return w["code"] in ("idea_dropped_malformed", "idea_dropped_wrong_language")
+
+
+@dataclass
+class _Round:
+    """One AI call of Explore: what it said and what was wrong with it."""
+    label: str
+    warnings: list[dict] = dc_field(default_factory=list)
+    problems: list[str] = dc_field(default_factory=list)
+    text: str = ""
+    error: Optional[AIUpstreamError] = None
+
+
+async def _stream_round(
+    system: str,
+    user: str,
+    followup: Optional[list[dict]],
+    state: _Round,
+    locale: str,
+    inventory: Inventory,
+    titles: set[str],
+) -> AsyncIterator[dict]:
+    """Yield each idea of one AI reply as soon as it is complete and valid.
+
+    The reply text is cut into ideas while it streams (ArrayItemStream) and
+    each one goes through clean_idea before it is yielded; invalid ideas only
+    add to `state.problems`. When the reply does not have the expected shape,
+    the whole parsed reply is validated at the end instead. A failed call is
+    kept in `state.error` (ideas yielded before it stay valid).
+    """
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def call() -> None:
+        try:
+            result = await chat_json(
+                system, user, followup=followup, label=state.label,
+                on_text=lambda text: queue.put_nowait(("text", text)),
+            )
+            queue.put_nowait(("end", result))
+        except Exception as exc:  # passed to the consumer below
+            queue.put_nowait(("error", exc))
+
+    parser = ArrayItemStream("ideas")
+    parts: list[str] = []
+    position = 0
+
+    def accept(raw) -> Optional[dict]:
+        nonlocal position
+        position += 1
+        idea = clean_idea(raw, locale, inventory, state.warnings, state.problems, position)
+        if idea is None or idea["title"] in titles:
+            return None
+        titles.add(idea["title"])
+        idea["idea_id"] = str(uuid4())[:8]
+        return idea
+
+    task = asyncio.create_task(call())
+    try:
+        while True:
+            kind, value = await queue.get()
+            if kind == "text":
+                parts.append(value)
+                for raw in parser.feed(value):
+                    idea = accept(raw)
+                    if idea is not None:
+                        yield idea
+                continue
+            state.text = "".join(parts)
+            if kind == "error":
+                if not isinstance(value, AIUpstreamError):
+                    raise value
+                state.error = value
+                return
+            if not parser.found:
+                # Unexpected shape (or the text never reached us): validate
+                # the whole reply now.
+                for raw in _extract_ideas(value):
+                    idea = accept(raw)
+                    if idea is not None:
+                        yield idea
+            if position == 0:
+                state.problems.append('The reply must be {"ideas": [...]} with at least one idea.')
+            if not state.text:
+                state.text = json.dumps(value, ensure_ascii=False)
+            return
+    finally:
+        if not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+
+async def explore_stream(
+    inventory_items: list[dict],
+    structured: Optional[dict] = None,
+    natural_language: Optional[str] = None,
+    locale: str = "zh-CN",
+    warnings: Optional[list[dict]] = None,
+) -> AsyncIterator[tuple[str, dict]]:
+    """Cooking ideas from the AI, one at a time, each already validated.
+
+    Yields ("idea", idea) for every idea that passed validation, as soon as
+    the AI has written it, then one ("done", meta). Nothing unvalidated is
+    yielded. Raises AIUnavailableError / AIUpstreamError when there is no
+    usable idea at all.
+
+    When fewer than MIN_IDEAS ideas pass, the rejected ideas and what is wrong
+    with them are sent back once for repair (#65); the repair round has its
+    own time limits. A failed repair keeps the ideas already sent. A first
+    round that fails partway keeps its valid ideas and is not repaired.
+    """
+    input_mode = "structured" if structured else "natural_language"
+    system_prompt, user_prompt = _build_explore_prompt(inventory_items, structured, natural_language, locale)
+    inventory = Inventory(inventory_items)
+    titles: set[str] = set()
+    count = 0
+
+    first = _Round("explore/first")
+    async for idea in _stream_round(system_prompt, user_prompt, None, first, locale, inventory, titles):
+        count += 1
+        yield "idea", idea
+    idea_warnings = first.warnings
+    last = first
+
+    if first.error is None and count < MIN_IDEAS and first.problems:
+        feedback = _feedback(
+            first.problems,
+            'Reply with {"ideas": [...]} containing corrected versions of only the ideas listed '
+            "above, in the same format. Do not repeat the ideas that had no problems.",
+        )
+        repair = _Round("explore/repair")
+        followup = _repair_messages(first.text, feedback)
+        async for idea in _stream_round(system_prompt, user_prompt, followup, repair, locale, inventory, titles):
+            count += 1
+            yield "idea", idea
+        last = repair
+        if repair.error is None:
+            # Drop warnings now come from the repair round only.
+            idea_warnings = [w for w in idea_warnings if not _is_drop_warning(w)] + repair.warnings
+        else:
+            idea_warnings = idea_warnings + [w for w in repair.warnings if not _is_drop_warning(w)]
+
+    if count == 0:
+        if first.error is not None:
+            raise first.error
+        raise AIUpstreamError(
+            "AI reply contained no usable ideas: " + _summary(last.problems), "no_usable_ideas"
+        )
+    yield "done", {
+        "mode": "ai",
+        "input_mode": input_mode,
+        "locale": locale,
+        "warnings": dedupe_warnings(list(warnings or []) + idea_warnings),
+        "count": count,
+    }
 
 
 async def explore_ideas(
@@ -189,55 +340,17 @@ async def explore_ideas(
     locale: str = "zh-CN",
     warnings: Optional[list[dict]] = None,
 ) -> dict:
-    """Cooking ideas from the AI. Raises AIUnavailableError / AIUpstreamError.
-
-    When fewer than MIN_IDEAS ideas pass validation, the dropped ideas and
-    what is wrong with them are sent back once for repair (#65). Both rounds
-    share the per-call time budget; if the repair fails, the ideas from the
-    first round are returned. With no usable idea at all: 502.
-    """
-    input_mode = "structured" if structured else "natural_language"
-    system_prompt, user_prompt = _build_explore_prompt(inventory_items, structured, natural_language, locale)
-    inventory = Inventory(inventory_items)
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + ai_client.get_config().text_total_timeout
-
-    first = await chat_json(system_prompt, user_prompt)
-    ideas, idea_warnings, problems = _extract_ideas(first, locale, inventory)
-
-    if len(ideas) < MIN_IDEAS and problems:
-        feedback = _feedback(
-            problems,
-            'Reply with {"ideas": [...]} containing corrected versions of only the ideas listed '
-            "above, in the same format. Do not repeat the ideas that had no problems.",
-        )
-        try:
-            repaired = await asyncio.wait_for(
-                chat_json(system_prompt, user_prompt, followup=_repair_messages(first, feedback)),
-                max(deadline - loop.time(), 0.001),
-            )
-            more, more_warnings, _ = _extract_ideas(repaired, locale, inventory)
-            seen = {i["title"] for i in ideas}
-            for idea in more:
-                if idea["title"] not in seen:
-                    seen.add(idea["title"])
-                    ideas.append(idea)
-            # Drop warnings now come from the repair round only.
-            idea_warnings = [w for w in idea_warnings if not _is_drop_warning(w)] + more_warnings
-        except (AIUpstreamError, asyncio.TimeoutError) as exc:
-            logger.warning("Explore repair round failed: %s", exc)
-
-    if not ideas:
-        raise AIUpstreamError("AI reply contained no usable ideas")
-    for idea in ideas:
-        idea["idea_id"] = str(uuid4())[:8]
-    return {
-        "mode": "ai",
-        "input_mode": input_mode,
-        "locale": locale,
-        "ideas": ideas,
-        "warnings": dedupe_warnings(list(warnings or []) + idea_warnings),
-    }
+    """All ideas at once (POST /api/recipes/explore): the same validated ideas
+    as explore_stream, collected. Raises AIUnavailableError / AIUpstreamError."""
+    ideas: list[dict] = []
+    meta: dict = {}
+    async for kind, value in explore_stream(inventory_items, structured, natural_language, locale, warnings):
+        if kind == "idea":
+            ideas.append(value)
+        else:
+            meta = value
+    meta.pop("count", None)
+    return {**meta, "ideas": ideas}
 
 
 def _build_expand_prompt(idea: dict, inventory_items: list[dict], locale: str) -> tuple[str, str]:
@@ -310,17 +423,14 @@ async def expand_to_recipe_draft(
 
     If the first draft is unusable (wrong language, no steps, not an object)
     or lost a quantity, the draft and a list of its problems are sent back
-    once for repair (#65). Both rounds share the per-call time budget. The
+    once for repair (#65). Each round has its own time limits. The
     better of the usable drafts is returned (fewer problems; the repaired one
     on a tie); with no usable draft: 502. There is no fallback draft (#66).
     """
     inventory_items = inventory_items or []
     inventory = Inventory(inventory_items)
     system, user = _build_expand_prompt(idea, inventory_items, locale)
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + ai_client.get_config().text_total_timeout
-
-    first = await chat_json(system, user)
+    first = await chat_json(system, user, label="expand/first")
     results = [clean_draft(first, idea, locale, inventory)]
     if needs_repair(results[0]):
         feedback = _feedback(
@@ -329,17 +439,19 @@ async def expand_to_recipe_draft(
             "format. Keep everything else unchanged.",
         )
         try:
-            repaired = await asyncio.wait_for(
-                chat_json(system, user, followup=_repair_messages(first, feedback)),
-                max(deadline - loop.time(), 0.001),
+            # The repair round has its own time limits (ai_client).
+            repaired = await chat_json(
+                system, user, followup=_repair_messages(first, feedback), label="expand/repair"
             )
             results.append(clean_draft(repaired, idea, locale, inventory))
-        except (AIUpstreamError, asyncio.TimeoutError) as exc:
-            logger.warning("Expand repair round failed: %s", exc)
+        except AIUpstreamError:
+            pass  # logged by ai_client; the first draft is used if it is usable
 
     usable = [r for r in results if r.draft is not None]
     if not usable:
-        raise AIUpstreamError("AI draft was unusable")
+        raise AIUpstreamError(
+            "AI draft was unusable: " + _summary(results[-1].problems), "draft_unusable"
+        )
     best = min(reversed(usable), key=lambda r: len(r.problems))
     return {
         "recipe_draft": best.draft,

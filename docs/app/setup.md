@@ -101,13 +101,22 @@ API_PORT=8000
 # AI_API_KEY=
 # AI_MODEL=deepseek-flash
 # AI_TEMPERATURE=0.2
-# Timeouts in seconds: per request (text / image), and per call including the retry.
+# Text replies are streamed from the provider; set false for one JSON body per request.
+# AI_STREAM=true
+# AI_MAX_TOKENS=8192
+# Streamed text: first data within, then no gap longer than (seconds).
+# AI_FIRST_TOKEN_TIMEOUT_SECONDS=20
+# AI_IDLE_TIMEOUT_SECONDS=15
+# Non-streamed requests (AI_STREAM=false / images), seconds per request.
 # AI_TIMEOUT_SECONDS=30
 # AI_IMAGE_TIMEOUT_SECONDS=60
-# AI_TOTAL_TIMEOUT_SECONDS=45
+# Upper bound per round (retry included); the repair round gets its own.
+# AI_TOTAL_TIMEOUT_SECONDS=50
 # AI_IMAGE_TOTAL_TIMEOUT_SECONDS=75
 # Retries after a connection error, 429 or 5xx (timeouts are not retried).
 # AI_MAX_RETRIES=1
+# Level of the backend's own log lines (AI calls and errors).
+# LOG_LEVEL=INFO
 ```
 
 `DATABASE_URL` is mandatory. The backend has no localhost fallback. When
