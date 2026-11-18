@@ -1,15 +1,23 @@
 """FastAPI router for recipe features."""
+import asyncio
+import contextlib
+import json
 import logging
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+
+from stock_manager.api import ai_client
 
 from stock_manager.api.db import get_session
 from stock_manager.api.recipe_schemas import (
+    AIWarning,
     ConsumePreviewResponse,
     CookRecipeRequest,
     CookRecipeResponse,
+    ExploreIdea,
     ExploreRequest,
     ExploreResponse,
     ExpandRequest,
@@ -131,23 +139,9 @@ def rule_recommendations(
         recommendations=[RecipeRecommendation(**r) for r in results])
 
 
-@router.post("/explore", response_model=ExploreResponse)
-async def explore_recipes_endpoint(
-    data: ExploreRequest,
-    db: Session = Depends(get_session),
-    accept_language: Optional[str] = Header(None),
-):
-    """Generate cooking ideas from inventory with structured or free-text input.
-
-    `structured.inventory_item_ids` limits the inventory sent to the AI; unknown
-    or ineligible ids return 400. DB work runs in a threadpool so the event
-    loop is not blocked while the AI call is awaited.
-
-    Output language: `locale`, else the household `default_locale`, else
-    Accept-Language, else zh-CN (#65).
-    """
+async def _prepare_explore(db: Session, data: ExploreRequest, accept_language: Optional[str]) -> dict:
+    """Inventory, locale and prompt inputs for Explore; raises 400 for bad ids."""
     from starlette.concurrency import run_in_threadpool
-    from stock_manager.api.explore_services import explore_ideas
     from stock_manager.api.localization import resolve_locale
 
     structured = data.structured.model_dump() if data.structured else None
@@ -162,11 +156,120 @@ async def explore_recipes_endpoint(
             detail=f"Inventory items not found or not usable for recipes: {bad_ids}",
         )
     locale, warnings = resolve_locale(data.locale, accept_language, setting_locale)
-
     # ExploreRequest guarantees exactly one of structured / natural_language is set.
-    return await explore_ideas(
-        inv_dicts, structured=structured, natural_language=data.natural_language,
-        locale=locale, warnings=warnings,
+    return {
+        "inventory_items": inv_dicts, "structured": structured,
+        "natural_language": data.natural_language, "locale": locale, "warnings": warnings,
+    }
+
+
+@router.post("/explore", response_model=ExploreResponse)
+async def explore_recipes_endpoint(
+    data: ExploreRequest,
+    db: Session = Depends(get_session),
+    accept_language: Optional[str] = Header(None),
+):
+    """Generate cooking ideas from inventory with structured or free-text input.
+
+    `structured.inventory_item_ids` limits the inventory sent to the AI; unknown
+    or ineligible ids return 400. DB work runs in a threadpool so the event
+    loop is not blocked while the AI call is awaited.
+
+    Output language: `locale`, else the household `default_locale`, else
+    Accept-Language, else zh-CN (#65).
+
+    The same validated ideas as `/explore/stream`, returned together.
+    """
+    from stock_manager.api.explore_services import explore_ideas
+
+    return await explore_ideas(**await _prepare_explore(db, data, accept_language))
+
+
+# Seconds between keep-alive comments on /explore/stream.
+SSE_HEARTBEAT_SECONDS = 10.0
+
+
+def _sse(event: str, data) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+async def _explore_events(events, path: str):
+    """Server-sent events for /explore/stream, with a heartbeat while the AI
+    is busy. Ideas are re-checked against ExploreIdea before they are sent."""
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def pump() -> None:
+        try:
+            async for item in events:
+                await queue.put(item)
+            await queue.put(None)
+        except Exception as exc:  # sent as an `error` event below
+            await queue.put(exc)
+
+    task = asyncio.create_task(pump())
+    try:
+        while True:
+            try:
+                item = await asyncio.wait_for(queue.get(), SSE_HEARTBEAT_SECONDS)
+            except asyncio.TimeoutError:
+                yield ": ping\n\n"
+                continue
+            if item is None:
+                return
+            if isinstance(item, Exception):
+                if isinstance(item, ai_client.AIError):
+                    ai_client.log_ai_error("POST", path, item)
+                    yield _sse("error", {"code": item.code})
+                else:
+                    logger.error("POST %s failed", path, exc_info=item)
+                    yield _sse("error", {"code": "internal_error"})
+                return
+            kind, value = item
+            if kind == "idea":
+                value = ExploreIdea.model_validate(value).model_dump(mode="json")
+            elif kind == "done":
+                value = {**value, "warnings": [AIWarning.model_validate(w).model_dump() for w in value["warnings"]]}
+            yield _sse(kind, value)
+    finally:
+        if not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        await events.aclose()
+
+
+@router.post(
+    "/explore/stream",
+    response_class=StreamingResponse,
+    responses={200: {"content": {"text/event-stream": {}},
+                     "description": "Server-sent events: idea*, then done or error"}},
+)
+async def explore_stream_endpoint(
+    request: Request,
+    data: ExploreRequest,
+    db: Session = Depends(get_session),
+    accept_language: Optional[str] = Header(None),
+):
+    """Explore, streamed: each idea is sent as soon as it has passed validation.
+
+    Events (`text/event-stream`):
+    - `idea`: one ExploreIdea, already validated (nothing unvalidated is sent);
+    - `done`: `{mode, input_mode, locale, warnings, count}`, last event on success;
+    - `error`: `{code}` (`ai_upstream_error`) when no idea could be produced.
+    A `: ping` comment is sent every 10 s while the AI is working.
+
+    Problems known before the AI is called keep their status codes: 400 for
+    bad inventory ids, 422 for a bad body, 503 when AI is not configured.
+    """
+    from stock_manager.api.explore_services import explore_stream
+
+    if not ai_client.is_available():
+        raise ai_client.AIUnavailableError("AI is not configured")
+    arguments = await _prepare_explore(db, data, accept_language)
+    return StreamingResponse(
+        _explore_events(explore_stream(**arguments), request.url.path),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 

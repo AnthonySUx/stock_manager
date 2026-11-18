@@ -9,6 +9,7 @@ dropped after each test):
 
 import json
 import os
+from typing import Optional
 
 import httpx
 import pytest
@@ -110,6 +111,20 @@ def _fresh_ai_config():
     ai_client._config = None
 
 
+def sse_body(content: str, chunk_size: int = 5, finish_reason: str = "stop",
+             usage: Optional[dict] = None, reasoning: str = "") -> bytes:
+    """A streamed chat completion, as the provider sends it."""
+    events = [{"choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}}]}]
+    for i in range(0, len(reasoning), chunk_size):
+        events.append({"choices": [{"index": 0, "delta": {"reasoning_content": reasoning[i:i + chunk_size]}}]})
+    for i in range(0, len(content), chunk_size):
+        events.append({"choices": [{"index": 0, "delta": {"content": content[i:i + chunk_size]}}]})
+    events.append({"choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}]})
+    events.append({"choices": [], "usage": usage or {"prompt_tokens": 100, "completion_tokens": 50}})
+    lines = [f"data: {json.dumps(e, ensure_ascii=False)}\n\n" for e in events] + ["data: [DONE]\n\n"]
+    return "".join(lines).encode()
+
+
 class FakeAI:
     """The AI provider as seen through httpx.MockTransport.
 
@@ -117,12 +132,17 @@ class FakeAI:
     - `responses`: optional queue, one entry per call: an httpx.Response, an
       exception (raised as a transport error), or a content string.
     - `requests`: the JSON payloads sent to the provider.
+
+    A content string is sent as server-sent events in small chunks when the
+    request asks for a stream (the default), else as one JSON body.
     """
 
     def __init__(self):
         self.reply = json.dumps({"ideas": [{"title": "番茄炒蛋", "matched_ingredients": ["番茄"]}]})
         self.responses: list = []
         self.requests: list[dict] = []
+        self.chunk_size = 5
+        self.finish_reason = "stop"
 
     @property
     def prompts(self) -> list:
@@ -134,13 +154,21 @@ class FakeAI:
         return [r["messages"][0]["content"] for r in self.requests]
 
     def handle(self, request: httpx.Request) -> httpx.Response:
-        self.requests.append(json.loads(request.content))
+        payload = json.loads(request.content)
+        self.requests.append(payload)
         item = self.responses.pop(0) if self.responses else self.reply
         if isinstance(item, Exception):
             raise item
         if isinstance(item, httpx.Response):
             return item
-        return httpx.Response(200, json={"choices": [{"message": {"content": item}}]})
+        if payload.get("stream"):
+            return httpx.Response(
+                200, headers={"content-type": "text/event-stream"},
+                content=sse_body(item, self.chunk_size, self.finish_reason),
+            )
+        return httpx.Response(200, json={"choices": [
+            {"message": {"content": item}, "finish_reason": self.finish_reason}
+        ]})
 
 
 @pytest.fixture()

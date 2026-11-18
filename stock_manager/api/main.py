@@ -1,5 +1,6 @@
 """FastAPI application entry point for Stock Manager."""
 
+import logging
 import os
 from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, Request
@@ -12,6 +13,25 @@ from stock_manager.api.auth import check_auth_config, require_api_token
 from stock_manager.api.schema_version import check_schema_current
 from stock_manager.api.db import engine
 from stock_manager.api.routers import capabilities, categories, items, recipes, restock, settings
+
+
+def configure_logging() -> None:
+    """Show the app's own log lines (AI calls, AI errors) next to uvicorn's.
+
+    uvicorn only configures its own loggers; without a handler here, INFO
+    lines from `stock_manager.*` would be dropped. Level: LOG_LEVEL (INFO).
+    """
+    app_logger = logging.getLogger("stock_manager")
+    if not app_logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(levelname)s:     %(name)s: %(message)s"))
+        app_logger.addHandler(handler)
+    level = os.getenv("LOG_LEVEL", "INFO").strip().upper()
+    value = logging.getLevelName(level)  # an int for a known level name
+    app_logger.setLevel(value if isinstance(value, int) else logging.INFO)
+
+
+configure_logging()
 
 description = """
 Stock Manager API — manage family stock, expiration reminders, and restocking lists.
@@ -78,7 +98,10 @@ app.include_router(capabilities.router, prefix="/api/capabilities", tags=["Capab
 @app.exception_handler(ai_client.AIError)
 async def ai_error_handler(request: Request, exc: ai_client.AIError):
     """AI failures: 503 `ai_unavailable` (not configured) or 502
-    `ai_upstream_error` (provider failed; the client may retry) (#66)."""
+    `ai_upstream_error` (provider failed; the client may retry) (#66).
+
+    The reason goes to the server log only; the client gets the code."""
+    ai_client.log_ai_error(request.method, request.url.path, exc)
     return JSONResponse(status_code=exc.status_code, content={"code": exc.code})
 
 

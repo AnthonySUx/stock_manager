@@ -129,7 +129,8 @@ When `needs_user_input` is `true`, the app must ask the user how much to deduct 
 
 ## Explore Recipes
 
-`POST /api/recipes/explore`
+`POST /api/recipes/explore` (all ideas at once) · `POST /api/recipes/explore/stream` (one idea
+at a time, see [Streamed Explore](#streamed-explore))
 
 Generate creative cooking ideas from your current inventory. Unlike Today Recommendations, Explore is **AI-powered** and designed for open-ended discovery.
 
@@ -236,8 +237,8 @@ backend checks), so most replies pass the first time.
 sends the model its previous reply plus a list of exactly what is wrong, for example
 `steps[2].instruction "Cut the tomatoes" is not in Simplified Chinese.` or
 `ingredients[3] "糖": quantity "1/2" with unit "茶匙" is not allowed. Use one number and one
-of: 克, 千克, …`. There is at most **one** repair round, and both rounds share the per-call time
-budget (45 s by default).
+of: 克, 千克, …`. There is at most **one** repair round. Each round has its own time limits (see
+[Timing](#timing)).
 
 | Where | When a repair round is sent | Result |
 |---|---|---|
@@ -248,7 +249,9 @@ Wrong enum values, servings or a wrong `category` alone do not trigger a repair:
 cleared (`null`) with `field_value_dropped`, which costs no extra tokens.
 
 If the repair call fails or runs out of time, the first round's result is used when it is
-usable. Only when nothing is usable: `502 ai_upstream_error`.
+usable (for Explore: the ideas already validated, including any the repair round finished before
+it failed). A first Explore round that fails partway (time limit, cut off at `max_tokens`) keeps
+the ideas it completed and is not repaired. Only when nothing is usable: `502 ai_upstream_error`.
 
 | Where | Failure (after the repair round) | Result |
 |---|---|---|
@@ -278,6 +281,58 @@ code. Identical warnings are merged. Parameter values are strings.
 | `ingredient_dropped_malformed` | `index` | Ingredient at this 1-based position in the AI reply was unusable |
 | `step_dropped_malformed` | `index` | Step at this 1-based position was unusable |
 
+### Streamed Explore
+
+`POST /api/recipes/explore/stream` takes the same body as `/explore` and returns
+`text/event-stream`. Each idea is sent **as soon as the AI has finished writing it and it has
+passed validation**; nothing unvalidated is ever sent (no partial idea, no rejected idea, no
+reasoning text).
+
+```
+event: idea
+data: {"idea_id": "3f2a9c1b", "title": "番茄炒蛋", ...}
+
+: ping
+
+event: idea
+data: {"idea_id": "8d0e4b77", "title": "红烧豆腐", ...}
+
+event: done
+data: {"mode": "ai", "input_mode": "natural_language", "locale": "zh-CN", "warnings": [], "count": 2}
+```
+
+| Event | Data | Notes |
+|---|---|---|
+| `idea` | One idea, exactly as in `ideas[]` of `/explore` | Validated; duplicate titles are not sent again |
+| `done` | `mode`, `input_mode`, `locale`, `warnings`, `count` | Last event on success. `warnings` is final only here |
+| `error` | `{"code": "ai_upstream_error"}` (or `internal_error`) | Last event when no idea could be produced |
+| `: ping` | — | A comment every 10 s while the AI works; ignore it |
+
+- Ideas from the repair round (if any) follow the first round's ideas in the same stream.
+- Errors known before the AI is called keep their status codes: `400` (bad
+  `inventory_item_ids`), `422` (bad body), `503 ai_unavailable`. After the stream has started,
+  the status is `200` and failures arrive as an `error` event.
+- If the client disconnects, the backend stops the AI call.
+- `POST /api/recipes/explore` returns the same validated ideas, all at once.
+
+Expand is not streamed to the client: a draft can only be validated as a whole (a step in the
+wrong language or a missing step makes the whole draft unusable).
+
+### Timing
+
+The backend streams every text reply from the AI provider (`AI_STREAM=true`), so a slow but
+progressing reply is not cut off. Limits **per round** (the repair round gets its own):
+
+| Limit | Default | Meaning |
+|---|---|---|
+| First data | 20 s | Something (text or reasoning) must arrive within this time |
+| Idle | 15 s | The stream may not stall longer than this |
+| Round | 50 s | One round, retry included |
+
+Worst case for a request with a repair round is about 100 s. A client calling the non-streamed
+`/explore` or `/explore/expand` should wait at least **120 s**. On `/explore/stream` the 10 s
+ping keeps an idle-based client timeout (such as `URLRequest.timeoutInterval`) from firing.
+
 ### AI errors
 
 The AI may answer Explore with `{"ideas": [...]}` or a bare list of ideas; both work. As long
@@ -291,6 +346,32 @@ Errors (Explore and Expand), with a JSON body `{"code": "..."}`:
 | `502` | `ai_upstream_error` | The provider timed out, failed, or returned nothing usable | Offer "retry" |
 
 Never a `500`.
+
+The client only gets the code. The reason is in the backend log: one line per AI call, and one
+per failed request:
+
+```
+INFO:     stock_manager.api.ai_client: AI explore/first ok model=deepseek-flash stream 12.4s first_data=1.1s reasoning=3.2s chars=1830 tokens=812/1430 finish=stop
+WARNING:  stock_manager.api.ai_client: AI explore/repair fail timeout_idle model=deepseek-flash stream 31.0s first_data=1.0s reasoning=- chars=620 tokens=?/? finish=-: AI stream stalled for 15s
+WARNING:  stock_manager.api.ai_client: POST /api/recipes/explore -> ai_upstream_error [no_usable_ideas]: AI reply contained no usable ideas: Idea #1 title "Tomato soup" is not in Simplified Chinese. | ...
+```
+
+| Reason | Meaning |
+|---|---|
+| `timeout_first_token` | Nothing arrived within the first-data limit |
+| `timeout_idle` | The stream stalled |
+| `timeout_round` | The round took longer than the round limit |
+| `timeout` | A non-streamed request timed out |
+| `connection` | The provider could not be reached (or the connection broke mid-reply) |
+| `http_error` | The provider returned an HTTP error; its message is logged (401 / 403: "check AI_API_KEY") |
+| `stream_error` | The stream carried an error or a broken chunk |
+| `no_content` | The reply was empty |
+| `truncated` | The reply hit `max_tokens` (`finish=length`) and is not complete JSON |
+| `not_json` | The reply is not JSON (its start is logged) |
+| `no_usable_ideas` | Explore: no idea passed validation (the first problems are logged) |
+| `draft_unusable` | Expand: no draft passed validation (the first problems are logged) |
+
+`LOG_LEVEL` (default `INFO`) sets the level of the backend's own log lines.
 
 ### Expand Idea to Draft
 
@@ -339,9 +420,10 @@ Currently AI is used **only** for Explore Recipes. Today Recommendations use loc
 - `POST /api/recipes/ai/today` was removed in #66 (deprecated since PR #14). Use
   `GET /api/recipes/recommendations`.
 - All AI calls go through one client (`stock_manager/api/ai_client.py`). It asks for JSON output
-  (`response_format: json_object`) and also accepts JSON in a code fence.
+  (`response_format: json_object`), also accepts JSON in a code fence, streams text replies, and
+  logs every call (see [AI errors](#ai-errors)).
 - AI configuration uses the following environment variables. They are read once at startup:
-  restart the backend after changing them. An invalid number is logged and turns AI off.
+  restart the backend after changing them. An invalid value is logged and turns AI off.
 
 | Variable | Default | Description |
 |---|---|---|
@@ -350,8 +432,12 @@ Currently AI is used **only** for Explore Recipes. Today Recommendations use loc
 | `AI_API_KEY` | — | API key |
 | `AI_MODEL` | `deepseek-flash` | Model name (`deepseek-chat` is retired) |
 | `AI_TEMPERATURE` | `0.2` | Response temperature |
-| `AI_TIMEOUT_SECONDS` | `30` | Timeout per text request |
-| `AI_IMAGE_TIMEOUT_SECONDS` | `60` | Timeout per image request |
-| `AI_TOTAL_TIMEOUT_SECONDS` | `45` | Upper bound for one text call, retry included |
+| `AI_STREAM` | `true` | Stream text replies from the provider (`false`: one JSON body per request) |
+| `AI_MAX_TOKENS` | `8192` | `max_tokens` per request (reasoning counts toward it on thinking models) |
+| `AI_FIRST_TOKEN_TIMEOUT_SECONDS` | `20` | Streamed: first data must arrive within this time |
+| `AI_IDLE_TIMEOUT_SECONDS` | `15` | Streamed: longest allowed gap between chunks |
+| `AI_TIMEOUT_SECONDS` | `30` | Timeout per non-streamed text request (`AI_STREAM=false`) |
+| `AI_IMAGE_TIMEOUT_SECONDS` | `60` | Timeout per image request (images are not streamed) |
+| `AI_TOTAL_TIMEOUT_SECONDS` | `50` | Upper bound for one text round, retry included; the repair round gets its own |
 | `AI_IMAGE_TOTAL_TIMEOUT_SECONDS` | `75` | Upper bound for one image call, retry included |
-| `AI_MAX_RETRIES` | `1` | Retries after a connection error, `429` or `5xx`. Timeouts are not retried |
+| `AI_MAX_RETRIES` | `1` | Retries after a connection error, `429` or `5xx`, before any content arrived. Timeouts are not retried |

@@ -29,7 +29,9 @@ class TestConfig:
         assert config == AIConfig()
         assert (config.model, config.base_url) == ("deepseek-flash", "https://api.deepseek.com")
         assert (config.text_timeout, config.image_timeout) == (30, 60)
-        assert (config.text_total_timeout, config.image_total_timeout) == (45, 75)
+        assert (config.text_total_timeout, config.image_total_timeout) == (50, 75)
+        assert (config.first_token_timeout, config.idle_timeout) == (20, 15)
+        assert (config.stream, config.max_tokens) == (True, 8192)
         assert config.max_retries == 1
         assert not config.available
 
@@ -39,17 +41,22 @@ class TestConfig:
             "AI_BASE_URL": "http://x", "AI_TEMPERATURE": "0.5", "AI_TIMEOUT_SECONDS": "9",
             "AI_IMAGE_TIMEOUT_SECONDS": "20", "AI_TOTAL_TIMEOUT_SECONDS": "12",
             "AI_IMAGE_TOTAL_TIMEOUT_SECONDS": "30", "AI_MAX_RETRIES": "0",
+            "AI_STREAM": " FALSE ", "AI_MAX_TOKENS": "1000", "AI_FIRST_TOKEN_TIMEOUT_SECONDS": "7",
+            "AI_IDLE_TIMEOUT_SECONDS": "3",
         })
         assert config == AIConfig(
             enabled=True, api_key="k", model="m1", base_url="http://x", temperature=0.5,
             text_timeout=9, image_timeout=20, text_total_timeout=12,
-            image_total_timeout=30, max_retries=0,
+            image_total_timeout=30, max_retries=0, stream=False, max_tokens=1000,
+            first_token_timeout=7, idle_timeout=3,
         )
         assert config.available
 
     @pytest.mark.parametrize("var,value", [
         ("AI_TIMEOUT_SECONDS", "abc"), ("AI_TIMEOUT_SECONDS", "0"), ("AI_TEMPERATURE", "-1"),
         ("AI_MAX_RETRIES", "1.5"), ("AI_MAX_RETRIES", "-1"), ("AI_IMAGE_TOTAL_TIMEOUT_SECONDS", "x"),
+        ("AI_MAX_TOKENS", "0"), ("AI_IDLE_TIMEOUT_SECONDS", "0.5"), ("AI_FIRST_TOKEN_TIMEOUT_SECONDS", "x"),
+        ("AI_STREAM", "yes"),
     ])
     def test_invalid_value_disables_ai_and_logs(self, caplog, var, value):
         with caplog.at_level(logging.ERROR, logger="stock_manager.api.ai_client"):
@@ -204,9 +211,13 @@ class TestChatJson:
 
         monkeypatch.setattr(ai_client.httpx, "AsyncClient", spy)
         fake_ai.reply = "{}"
+        _chat()  # streamed: connect 10 s, headers within the first-token limit
+        _chat(images=[{"data": b"img", "mime": "image/png"}])  # images are not streamed
+        monkeypatch.setenv("AI_STREAM", "false")
+        ai_client.reload_config()
         _chat()
-        _chat(images=[{"data": b"img", "mime": "image/png"}])
-        assert seen == [30, 60]
+        assert seen == [httpx.Timeout(10, read=20), httpx.Timeout(60), httpx.Timeout(30)]
+        assert [r.get("stream") for r in fake_ai.requests] == [True, None, None]
 
     def test_images_are_sent_as_data_urls(self, fake_ai):
         fake_ai.reply = "{}"
@@ -254,3 +265,64 @@ def test_unused_ai_table_is_not_in_the_models():
     from stock_manager.api.models import Base
 
     assert "ai_recipe_recommendations" not in Base.metadata.tables
+
+
+# ─── Diagnostics: why a request ended in 502 ─────────────────────
+
+
+class TestErrorDetails:
+    """The reason for a 502 reaches the server log, never the client."""
+
+    @pytest.mark.parametrize("response,expected", [
+        (httpx.Response(400, json={"error": {"message": "Model Not Exist", "type": "invalid_request_error"}}),
+         "AI returned HTTP 400: Model Not Exist"),
+        (httpx.Response(404, json={"error": "no such route"}), "AI returned HTTP 404: no such route"),
+        (httpx.Response(422, text="  bad\n  payload  "), "AI returned HTTP 422: bad payload"),
+        (httpx.Response(400, json={"error": {"code": 1}}), 'AI returned HTTP 400: {"error":{"code":1}}'),
+        (httpx.Response(400), "AI returned HTTP 400"),
+        (httpx.Response(402, text="x" * 300), "AI returned HTTP 402: " + "x" * 200),
+    ])
+    def test_provider_message_is_in_the_error(self, fake_ai, response, expected):
+        fake_ai.responses = [response]
+        with pytest.raises(AIUpstreamError) as info:
+            _chat()
+        assert str(info.value) == expected
+
+    @pytest.mark.parametrize("status", [401, 403])
+    def test_auth_error_body_is_not_logged(self, fake_ai, status):
+        """The provider may echo part of the key in a 401 body."""
+        fake_ai.responses = [httpx.Response(status, json={"error": {"message": "key sk-secret is invalid"}})]
+        with pytest.raises(AIUpstreamError) as info:
+            _chat()
+        assert str(info.value) == f"AI returned HTTP {status} (check AI_API_KEY)"
+        assert "sk-secret" not in str(info.value)
+
+    def test_handler_logs_the_reason_and_returns_only_the_code(self, client, fake_ai, caplog):
+        fake_ai.responses = [httpx.Response(400, json={"error": {"message": "Model Not Exist"}})]
+        with caplog.at_level(logging.WARNING, logger="stock_manager.api.main"):
+            response = client.post("/api/recipes/explore", json={"mode": "natural_language", "natural_language": "晚饭"})
+        assert response.status_code == 502
+        assert response.json() == {"code": "ai_upstream_error"}
+        assert "POST /api/recipes/explore -> ai_upstream_error [http_error]: AI returned HTTP 400: Model Not Exist" in caplog.text
+
+    def test_no_usable_ideas_logs_the_problems(self, client, fake_ai, caplog):
+        fake_ai.reply = '{"ideas": [{"description": "x"}]}'
+        with caplog.at_level(logging.WARNING, logger="stock_manager.api.main"):
+            response = client.post("/api/recipes/explore", json={"mode": "natural_language", "natural_language": "晚饭"})
+        assert response.status_code == 502
+        assert "AI reply contained no usable ideas: Idea #1: missing title." in caplog.text
+
+    def test_unusable_draft_logs_the_problems(self, client, fake_ai, caplog):
+        fake_ai.reply = '{"title": "番茄炒蛋", "steps": []}'
+        with caplog.at_level(logging.WARNING, logger="stock_manager.api.main"):
+            response = client.post("/api/recipes/explore/expand", json={"idea": {"title": "番茄炒蛋"}})
+        assert response.status_code == 502
+        assert "AI draft was unusable: steps is empty" in caplog.text
+
+
+def test_problem_summary_is_capped():
+    from stock_manager.api.explore_services import _summary
+
+    assert _summary([]) == "no details"
+    assert _summary(["a", "b"]) == "a | b"
+    assert _summary([str(i) for i in range(8)]) == "0 | 1 | 2 | 3 | 4 | (+3 more)"

@@ -8,6 +8,7 @@ import json
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import httpx
 import pytest
 
 from stock_manager.api.ai_output import Inventory, clean_quantity, in_locale
@@ -503,26 +504,15 @@ class TestExpand:
         ingredients = response.json()["recipe_draft"]["ingredients"]
         assert [(i["quantity"], i["unit"]) for i in ingredients] == [("to taste", None), ("3", "pcs")]
 
-    def test_retries_share_the_time_budget(self, client, fake_ai, monkeypatch):
-        from stock_manager.api import explore_services
-
-        monkeypatch.setenv("AI_TOTAL_TIMEOUT_SECONDS", "1")
-        from stock_manager.api import ai_client
-        ai_client.reload_config()
-        calls = []
-
-        replies = [{"title": "Tomato Egg", "steps": ["Cook"]}, {"title": "番茄炒蛋", "steps": ["炒"]}]
-
-        async def slow_reply(system, user, **kwargs):
-            calls.append(1)
-            await asyncio.sleep(0.7)
-            return replies[len(calls) - 1]
-
-        monkeypatch.setattr(explore_services, "chat_json", slow_reply)
+    def test_repair_has_its_own_time_budget(self, client, fake_ai, monkeypatch):
+        """Each round may use the whole AI_TOTAL_TIMEOUT_SECONDS: two 0.7 s
+        rounds succeed under a 1 s limit."""
+        _slow_provider(monkeypatch, [
+            {"title": "Tomato Egg", "steps": ["Cook"]}, {"title": "番茄炒蛋", "steps": ["炒"]},
+        ])
         response = _expand(client)
-        # The good second reply would arrive at 1.4 s, after the 1 s budget.
-        assert response.status_code == 502
-        assert len(calls) == 2
+        assert response.status_code == 200
+        assert response.json()["recipe_draft"]["title"] == "番茄炒蛋"
 
     def test_ai_off_is_503(self, client):
         assert _expand(client).status_code == 503
@@ -692,24 +682,30 @@ class TestExploreRepair:
         assert _explore(client).status_code == 200
         assert len(fake_ai.requests) == 1
 
-    def test_repair_shares_the_time_budget(self, client, fake_ai, monkeypatch):
-        from stock_manager.api import ai_client, explore_services
-
-        monkeypatch.setenv("AI_TOTAL_TIMEOUT_SECONDS", "1")
-        ai_client.reload_config()
-        calls = []
-        replies = [{"ideas": [{"title": "甲"}, {"title": "Egg"}]}, {"ideas": [{"title": "乙"}]}]
-
-        async def slow_reply(system, user, **kwargs):
-            calls.append(1)
-            await asyncio.sleep(0.7)
-            return replies[len(calls) - 1]
-
-        monkeypatch.setattr(explore_services, "chat_json", slow_reply)
+    def test_repair_has_its_own_time_budget(self, client, fake_ai, monkeypatch):
+        _slow_provider(monkeypatch, [
+            {"ideas": [{"title": "甲"}, {"title": "Egg"}]}, {"ideas": [{"title": "乙"}]},
+        ])
         response = _explore(client)
         assert response.status_code == 200
-        assert [i["title"] for i in response.json()["ideas"]] == ["甲"]  # the repair was cut off
-        assert len(calls) == 2
+        assert [i["title"] for i in response.json()["ideas"]] == ["甲", "乙"]
+
+
+def _slow_provider(monkeypatch, replies, delay=0.7, total="1"):
+    """A provider that takes `delay` seconds per reply, under a `total` limit per round."""
+    from stock_manager.api import ai_client
+    from tests.conftest import sse_body
+
+    monkeypatch.setenv("AI_TOTAL_TIMEOUT_SECONDS", total)
+    ai_client.reload_config()
+    queue = list(replies)
+
+    async def handler(request):
+        await asyncio.sleep(delay)
+        return httpx.Response(200, headers={"content-type": "text/event-stream"},
+                              content=sse_body(json.dumps(queue.pop(0), ensure_ascii=False)))
+
+    monkeypatch.setattr(ai_client, "_transport", httpx.MockTransport(handler))
 
 
 @pytest.mark.parametrize("locale,rule", [
