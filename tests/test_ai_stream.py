@@ -160,11 +160,23 @@ class TestFailureReasons:
         assert _chat() == {}
 
     def test_slow_but_steady_stream_is_fine_until_the_round_limit(self, monkeypatch, caplog):
-        steady = [p for _ in range(40) for p in (_content(" "), 0.02)]
-        _use(monkeypatch, _streaming(_content("{}"), *steady, DONE), idle_timeout=0.5)
-        assert _chat() == {}  # 0.8 s in all, but never idle for 0.5 s
+        steady = [p for _ in range(60) for p in (_content(" "), 0.02)]
+        _use(monkeypatch, _streaming(_content("{}"), *steady, DONE), idle_timeout=0.6, text_total_timeout=5)
+        assert _chat() == {}  # 1.2 s in all, but never idle for 0.6 s
         _fails(monkeypatch, caplog, _streaming(_content("{}"), *steady, DONE), "timeout_round",
-               idle_timeout=0.5, text_total_timeout=0.3)
+               idle_timeout=2, text_total_timeout=0.3)
+
+    def test_round_limit_holds_without_the_outer_wait_for(self, monkeypatch):
+        """The stream reader enforces the round limit itself (a cancellation
+        from the outer wait_for can be lost on Python 3.11)."""
+        steady = [p for _ in range(60) for p in (_content(" "), 0.02)]
+        _use(monkeypatch, _streaming(_content("{}"), *steady, DONE), idle_timeout=2)
+        config = ai_client.get_config()
+        stats, reply = ai_client.CallStats(), ai_client._Reply()
+        with pytest.raises(AIUpstreamError) as info:
+            asyncio.run(ai_client._request(config, {"stream": True}, True, 30, 0.3, stats, reply, None))
+        assert info.value.reason == "timeout_round"
+        assert 0.25 < stats.now() < 1.0
 
     def test_truncated_reply(self, monkeypatch, caplog):
         error = _fails(monkeypatch, caplog, _streaming(_content('{"ideas": [{"ti'), _finish("length"), DONE),

@@ -150,6 +150,7 @@ async def _prepare_explore(db: Session, data: ExploreRequest, accept_language: O
     inv_dicts, bad_ids, setting_locale = await run_in_threadpool(
         _load_explore_inventory, db, selected_ids
     )
+    recipes = await run_in_threadpool(_load_recipe_titles, db)
     if bad_ids:
         raise HTTPException(
             status_code=400,
@@ -160,7 +161,16 @@ async def _prepare_explore(db: Session, data: ExploreRequest, accept_language: O
     return {
         "inventory_items": inv_dicts, "structured": structured,
         "natural_language": data.natural_language, "locale": locale, "warnings": warnings,
+        "recipes": recipes,
     }
+
+
+def _load_recipe_titles(db: Session) -> list[tuple[int, str]]:
+    """(id, title) of every local recipe, for linking Explore ideas to
+    existing recipes (#66 part 6)."""
+    from stock_manager.api.models import Recipe
+
+    return [(row.id, row.title) for row in db.query(Recipe.id, Recipe.title)]
 
 
 @router.post("/explore", response_model=ExploreResponse)

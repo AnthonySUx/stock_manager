@@ -25,8 +25,10 @@ from stock_manager.api.ai_output import (
     dedupe_warnings,
     needs_repair,
 )
+from stock_manager.api import recipe_services
 from stock_manager.api.json_stream import ArrayItemStream
 from stock_manager.api.localization import LANGUAGE_NAMES
+from stock_manager.api.text_search import TitleMatcher
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +181,29 @@ def _is_drop_warning(w: dict) -> bool:
     return w["code"] in ("idea_dropped_malformed", "idea_dropped_wrong_language")
 
 
+class _Seen:
+    """Ideas already sent: a repeated title, or a second idea for the same
+    local recipe (番茄炒蛋 and 西红柿炒鸡蛋), is not sent again."""
+
+    def __init__(self, matcher: TitleMatcher):
+        self.matcher = matcher
+        self.titles: set[str] = set()
+        self.recipe_ids: set[int] = set()
+
+    def admit(self, idea: dict) -> Optional[dict]:
+        if idea["title"] in self.titles:
+            return None
+        match = self.matcher.match(idea["title"])
+        if match is not None:
+            if match.recipe_id in self.recipe_ids:
+                return None
+            self.recipe_ids.add(match.recipe_id)
+            idea.update(source_type="existing_recipe", recipe_id=match.recipe_id, can_expand_to_recipe=False)
+        self.titles.add(idea["title"])
+        idea["idea_id"] = str(uuid4())[:8]
+        return idea
+
+
 @dataclass
 class _Round:
     """One AI call of Explore: what it said and what was wrong with it."""
@@ -196,7 +221,7 @@ async def _stream_round(
     state: _Round,
     locale: str,
     inventory: Inventory,
-    titles: set[str],
+    seen: "_Seen",
 ) -> AsyncIterator[dict]:
     """Yield each idea of one AI reply as soon as it is complete and valid.
 
@@ -226,11 +251,9 @@ async def _stream_round(
         nonlocal position
         position += 1
         idea = clean_idea(raw, locale, inventory, state.warnings, state.problems, position)
-        if idea is None or idea["title"] in titles:
+        if idea is None:
             return None
-        titles.add(idea["title"])
-        idea["idea_id"] = str(uuid4())[:8]
-        return idea
+        return seen.admit(idea)
 
     task = asyncio.create_task(call())
     try:
@@ -274,6 +297,7 @@ async def explore_stream(
     natural_language: Optional[str] = None,
     locale: str = "zh-CN",
     warnings: Optional[list[dict]] = None,
+    recipes: Optional[list[tuple[int, str]]] = None,
 ) -> AsyncIterator[tuple[str, dict]]:
     """Cooking ideas from the AI, one at a time, each already validated.
 
@@ -284,17 +308,22 @@ async def explore_stream(
 
     When fewer than MIN_IDEAS ideas pass, the rejected ideas and what is wrong
     with them are sent back once for repair (#65); the repair round has its
-    own time limits. A failed repair keeps the ideas already sent. A first
+    own time limits.
+
+    `recipes` are the local recipes as (id, title). An idea whose title
+    refers to one of them is linked to it (#66 part 6): `recipe_id` is set,
+    `source_type` is "existing_recipe" and `can_expand_to_recipe` is False,
+    so the app opens the curated recipe instead of asking for an AI draft. A failed repair keeps the ideas already sent. A first
     round that fails partway keeps its valid ideas and is not repaired.
     """
     input_mode = "structured" if structured else "natural_language"
     system_prompt, user_prompt = _build_explore_prompt(inventory_items, structured, natural_language, locale)
     inventory = Inventory(inventory_items)
-    titles: set[str] = set()
+    seen = _Seen(TitleMatcher(recipes or [], recipe_services.SYNONYM_MAP))
     count = 0
 
     first = _Round("explore/first")
-    async for idea in _stream_round(system_prompt, user_prompt, None, first, locale, inventory, titles):
+    async for idea in _stream_round(system_prompt, user_prompt, None, first, locale, inventory, seen):
         count += 1
         yield "idea", idea
     idea_warnings = first.warnings
@@ -308,7 +337,7 @@ async def explore_stream(
         )
         repair = _Round("explore/repair")
         followup = _repair_messages(first.text, feedback)
-        async for idea in _stream_round(system_prompt, user_prompt, followup, repair, locale, inventory, titles):
+        async for idea in _stream_round(system_prompt, user_prompt, followup, repair, locale, inventory, seen):
             count += 1
             yield "idea", idea
         last = repair
@@ -339,12 +368,15 @@ async def explore_ideas(
     natural_language: Optional[str] = None,
     locale: str = "zh-CN",
     warnings: Optional[list[dict]] = None,
+    recipes: Optional[list[tuple[int, str]]] = None,
 ) -> dict:
     """All ideas at once (POST /api/recipes/explore): the same validated ideas
     as explore_stream, collected. Raises AIUnavailableError / AIUpstreamError."""
     ideas: list[dict] = []
     meta: dict = {}
-    async for kind, value in explore_stream(inventory_items, structured, natural_language, locale, warnings):
+    async for kind, value in explore_stream(
+        inventory_items, structured, natural_language, locale, warnings, recipes
+    ):
         if kind == "idea":
             ideas.append(value)
         else:

@@ -162,6 +162,36 @@ Empty or omitted → all eligible inventory.
 
 Both Explore and Expand accept an optional `locale` field (see below).
 
+### Ideas that are local recipes
+
+Each idea title is compared with the titles of all local recipes (HowToCook, user recipes and
+forks). When the idea is a dish the library already has, the idea is linked to it:
+
+| Field | Not linked | Linked |
+|---|---|---|
+| `source_type` | `ai_idea` | `existing_recipe` |
+| `recipe_id` | `null` | the local recipe |
+| `can_expand_to_recipe` | `true` | `false`: open `GET /api/recipes/{recipe_id}` instead of Expand |
+
+Matching (`TitleMatcher` in `text_search.py`):
+
+1. Both titles are normalized: the HowToCook suffix "的做法", bracketed notes, spaces and
+   punctuation are removed, letters are lower-cased, and Chinese ingredient synonyms of two or
+   more characters are mapped to one name (西红柿 → 番茄, 包菜 → 卷心菜), plus 鸡蛋 → 蛋.
+2. A title matches a recipe when it is
+   - the same after normalization: 番茄炒蛋 = 西红柿炒鸡蛋;
+   - very similar, character-bigram Dice ≥ 0.8: 番茄鸡蛋面 → 西红柿鸡蛋挂面;
+   - contained in it or containing it, the shorter at least 3 Chinese characters and Dice
+     ≥ 0.5: 红烧肉 → 简易红烧肉, 黄焖鸡米饭 → 黄焖鸡, 蛋花汤 → 紫菜蛋花汤.
+3. The best score wins; on a tie, the older recipe.
+
+The thresholds were tuned on the 373 HowToCook titles. They keep different dishes apart:
+青椒炒肉 is not 辣椒炒肉, 黄瓜炒蛋 is not 黄瓜炒肉, 炒饭 (2 characters) is not 蛋炒饭. The
+"contains" rule is not used for Latin text.
+
+A second idea for a recipe that is already linked (番茄炒蛋 and 西红柿炒鸡蛋 in one reply) is not
+sent, like a repeated title. Linking works the same on `/explore` and `/explore/stream`.
+
 ### Language of AI output
 
 AI text is generated in one locale: `zh-CN`, `en` or `ja` (#65). It is chosen in this order:
@@ -207,8 +237,8 @@ value becomes `null` and adds `field_value_dropped`. Case and `-` / space are to
 | `difficulty` (drafts) | `easy`, `medium`, `hard` |
 | `category` (drafts) | the recipe categories (`meat_dish`, …) |
 
-`source_type` / `recipe_id` from the model are always discarded (`ai_idea`, `null`); only the
-backend may link an idea to a local recipe (#66 part 6).
+`source_type` / `recipe_id` from the model are always discarded; only the backend links an
+idea to a local recipe (see [Ideas that are local recipes](#ideas-that-are-local-recipes)).
 
 **Ingredient lists in ideas** are recomputed from the inventory that was sent, through the
 synonym table. A name the model lists that matches stock goes to `matched_ingredients` under
