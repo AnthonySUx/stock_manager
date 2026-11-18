@@ -6,6 +6,7 @@ from typing import Optional
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
+from stock_manager.api.localization import today as household_today
 from stock_manager.api.models import Item, RestockItem, Setting, utcnow
 
 
@@ -56,7 +57,7 @@ def refresh_item_statuses(db: Session) -> int:
     Commits only when a status actually changed, so a plain read does not
     write to the database (#48).
     """
-    today = date.today()
+    today = household_today(db)
     warning_days = _get_expiration_warning_days(db)
     changed = 0
 
@@ -88,7 +89,7 @@ def calculate_item_status(
         quantity_value,
         current_expiration_date,
         warning_days,
-        date.today(),
+        household_today(db),
     )
 
 
@@ -212,7 +213,7 @@ def consume_item(
     new_quantity = max(0.0, original_quantity - quantity)
     item.quantity_value = new_quantity
 
-    today = date.today()
+    today = household_today(db)
     warning_days = _get_expiration_warning_days(db)
     new_status = _calculate_status(
         new_quantity,
@@ -462,6 +463,11 @@ def update_settings(db: Session, settings: dict[str, str]) -> dict[str, str]:
         if value is None:
             continue
         existing = db.query(Setting).filter(Setting.key == key).first()
+        if value == "":
+            # An empty value clears an optional setting (#65).
+            if existing:
+                db.delete(existing)
+            continue
         if existing:
             existing.value = str(value)
             existing.updated_at = now

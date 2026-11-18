@@ -12,6 +12,29 @@ RecipeCategory = Literal[
 ]
 
 
+# Machine fields in AI output are fixed English values; the app translates
+# them for display (#65).
+CookingMethod = Literal[
+    "stir_fry", "steam", "boil", "braise", "stew", "pan_fry", "deep_fry",
+    "roast", "bake", "grill", "cold_mix", "raw", "other",
+]
+CuisineGroup = Literal["chinese", "japanese", "korean", "western", "southeast_asian", "other"]
+Difficulty = Literal["easy", "medium", "hard"]
+
+
+class AIWarning(BaseModel):
+    """A warning from an AI endpoint: a stable code plus parameters (#65).
+
+    Codes and params: locale_fallback {requested}, draft_ai_generated,
+    idea_dropped_malformed, idea_dropped_wrong_language {title},
+    field_value_dropped {field, value}, quantity_dropped {ingredient},
+    ingredient_dropped_malformed {index}, step_dropped_malformed {index}
+    (index = 1-based position in the AI reply).
+    """
+    code: str
+    params: dict[str, str] = {}
+
+
 class IngredientSchema(BaseModel):
     ingredient_name: str
     normalized_name: Optional[str] = None
@@ -209,6 +232,9 @@ class ExploreRequest(BaseModel):
     mode: str = Field(..., pattern="^(structured|natural_language)$")
     structured: Optional[ExploreStructuredPreferences] = None
     natural_language: Optional[str] = None
+    # Output language (zh-CN, en, ja). Omitted: household setting, then
+    # Accept-Language, then zh-CN (#65).
+    locale: Optional[str] = Field(None, max_length=35)
 
     @model_validator(mode="after")
     def check_mode_matches_payload(self):
@@ -240,9 +266,9 @@ class ExploreIdea(BaseModel):
     missing_ingredients: list[str] = []
     flavors: list[str] = []
     textures: list[str] = []
-    cuisine_group: Optional[str] = None
+    cuisine_group: Optional[CuisineGroup] = None
     cuisine: Optional[str] = None
-    cooking_method: Optional[str] = None
+    cooking_method: Optional[CookingMethod] = None
     estimated_time_minutes: Optional[int] = None
     reason: Optional[str] = None
     can_expand_to_recipe: bool = True
@@ -252,29 +278,40 @@ class ExploreResponse(BaseModel):
     """Response from Explore Recipes."""
     mode: str  # ai
     input_mode: str  # structured | natural_language
+    locale: str  # the language the AI text was generated in (#65)
     ideas: list[ExploreIdea] = []
-    warnings: list[str] = []
+    warnings: list[AIWarning] = []
 
 
 class ExpandRequest(BaseModel):
     """Request body for expanding an idea into a recipe draft."""
     idea: ExploreIdea
+    # Output language (zh-CN, en, ja). Omitted: household setting, then
+    # Accept-Language, then zh-CN (#65).
+    locale: Optional[str] = Field(None, max_length=35)
 
 
-class ExpandIngredient(BaseModel):
-    ingredient_name: str
-    quantity: Optional[str] = None
-    unit: Optional[str] = None
-    is_optional: bool = False
-    is_seasoning: bool = False
+class RecipeDraft(BaseModel):
+    """An AI recipe draft, not saved (#65, #66 part 4).
 
-
-class ExpandStep(BaseModel):
-    step_number: int
-    instruction: str
+    Same fields as RecipeCreate except that `category` may be null: the user
+    picks one before saving. Missing values stay null; there are no
+    invented defaults.
+    """
+    title: str
+    category: Optional[RecipeCategory] = None
+    description: Optional[str] = None
+    difficulty: Optional[Difficulty] = None
+    servings: Optional[str] = None
+    cook_time_minutes: Optional[int] = None
+    raw_markdown: Optional[str] = None
+    ingredients: list[IngredientSchema] = []
+    steps: list[StepSchema] = []
 
 
 class ExpandResponse(BaseModel):
     """Response from expanding an idea into a recipe draft."""
-    recipe_draft: dict  # RecipeCreate-compatible dict, not saved
+    recipe_draft: RecipeDraft
+    locale: str
+    warnings: list[AIWarning] = []
 

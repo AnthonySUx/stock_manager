@@ -14,7 +14,9 @@ from tests.helpers import make_item_create_payload
 
 class TestSettings:
     def test_response_has_no_default_database(self, client):
-        assert client.get("/api/settings").json() == {"expiration_reminder_days": "2"}
+        assert client.get("/api/settings").json() == {
+            "expiration_reminder_days": "2", "default_locale": None, "default_timezone": None,
+        }
 
     def test_old_default_database_row_is_ignored(self, client, db_session):
         db_session.add(Setting(key="default_database", value="stock.db"))
@@ -26,7 +28,8 @@ class TestSettings:
             "/api/settings", json={"default_database": "x.db", "expiration_reminder_days": "4"}
         )
         assert response.status_code == 200
-        assert response.json() == {"expiration_reminder_days": "4"}
+        assert response.json()["expiration_reminder_days"] == "4"
+        assert "default_database" not in response.json()
         assert db_session.query(Setting).filter_by(key="default_database").count() == 0
 
     @pytest.mark.parametrize("value,stored", [("5", "5"), (7, "7"), (" 3 ", "3"), ("0", "0"), ("365", "365"), ("007", "7")])

@@ -251,14 +251,15 @@ class TestRecipeCategoryRequired:
         assert fork.json()["category"] == "meat_dish"
 
     def test_expand_draft_keeps_valid_category_only(self, client, fake_ai):
+        steps = [{"step_number": 1, "instruction": "烤二十分钟"}]
         fake_ai.responses = [
-            json.dumps({"title": "蛋挞", "category": "dessert"}),
-            json.dumps({"title": "蛋挞", "category": "甜品"}),
+            json.dumps({"title": "蛋挞", "category": "dessert", "steps": steps}),
+            json.dumps({"title": "蛋挞", "category": "甜品", "steps": steps}),
         ]
         idea = {"idea": {"title": "蛋挞"}}
         first = client.post("/api/recipes/explore/expand", json=idea).json()["recipe_draft"]
         second = client.post("/api/recipes/explore/expand", json=idea).json()["recipe_draft"]
-        assert all("Set category to exactly one of" in p for p in fake_ai.system_prompts)
+        assert all("category must be exactly one of" in p for p in fake_ai.system_prompts)
         assert first["category"] == "dessert"
         assert second["category"] is None
 

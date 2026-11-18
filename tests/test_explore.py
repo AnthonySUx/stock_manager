@@ -260,7 +260,8 @@ class TestAIErrors:
 
     def test_expand_success_still_returns_a_draft(self, client, fake_ai):
         fake_ai.reply = json.dumps({"title": "番茄炒蛋", "category": "vegetable_dish",
-                                    "ingredients": [{"ingredient_name": "番茄", "quantity": "2"}]})
+                                    "ingredients": [{"ingredient_name": "番茄", "quantity": "2"}],
+                                    "steps": ["番茄切块，和鸡蛋一起炒"]})
         response = client.post("/api/recipes/explore/expand", json={"idea": IDEA})
         assert response.status_code == 200
         draft = response.json()["recipe_draft"]

@@ -89,7 +89,7 @@ Ingredients matched from `conditional` categories (drinks, snacks, frozen, canne
 
 To handle cases where inventory names don't exactly match recipe ingredient names (e.g., `西红柿` vs `番茄`, `potato` vs `土豆`, `じゃがいも`), the app uses a local synonym table (`DEFAULT_SYNONYM_MAP`).
 
-This is **deterministic**, not AI-based. It covers common names in Chinese, English, and Japanese while being conservative to avoid over-normalization.
+This is **deterministic**, not AI-based. It covers common names in Chinese, English, and Japanese while being conservative to avoid over-normalization (for example, 人参 is not a carrot: in Chinese it means ginseng). Matching works across languages: stock `tomato` matches recipe `番茄`.
 
 ### Recommendation History
 
@@ -159,10 +159,129 @@ Empty or omitted → all eligible inventory.
 {"mode": "structured", "structured": {"inventory_item_ids": [12, 15], "flavors": ["spicy"]}}
 ```
 
-### AI response handling and errors
+Both Explore and Expand accept an optional `locale` field (see below).
 
-The AI may answer with `{"ideas": [...]}` or a bare list of ideas; both work. Ideas without a
-title or with wrong field types are dropped; as long as one idea is usable the response is `200`.
+### Language of AI output
+
+AI text is generated in one locale: `zh-CN`, `en` or `ja` (#65). It is chosen in this order:
+
+1. `locale` in the request body;
+2. the household setting `default_locale` (`PATCH /api/settings`);
+3. the `Accept-Language` header;
+4. `zh-CN`.
+
+The setting comes before the header because iOS sends the device language with every request;
+otherwise the household setting could never apply. An unsupported `locale` in the body falls
+back and adds the warning `locale_fallback`; an unsupported header is ignored silently. The
+response carries the locale that was used (`"locale": "zh-CN"`).
+
+Recipe content from HowToCook is Chinese and is not translated; only AI text follows the locale.
+
+### AI output validation
+
+The prompt states the rules, and the backend checks every reply. Nothing from the model reaches
+the app unchecked.
+
+**Language.** Titles, descriptions, reasons, steps, ingredient names, flavors, textures and
+cuisine must be in the locale. Inventory names are exempt: they are copied verbatim, in any
+language.
+
+| Locale | Rule |
+|---|---|
+| `zh-CN` | Contains Chinese characters; no Japanese kana; Latin words only for units (`g`, `ml`, `°C`) |
+| `ja` | Contains Japanese characters; Latin words only for units |
+| `en` | No Chinese or Japanese characters |
+
+Text with no letters at all (for example `2`) passes. `zh-CN` and `ja` are not told apart
+beyond the kana rule, so a kanji-only Japanese title passes as Chinese.
+
+**Machine fields** are fixed English values; the app translates them for display. An unknown
+value becomes `null` and adds `field_value_dropped`. Case and `-` / space are tolerated
+(`Stir-Fry` → `stir_fry`).
+
+| Field | Values |
+|---|---|
+| `cooking_method` (ideas) | `stir_fry`, `steam`, `boil`, `braise`, `stew`, `pan_fry`, `deep_fry`, `roast`, `bake`, `grill`, `cold_mix`, `raw`, `other` |
+| `cuisine_group` (ideas) | `chinese`, `japanese`, `korean`, `western`, `southeast_asian`, `other` |
+| `difficulty` (drafts) | `easy`, `medium`, `hard` |
+| `category` (drafts) | the recipe categories (`meat_dish`, …) |
+
+`source_type` / `recipe_id` from the model are always discarded (`ai_idea`, `null`); only the
+backend may link an idea to a local recipe (#66 part 6).
+
+**Ingredient lists in ideas** are recomputed from the inventory that was sent, through the
+synonym table. A name the model lists that matches stock goes to `matched_ingredients` under
+the stock item's exact name (and to `expiring_ingredients` when that item is expiring soon);
+any other name goes to `missing_ingredients`.
+
+**Quantities and units in drafts.** `quantity` is a positive number (`"2"`, `"0.5"`) or a
+"to taste" word; ranges and fractions (`2-3`, `1/2`) are rejected. `unit` must be one of the
+locale's units, or the unit of the matching stock item. Spelling variants are mapped to the
+locale's spelling (`g` → `克`, `大勺` → `汤匙`, `pieces` → `pcs`). There is still no conversion
+between units.
+
+| Locale | Units | "To taste" |
+|---|---|---|
+| `zh-CN` | 克, 千克, 毫升, 升, 个, 只, 颗, 根, 片, 瓣, 块, 把, 汤匙, 茶匙, 杯 | 适量, 少许 |
+| `en` | g, kg, ml, l, pcs, tbsp, tsp, cup, clove, slice | to taste |
+| `ja` | g, kg, ml, l, 個, 本, 枚, かけ, 大さじ, 小さじ, カップ, 束, パック | 適量, 少々 |
+
+An invalid quantity or unit clears both (the ingredient is kept) and adds `quantity_dropped`.
+For a "to taste" quantity the unit is cleared.
+
+The prompt states these rules up front (the same lists and the same language rules the
+backend checks), so most replies pass the first time.
+
+**Repair round with feedback.** When a reply fails, the backend does not just ask again: it
+sends the model its previous reply plus a list of exactly what is wrong, for example
+`steps[2].instruction "Cut the tomatoes" is not in Simplified Chinese.` or
+`ingredients[3] "糖": quantity "1/2" with unit "茶匙" is not allowed. Use one number and one
+of: 克, 千克, …`. There is at most **one** repair round, and both rounds share the per-call time
+budget (45 s by default).
+
+| Where | When a repair round is sent | Result |
+|---|---|---|
+| Explore | Fewer than 3 ideas passed and some were dropped | Only the dropped ideas are sent back; repaired ideas are added (duplicate titles skipped) |
+| Expand | The draft is unusable (wrong language anywhere, no usable step, not an object) or a quantity / unit had to be cleared | The better draft is used: fewer problems, the repaired one on a tie |
+
+Wrong enum values, servings or a wrong `category` alone do not trigger a repair: they are only
+cleared (`null`) with `field_value_dropped`, which costs no extra tokens.
+
+If the repair call fails or runs out of time, the first round's result is used when it is
+usable. Only when nothing is usable: `502 ai_upstream_error`.
+
+| Where | Failure (after the repair round) | Result |
+|---|---|---|
+| Explore | An idea's title / description / reason is in the wrong language | Idea dropped, `idea_dropped_wrong_language` |
+| Explore | An idea has no title or a list field is not a list | Idea dropped, `idea_dropped_malformed` |
+| Explore | A flavor, texture, cuisine or missing ingredient is in the wrong language | That value dropped, `field_value_dropped` |
+| Explore | No usable idea left | `502 ai_upstream_error` |
+| Expand | No usable draft | `502 ai_upstream_error` |
+| Expand | An ingredient without a name / a step without text | Dropped, `ingredient_dropped_malformed` / `step_dropped_malformed` |
+
+Warnings describe the result that is returned: problems fixed by the repair round leave no
+warning.
+
+### Warnings
+
+`warnings` is a list of `{"code": "...", "params": {...}}`; the app shows its own text for each
+code. Identical warnings are merged. Parameter values are strings.
+
+| Code | Params | Meaning |
+|---|---|---|
+| `locale_fallback` | `requested` | The requested locale is not supported |
+| `draft_ai_generated` | — | Always on Expand: review before saving |
+| `idea_dropped_malformed` | — | An idea was unusable |
+| `idea_dropped_wrong_language` | `title` | An idea was not in the locale |
+| `field_value_dropped` | `field`, `value` | A value was invalid and removed |
+| `quantity_dropped` | `ingredient` | A quantity / unit was invalid and cleared |
+| `ingredient_dropped_malformed` | `index` | Ingredient at this 1-based position in the AI reply was unusable |
+| `step_dropped_malformed` | `index` | Step at this 1-based position was unusable |
+
+### AI errors
+
+The AI may answer Explore with `{"ideas": [...]}` or a bare list of ideas; both work. As long
+as one idea passes validation the response is `200`.
 
 Errors (Explore and Expand), with a JSON body `{"code": "..."}`:
 
@@ -178,6 +297,31 @@ Never a `500`.
 `POST /api/recipes/explore/expand`
 
 Select an explore idea and expand it into a structured recipe draft with estimated ingredients and steps. The draft is **not saved automatically** — the frontend should let users review and optionally save it via the recipe creation API.
+
+Request: `{"idea": <an idea from Explore>, "locale": "zh-CN"}` (`locale` optional).
+
+Response:
+
+```json
+{
+  "locale": "zh-CN",
+  "recipe_draft": {
+    "title": "番茄炒蛋", "category": "vegetable_dish", "description": "…",
+    "difficulty": "easy", "servings": "2", "cook_time_minutes": 15, "raw_markdown": null,
+    "ingredients": [{"ingredient_name": "番茄", "normalized_name": null, "quantity": "2",
+                     "unit": "个", "is_optional": false, "is_seasoning": false, "sort_order": 0}],
+    "steps": [{"step_number": 1, "instruction": "…"}]
+  },
+  "warnings": [{"code": "draft_ai_generated", "params": {}}]
+}
+```
+
+- `recipe_draft` has the fields of `POST /api/recipes`. `category` may be `null`: the user picks
+  one before saving. Missing `difficulty`, `servings` and `cook_time_minutes` stay `null`
+  (`cook_time_minutes` falls back to the idea's estimate); there are no invented defaults.
+- The prompt lists recipe-eligible inventory with units. An ingredient that matches stock
+  (synonyms included) uses the stock item's exact name, so cooking the saved recipe finds it.
+- Steps are renumbered 1, 2, 3, ….
 
 When the AI fails, Expand returns `502` / `503` like Explore. There is no fallback draft (it used
 to return just the title with no ingredients or steps); the user can retry or create the recipe

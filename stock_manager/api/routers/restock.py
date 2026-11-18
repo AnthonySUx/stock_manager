@@ -1,6 +1,5 @@
 """Restock items REST API router."""
 
-from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -8,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from stock_manager.api import schemas
 from stock_manager.api.db import get_session
+from stock_manager.api.localization import today as household_today
 from stock_manager.api.services import (
     RestockAlreadyDoneError,
     complete_restock_purchase,
@@ -131,7 +131,7 @@ def done_restock(
         "name": item.name,
         "category_id": final_category_id,
         "owner": payload.owner or "",
-        "purchase_date": payload.purchase_date or date.today().isoformat(),
+        "purchase_date": payload.purchase_date or household_today(db).isoformat(),
         "quantity_value": purchased_qty,
         "quantity_unit": item.quantity_unit or "pcs",
         "location": payload.location or "",

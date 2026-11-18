@@ -1,5 +1,5 @@
 """Business logic for recipe features."""
-from datetime import date, timedelta
+from datetime import timedelta
 from typing import Optional
 
 from sqlalchemy import case, func, select
@@ -16,6 +16,7 @@ from stock_manager.api.models import (
 )
 from stock_manager.api.recipe_schemas import RecipeCreate, RecipeUpdate
 from stock_manager.api.quantity import parse_quantity, same_unit
+from stock_manager.api.localization import today as household_today
 from stock_manager.api.text_search import contains_ci
 
 
@@ -23,7 +24,7 @@ DEFAULT_SYNONYM_MAP: dict[str, list[str]] = {
     # ── 蔬菜 / Vegetables ──
     "番茄": ["西红柿", "tomato", "tomatoes", "トマト"],
     "土豆": ["马铃薯", "洋芋", "potato", "potatoes", "じゃがいも", "ジャガイモ"],
-    "胡萝卜": ["红萝卜", "carrot", "carrots", "人参", "にんじん", "ニンジン"],
+    "胡萝卜": ["红萝卜", "carrot", "carrots", "にんじん", "ニンジン"],  # not 人参 (ginseng)
     "西兰花": ["青花菜", "broccoli", "ブロッコリー"],
     "菠菜": ["spinach", "ほうれん草", "ホウレンソウ"],
     "白菜": ["大白菜", "Chinese cabbage", "napa cabbage", "ハクサイ"],
@@ -821,7 +822,7 @@ def cook_recipe_and_consume(
         new_qty = max(0.0, original_qty - qty)
         item.quantity_value = new_qty
 
-        today = date.today()
+        today = household_today(db)
         from stock_manager.api.services import _calculate_status, _get_expiration_warning_days
         warning_days = _get_expiration_warning_days(db)
         new_status = _calculate_status(

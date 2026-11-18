@@ -210,11 +210,15 @@ async def chat_json(
     *,
     images: Optional[list[dict]] = None,
     max_tokens: int = 4096,
+    followup: Optional[list[dict]] = None,
 ) -> JsonValue:
     """Send one chat request and return the reply as parsed JSON.
 
     `images` (for intake, #63): dicts with `data` (bytes), `mime`, and an
     optional `detail` ("auto" / "low" / "high").
+
+    `followup` (#65): more chat messages after the first user message, e.g. the
+    model's previous reply and a list of problems to fix.
 
     Raises AIUnavailableError or AIUpstreamError; never returns None.
     """
@@ -227,6 +231,7 @@ async def chat_json(
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": _user_content(user, images)},
+            *(followup or []),
         ],
         "temperature": config.temperature,
         "max_tokens": max_tokens,
