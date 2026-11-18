@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from stock_manager.api import schemas
 from stock_manager.api.db import get_session
+from stock_manager.api.localization import today as household_today
 from stock_manager.api.services import (
     calculate_item_status,
     consume_item,
@@ -109,6 +110,8 @@ def create_item_endpoint(
         raise HTTPException(status_code=400, detail=str(e))
 
     item_data = payload.model_dump()
+    if item_data.get("purchase_date") is None:
+        item_data["purchase_date"] = household_today(db).isoformat()
     item_data["current_expiration_date"] = _calculate_current_expiration_date(
         item_data
     )

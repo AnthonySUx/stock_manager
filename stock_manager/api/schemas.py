@@ -80,7 +80,9 @@ class ItemCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     category_id: int = Field(..., gt=0)
     owner: str = Field(..., min_length=1, max_length=100)
-    purchase_date: DateStr = Field(default_factory=lambda: date.today().isoformat())
+    # Defaults to today in the household timezone; filled in by the router
+    # because a schema default cannot read settings (#65).
+    purchase_date: Optional[DateStr] = None
     quantity_value: float = Field(..., gt=0)
     quantity_unit: str = Field(..., min_length=1, max_length=50)
     location: str = Field(..., min_length=1, max_length=100)
@@ -208,6 +210,10 @@ MAX_REMINDER_DAYS = 365
 
 class SettingResponse(BaseModel):
     expiration_reminder_days: str
+    # null = not set: the locale follows the device (Accept-Language) and
+    # "today" uses the server's local date (#65).
+    default_locale: Optional[str] = None
+    default_timezone: Optional[str] = None
 
 
 class SettingUpdate(BaseModel):
@@ -228,6 +234,40 @@ class SettingUpdate(BaseModel):
         if days > MAX_REMINDER_DAYS:
             raise ValueError(f"expiration_reminder_days must be between 0 and {MAX_REMINDER_DAYS}")
         return str(days)
+
+    # A supported locale (zh-CN, en, ja; tags such as "zh-Hans" or "en-US" are
+    # normalized) or an IANA timezone name. "" clears the setting.
+    default_locale: Optional[str] = None
+    default_timezone: Optional[str] = None
+
+    @field_validator("default_locale", mode="before")
+    @classmethod
+    def check_locale(cls, value):
+        from stock_manager.api.localization import SUPPORTED_LOCALES, normalize_locale
+
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("default_locale must be a string")
+        if not value.strip():
+            return ""
+        locale = normalize_locale(value)
+        if locale is None:
+            raise ValueError(f"default_locale must be one of {', '.join(SUPPORTED_LOCALES)}")
+        return locale
+
+    @field_validator("default_timezone", mode="before")
+    @classmethod
+    def check_timezone(cls, value):
+        from stock_manager.api.localization import validate_timezone
+
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("default_timezone must be a string")
+        if not value.strip():
+            return ""
+        return validate_timezone(value)
 
 
 # ─── Generic ─────────────────────────────────────────────────────

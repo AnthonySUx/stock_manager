@@ -131,6 +131,15 @@ Manage global app-level settings (`GET` / `PATCH /api/settings`), stored in the 
 - `expiration_reminder_days`: number of days before expiration to trigger `expiring soon` status.
   A whole number from 0 to 365, sent as a number or a numeric string and returned as a string.
   Other values are rejected with `422`.
+- `default_locale` (#65): the language of AI-generated text for the whole household: `zh-CN`,
+  `en` or `ja`. Tags such as `zh-Hans` or `en-US` are normalized; other values are a `422`.
+  `null` (the default) means "follow the device" (`Accept-Language`). See
+  [Language of AI output](recipes.md#language-of-ai-output).
+- `default_timezone` (#65): an IANA name such as `Asia/Tokyo`, used wherever "today" matters:
+  expiring-soon / expired status, the default purchase date, and stock status after cooking.
+  `null` (the default) uses the server's local date. An unknown name is a `422`.
+
+Send `""` to clear `default_locale` or `default_timezone` (back to `null`).
 
 `default_database` was removed from the API (the app always uses MySQL); a client that still
 sends it is not rejected, the field is ignored. The legacy CLI keeps its own `settings.json`

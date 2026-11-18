@@ -15,6 +15,16 @@ _UNIT_ALIASES = {
     "毫升": "ml", "ml": "ml",
     "升": "l", "l": "l",
     "个": "pcs", "pcs": "pcs", "pc": "pcs", "piece": "pcs", "pieces": "pcs",
+    "個": "pcs",
+    "グラム": "g", "キログラム": "kg", "ミリリットル": "ml", "リットル": "l",
+    # Spoons and cups (#65). 大勺 / 小勺 are common spellings of 汤匙 / 茶匙.
+    "汤匙": "tbsp", "大勺": "tbsp", "tbsp": "tbsp", "tablespoon": "tbsp",
+    "tablespoons": "tbsp", "大さじ": "tbsp",
+    "茶匙": "tsp", "小勺": "tsp", "tsp": "tsp", "teaspoon": "tsp",
+    "teaspoons": "tsp", "小さじ": "tsp",
+    "杯": "cup", "cup": "cup", "cups": "cup", "カップ": "cup",
+    "瓣": "clove", "clove": "clove", "cloves": "clove", "かけ": "clove",
+    "片": "slice", "slice": "slice", "slices": "slice", "枚": "slice",
 }
 
 # A decimal number, then an optional unit: starts with a letter (CJK counts),

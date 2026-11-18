@@ -2,7 +2,7 @@
 import logging
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from stock_manager.api.db import get_session
@@ -135,36 +135,49 @@ def rule_recommendations(
 async def explore_recipes_endpoint(
     data: ExploreRequest,
     db: Session = Depends(get_session),
+    accept_language: Optional[str] = Header(None),
 ):
     """Generate cooking ideas from inventory with structured or free-text input.
 
     `structured.inventory_item_ids` limits the inventory sent to the AI; unknown
     or ineligible ids return 400. DB work runs in a threadpool so the event
     loop is not blocked while the AI call is awaited.
+
+    Output language: `locale`, else the household `default_locale`, else
+    Accept-Language, else zh-CN (#65).
     """
     from starlette.concurrency import run_in_threadpool
     from stock_manager.api.explore_services import explore_ideas
+    from stock_manager.api.localization import resolve_locale
 
     structured = data.structured.model_dump() if data.structured else None
     selected_ids = (structured or {}).get("inventory_item_ids") or []
 
-    inv_dicts, bad_ids = await run_in_threadpool(_load_explore_inventory, db, selected_ids)
+    inv_dicts, bad_ids, setting_locale = await run_in_threadpool(
+        _load_explore_inventory, db, selected_ids
+    )
     if bad_ids:
         raise HTTPException(
             status_code=400,
             detail=f"Inventory items not found or not usable for recipes: {bad_ids}",
         )
+    locale, warnings = resolve_locale(data.locale, accept_language, setting_locale)
 
     # ExploreRequest guarantees exactly one of structured / natural_language is set.
     return await explore_ideas(
-        inv_dicts, structured=structured, natural_language=data.natural_language
+        inv_dicts, structured=structured, natural_language=data.natural_language,
+        locale=locale, warnings=warnings,
     )
 
 
-def _load_explore_inventory(db: Session, selected_ids: list[int]) -> tuple[list[dict], list[int]]:
-    """Return recipe-eligible, usable inventory (optionally only `selected_ids`)
-    and the selected ids that are unknown or not eligible."""
+def _load_explore_inventory(
+    db: Session, selected_ids: list[int]
+) -> tuple[list[dict], list[int], Optional[str]]:
+    """Return recipe-eligible, usable inventory (optionally only `selected_ids`),
+    the selected ids that are unknown or not eligible, and the household
+    `default_locale` setting (None when not set)."""
     from stock_manager.api.category_services import query_recipe_candidate_items
+    from stock_manager.api.localization import household_locale
     from stock_manager.api.models import Item
 
     query = query_recipe_candidate_items(db)
@@ -180,17 +193,29 @@ def _load_explore_inventory(db: Session, selected_ids: list[int]) -> tuple[list[
          "status": i.status, "recipe_usage": i.category.recipe_usage}
         for i in items
     ]
-    return inv_dicts, bad_ids
+    return inv_dicts, bad_ids, household_locale(db)
 
 
 @router.post("/explore/expand", response_model=ExpandResponse)
 async def explore_expand_endpoint(
     data: ExpandRequest,
+    db: Session = Depends(get_session),
+    accept_language: Optional[str] = Header(None),
 ):
+    """Expand an idea into a recipe draft (not saved).
+
+    The prompt lists recipe-eligible inventory with units, so the draft can
+    reuse stock names and units (#65, #66 part 5). Locale as for Explore.
+    """
+    from starlette.concurrency import run_in_threadpool
     from stock_manager.api.explore_services import expand_to_recipe_draft
-    idea = data.idea.model_dump() if hasattr(data.idea, "model_dump") else data.idea
-    result = await expand_to_recipe_draft(idea)
-    return result
+    from stock_manager.api.localization import resolve_locale
+
+    inv_dicts, _, setting_locale = await run_in_threadpool(_load_explore_inventory, db, [])
+    locale, warnings = resolve_locale(data.locale, accept_language, setting_locale)
+    return await expand_to_recipe_draft(
+        data.idea.model_dump(), inventory_items=inv_dicts, locale=locale, warnings=warnings
+    )
 
 
 @router.get("/{recipe_id}/consume-preview", response_model=ConsumePreviewResponse)
