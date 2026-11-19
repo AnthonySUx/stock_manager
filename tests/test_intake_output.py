@@ -42,7 +42,7 @@ def test_add_sanitizes_model_fields_and_assigns_unused_id(context, monkeypatch):
         "restock_action": "done",
         "warnings": [{"code": "injected"}],
         "source": {"input_kind": "receipt", "image_index": 5, "span": "s" * 210},
-    }, context, Inventory([]), {"cand_00000001"})
+    }, context, {"cand_00000001"})
     assert candidate["temporary_id"] == "cand_00000002"
     assert candidate["name"] == "Eggs"
     assert len(candidate["raw_name"]) == 255
@@ -60,7 +60,7 @@ def test_add_sanitizes_model_fields_and_assigns_unused_id(context, monkeypatch):
     ]
 
 
-def test_add_clears_invalid_fields_and_rejects_wrong_language_name(context):
+def test_add_clears_invalid_fields_and_defaults_invalid_purchase_date(context):
     candidate = intake_output._add_candidate({
         "name": "Milk",
         "quantity_value": -1,
@@ -69,19 +69,18 @@ def test_add_clears_invalid_fields_and_rejects_wrong_language_name(context):
         "purchase_date": "2028-02-30",
         "matched_restock_id": "9" * 5000,
         "confidence": "NaN",
-    }, context, Inventory([]), set())
+    }, context, set())
     assert candidate["quantity_value"] is None
     assert candidate["quantity_unit"] == "bottle"
     assert candidate["category_id"] is None
-    assert candidate["purchase_date"] is None
+    assert candidate["purchase_date"] == "2028-02-28"
     assert candidate["matched_restock_id"] is None
     assert candidate["restock_action"] is None
     assert candidate["confidence"] == 0
     assert {w["code"] for w in candidate["warnings"]} == {
         "quantity_dropped", "category_dropped", "date_dropped", "restock_match_dropped",
     }
-    assert intake_output._add_candidate({"name": "牛奶"}, context, Inventory([]), set()) is None
-    assert intake_output._add_candidate({"name": []}, context, Inventory([]), set()) is None
+    assert intake_output._add_candidate({"name": []}, context, set()) is None
 
 
 @pytest.mark.parametrize(("date_value", "expected"), [
@@ -120,8 +119,8 @@ def test_changes_ignore_other_keys(context):
         "temporary_id": "cand_00000001",
         "notes": "  Note  ",
         "quantity_value": True,
-    }, context, Inventory([]), warnings)
-    assert changes == {"notes": "Note", "quantity_value": None}
+    }, context, warnings)
+    assert changes == {"notes": "Note"}
     assert [w["code"] for w in warnings] == [
         "op_field_dropped", "op_field_dropped", "quantity_dropped",
     ]

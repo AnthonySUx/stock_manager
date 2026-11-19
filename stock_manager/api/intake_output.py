@@ -93,17 +93,12 @@ def _known_id(value, entries: dict[int, dict]) -> int | None:
     return key if key in entries else None
 
 
-def _clean_fields(
-    raw: dict, context: "PreparedParse", inventory: Inventory, warnings: list[dict]
-) -> dict:
+def _clean_fields(raw: dict, context: "PreparedParse", warnings: list[dict]) -> dict:
     """Clean values shared by add candidates and update changes."""
     fields = {}
     for field, value in raw.items():
         if field in _TEXT_LIMITS:
-            text = _text(value, _TEXT_LIMITS[field])
-            if field == "name" and not in_locale(text, context.locale, inventory):
-                text = None
-            fields[field] = text
+            fields[field] = _text(value, _TEXT_LIMITS[field])
             code = "field_value_dropped"
         elif field in _DATE_FIELDS:
             fields[field] = _parse_date(value, field, context.today)
@@ -126,16 +121,16 @@ def _clean_fields(
 
 
 def _add_candidate(
-    raw: dict, context: "PreparedParse", inventory: Inventory, used_ids: set[str]
+    raw: dict, context: "PreparedParse", used_ids: set[str]
 ) -> dict | None:
     warnings: list[dict] = []
     fields = _clean_fields(
         {key: value for key, value in raw.items() if key in EDITABLE_FIELDS},
-        context, inventory, warnings,
+        context, warnings,
     )
     if not fields.get("name"):
         return None
-    if raw.get("purchase_date") is None:
+    if fields.get("purchase_date") is None:
         fields["purchase_date"] = context.purchase_date.isoformat()
     fields.update(_expiration_changes(fields, {}, context, warnings))
     source = raw.get("source")
@@ -159,20 +154,18 @@ def _add_candidate(
     }
 
 
-def _update_changes(
-    raw: dict, context: "PreparedParse", inventory: Inventory, warnings: list[dict]
-) -> dict:
+def _update_changes(raw: dict, context: "PreparedParse", warnings: list[dict]) -> dict:
     editable = {}
     for key, value in raw.items():
         if key in EDITABLE_FIELDS:
             editable[key] = value
         else:
             warnings.append(warning("op_field_dropped", field=key))
-    changes = _clean_fields(editable, context, inventory, warnings)
-    # Invalid model dates should not clear an existing date. An explicit null can.
+    changes = _clean_fields(editable, context, warnings)
+    # Only an explicit null can clear a field the model tried to update.
     return {
         key: value for key, value in changes.items()
-        if key not in _DATE_FIELDS or value is not None or editable[key] is None
+        if value is not None or editable[key] is None
     }
 
 
@@ -339,14 +332,14 @@ def clean_parse_output(reply: dict, items: list[IntakeCandidate], context: "Prep
     for index, operation in _prepare_operations(reply["operations"], draft, context.locale, inventory, warnings):
         match operation["op"]:
             case "add":
-                candidate = _add_candidate(operation["candidate"], context, inventory, used_ids)
+                candidate = _add_candidate(operation["candidate"], context, used_ids)
                 if candidate is None:
                     warnings.append(warning("op_invalid", index=index))
                     continue
                 operation = {"op": "add", "candidate": candidate}
             case "update":
                 field_warnings: list[dict] = []
-                changes = _update_changes(operation["changes"], context, inventory, field_warnings)
+                changes = _update_changes(operation["changes"], context, field_warnings)
                 warnings.extend(
                     warning(w["code"], index=index, **w["params"])
                     if w["code"] == "op_field_dropped" else w
@@ -360,9 +353,11 @@ def clean_parse_output(reply: dict, items: list[IntakeCandidate], context: "Prep
                 previous = draft[key]
                 if _EXPIRATION_FIELDS.intersection(changes):
                     changes.update(_expiration_changes(changes, previous, context, field_warnings))
-                if _RESTOCK_FIELDS.intersection(changes):
+                match_id = changes.get("matched_restock_id", previous.get("matched_restock_id"))
+                if _RESTOCK_FIELDS.intersection(changes) and (
+                    match_id is not None or "matched_restock_id" in changes
+                ):
                     merged = {**previous, **changes}
-                    match_id = merged.get("matched_restock_id")
                     if match_id is not None and match_id not in context.restock:
                         changes["matched_restock_id"] = None
                         field_warnings.append(warning("restock_match_dropped", field="matched_restock_id"))

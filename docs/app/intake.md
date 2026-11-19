@@ -25,8 +25,12 @@ Send `POST /api/intake/parse` with `Content-Type: application/json`.
 }
 ```
 
-Provide up to 100 draft candidates with unique temporary IDs. Text must have
-1–4,000 characters after trimming. The optional context supplies the output
+Provide up to 100 draft candidates. For a candidate created by the app,
+`temporary_id` must be unique within the draft and consist of `cand_` followed
+by exactly eight lowercase hexadecimal digits (for example, `cand_1a2b3c4d`).
+The fields `confidence` and `source.input_kind` are required.
+
+Text must have 1–4,000 characters after trimming. The optional context supplies the output
 language, an IANA timezone and a default purchase date. Locale resolution uses
 the request, the household setting, the `Accept-Language` header, then
 `zh-CN`. Timezone resolution uses the request, the household setting, then
@@ -66,7 +70,7 @@ unknown values and an empty map for missing `field_confidence`.
 | Operation | Fields | Conditions |
 | --- | --- | --- |
 | `add` | `candidate` | The server assigns a `cand_` ID. The candidate needs a name. |
-| `update` | `temporary_id`, `changes` | The target must exist in the draft. Extra keys are discarded. |
+| `update` | `temporary_id`, `changes` | The target must exist in the draft. Extra keys and invalid values are discarded with warnings. An explicit `null` can clear a field. An empty update is discarded. |
 | `delete` | `temporary_id`, `reason_code` | The target must exist. Reasons are `user_requested`, `duplicate`, and `non_product_line`. |
 | `clarify` | `temporary_ids`, `question_code`, `question` | All targets must exist. The question must use the resolved locale and have 1–200 characters. Codes are `ambiguous_target`, `ambiguous_quantity`, and `ambiguous_date`. |
 
@@ -92,6 +96,8 @@ a valid untrusted date moves to `suggested_unopened_expiration_date`. An
 estimate uses the `estimated` source. A date before the purchase date is
 kept with a warning. Updates calculate from the changed category and purchase
 date, falling back to the current draft fields when omitted.
+On add, a missing or invalid purchase date uses the context's default purchase
+date. An invalid model date still produces `date_dropped`.
 
 The backend validates matches against pending restock items. A matching unit
 and enough quantity yield `done`. A short quantity in the same unit yields
@@ -99,7 +105,8 @@ and enough quantity yield `done`. A short quantity in the same unit yields
 operation, the result is `candidate.restock_action`. For an update to
 `matched_restock_id`, `quantity_value`, or `quantity_unit`, the backend
 recalculates from the merged candidate and returns `changes.restock_action`.
-A cleared link yields `null`. Other updates keep the current action. Apply
+A cleared link yields `null`. A quantity or unit change on an unlinked
+candidate omits the action. Other updates keep the current action. Apply
 all returned changes normally, including fields written by the backend.
 
 ## Confirm the reviewed draft

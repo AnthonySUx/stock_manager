@@ -402,7 +402,7 @@ class TestParse:
         ], _candidate(category_id=dairy), _candidate(2), _candidate(3))
         assert [row["op"] for row in result["operations"]] == ["add", "update", "delete", "clarify"]
         assert result["operations"][0]["candidate"]["restock_action"] == "done"
-        assert result["operations"][1]["changes"] == {"quantity_value": 2.0, "restock_action": None}
+        assert result["operations"][1]["changes"] == {"quantity_value": 2.0}
         assert result["operations"][2]["reason_code"] == "duplicate"
         assert result["operations"][3]["temporary_ids"] == [_id(1), _id(3)]
         assert result["unparsed_fragments"] == ["remaining text"]
@@ -463,6 +463,64 @@ class TestParse:
             ("ops_dropped", {"count": "6"}),
         ]:
             assert _warning(code, **params) in result["warnings"]
+
+    def test_invalid_update_values_discard_the_entire_operation(self, client, db_session, fake_ai):
+        result = _parse(client, fake_ai, [
+            _update(1, quantity_value="abc", category_id=999999, name="  "),
+        ], _candidate(name="Milk", quantity_value=2, category_id=_category(db_session)))
+        assert result["operations"] == []
+        assert result["warnings"] == [
+            _warning("quantity_dropped", field="quantity_value"),
+            _warning("category_dropped", field="category_id"),
+            _warning("field_value_dropped", field="name"),
+            _warning("op_invalid", index="0"),
+            _warning("ops_dropped", count="1"),
+        ]
+
+    def test_update_keeps_explicit_null_and_drops_only_the_invalid_value(self, client, db_session, fake_ai):
+        result = _parse(client, fake_ai, [
+            _update(1, quantity_value=None, category_id=999999, notes="Reviewed"),
+        ], _candidate(quantity_value=2, category_id=_category(db_session)))
+        assert result["operations"][0]["changes"] == {"quantity_value": None, "notes": "Reviewed"}
+        assert result["warnings"] == [_warning("category_dropped", field="category_id")]
+
+    def test_add_keeps_mixed_language_product_names(self, client, fake_ai):
+        names = ["Oreo饼干", "Coca-Cola", "iPhone充电线"]
+        result = _parse(
+            client, fake_ai, [_add(name=name) for name in names],
+            text="买了 Oreo饼干、Coca-Cola、iPhone充电线", context={"locale": "zh-CN"},
+        )
+        assert [op["candidate"]["name"] for op in result["operations"]] == names
+        assert result["warnings"] == []
+
+    def test_invalid_purchase_date_on_add_uses_context_default(self, client, fake_ai):
+        result = _parse(
+            client, fake_ai, [_add(purchase_date="2026-13-40")],
+            context={"locale": "en", "purchase_date": "2026-11-18"},
+        )
+        candidate = result["operations"][0]["candidate"]
+        assert candidate["purchase_date"] == "2026-11-18"
+        assert candidate["warnings"] == [_warning("date_dropped", field="purchase_date")]
+
+    @pytest.mark.parametrize(("changes", "loc"), [
+        ({"temporary_id": "cand_1A2b3c4d"}, ["temporary_id"]),
+        ({"temporary_id": "cand_1a2b3c4"}, ["temporary_id"]),
+        ({"temporary_id": "app_1a2b3c4d"}, ["temporary_id"]),
+        ({"source": {}}, ["source", "input_kind"]),
+    ])
+    def test_app_candidate_shape_is_validated(self, client, fake_ai, changes, loc):
+        response = client.post(PARSE, json=_parse_body(_candidate(**changes)))
+        assert response.status_code == 422
+        assert response.json()["detail"][0]["loc"] == ["body", "draft", "items", 0, *loc]
+        assert fake_ai.requests == []
+
+    def test_app_candidate_requires_confidence(self, client, fake_ai):
+        candidate = _candidate()
+        del candidate["confidence"]
+        response = client.post(PARSE, json=_parse_body(candidate))
+        assert response.status_code == 422
+        assert response.json()["detail"][0]["loc"] == ["body", "draft", "items", 0, "confidence"]
+        assert fake_ai.requests == []
 
     @pytest.mark.parametrize("source", [None, "printed", "estimated", "none"])
     def test_category_default_replaces_untrusted_date_even_when_user_said_it(self, client, db_session, fake_ai, source):
@@ -571,12 +629,18 @@ class TestParse:
             {"quantity_unit": "kg", "restock_action": "none"},
             {"notes": "Keep the user's choice"},
             {"matched_restock_id": None, "restock_action": None},
-            {"matched_restock_id": None, "restock_action": None},
             {"quantity_value": 4.0, "matched_restock_id": None, "restock_action": None},
         ]
         assert _warning("op_field_dropped", index="0", field="restock_action") in result["warnings"]
         assert _warning("op_field_dropped", index="3", field="restock_action") in result["warnings"]
         assert _warning("restock_match_dropped", field="matched_restock_id") in result["warnings"]
+        assert _warning("op_invalid", index="5") in result["warnings"]
+        assert _warning("ops_dropped", count="1") in result["warnings"]
+
+    def test_update_omits_restock_action_for_unlinked_quantity_change(self, client, fake_ai):
+        result = _parse(client, fake_ai, [_update(1, quantity_value=3)], _candidate(quantity_value=2))
+        assert result["operations"][0]["changes"] == {"quantity_value": 3.0}
+        assert result["warnings"] == []
 
     def test_zero_valid_ops_and_locale_fallback_are_successful(self, client, fake_ai):
         result = _parse(client, fake_ai, [{"op": ["invalid"]}], context={"locale": "fr"})
