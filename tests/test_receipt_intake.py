@@ -52,13 +52,13 @@ def _line(**fields):
     }
 
 
-def _parse(client, fake_ai, *lines, context=None, fragments=None):
+def _parse(client, fake_ai, *lines, context=None, fragments=None, text="STORE\nORG MLK 2% 4.99\nTAX 0.95"):
     fake_ai.reply = json.dumps({
         "operations": [{"op": "add", "candidate": line} for line in lines],
         "unparsed_fragments": fragments or [],
     })
     response = client.post(PARSE, json={
-        "input": {"type": "text", "text": "STORE\nORG MLK 2% 4.99\nTAX 0.95"},
+        "input": {"type": "text", "text": text},
         "draft": {"items": []}, "context": {"locale": "en", **(context or {})},
     })
     assert response.status_code == 200, response.text
@@ -142,12 +142,45 @@ def test_receipt_parse_confirm_round_trip_learns_reviewed_name(client, db_sessio
     ]
 
 
-def test_normal_text_adds_keep_the_existing_candidate_shape(client, db_session, fake_ai):
-    result = _parse(client, fake_ai, _line(source={"input_kind": "text"}, alias_mode="auto"))
+def test_normal_text_confirm_does_not_learn_receipt_alias(client, db_session, fake_ai):
+    result = _parse(
+        client, fake_ai, _line(
+            source={"input_kind": "text"}, alias_mode="auto",
+            category_id=get_category_by_slug(db_session, "dairy").id,
+        ), text="I bought a carton of milk.",
+    )
     candidate = result["operations"][0]["candidate"]
     assert candidate["source"]["input_kind"] == "text"
+    assert candidate["raw_name"] == RAW_NAME
     assert "specificity" not in candidate and "alias_mode" not in candidate and "suggestions" not in candidate
+    response = _confirm(client, {**candidate, "unopened_expiration_date": "infinite"})
+    assert response.status_code == 201, response.text
+    assert db_session.query(Item).count() == 1
     assert db_session.query(ReceiptItemAlias).count() == 0
+    assert db_session.query(ReceiptAliasName).count() == 0
+
+
+def test_text_confirms_cannot_promote_unknown_store_receipt_alias(client, db_session, fake_ai):
+    dairy_id = get_category_by_slug(db_session, "dairy").id
+    for _ in range(2):
+        result = _parse(
+            client, fake_ai, _line(
+                name=DAIRY_NAME, category_id=dairy_id, store_name=None, source={"input_kind": "text"},
+            ), text="I bought a carton of organic milk.",
+        )
+        candidate = result["operations"][0]["candidate"]
+        assert candidate["raw_name"] == RAW_NAME and "specificity" not in candidate
+        response = _confirm(client, {**candidate, "unopened_expiration_date": "infinite"})
+        assert response.status_code == 201, response.text
+
+    receipt = _candidate(client, fake_ai, name=DAIRY_NAME, store_name=None, category_id=dairy_id)
+    response = _confirm(client, {**receipt, "unopened_expiration_date": "infinite"})
+    assert response.status_code == 201, response.text
+    alias = db_session.query(ReceiptItemAlias).one()
+    assert alias.alias_mode == "suggest"
+    assert alias.store_key == "" and alias.confirmed_count == 1
+    assert db_session.query(ReceiptAliasName).one().count == 1
+    assert db_session.query(Item).count() == 3
 
 
 def test_receipt_alias_promotes_after_three_confirmations_and_reuses_values(
@@ -181,6 +214,24 @@ def test_receipt_alias_promotes_after_three_confirmations_and_reuses_values(
     assert found["alias_mode"] == "auto" and found["match_method"] == "alias"
     assert found["auto_apply_allowed"] and not found["requires_user_review"]
     assert found["review_reason"] is None
+    assert found["suggestions"] == []
+
+
+def test_model_generic_classification_does_not_use_auto_alias(client, db_session, fake_ai):
+    raw_name = "MARKET BAG"
+    response = _confirm(client, *[
+        _confirmed(db_session, i, raw_name=raw_name) for i in (1, 2, 3)
+    ])
+    assert response.status_code == 201, response.text
+    alias = db_session.query(ReceiptItemAlias).one()
+    assert alias.raw_name_normalized == "market bag" and alias.alias_mode == "auto"
+
+    found = _candidate(client, fake_ai, raw_name=raw_name, specificity="generic_category")
+
+    assert found["specificity"] == "generic_category"
+    assert found["alias_mode"] == "suggest" and found["auto_apply_allowed"] is False
+    assert found["name"] is None
+    assert found["requires_user_review"] and found["review_reason"] == "generic_receipt_label"
 
 
 def test_generic_safety_list_blocks_promotion_and_preserves_duplicate_lines(client, db_session, fake_ai):

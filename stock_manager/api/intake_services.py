@@ -276,7 +276,7 @@ def after_confirm(db: Session, created: list[tuple[ConfirmItem, Item]]) -> None:
     """Learn confirmed receipt mappings inside the intake transaction."""
     receipts = []
     for reviewed, stock in created:
-        if reviewed.raw_name:
+        if reviewed.specificity is not None and reviewed.raw_name:
             key = alias_key(reviewed.store_name, reviewed.raw_name)
             if key is not None:
                 receipts.append((key, reviewed, stock))

@@ -158,6 +158,8 @@ omitted `context.purchase_date`, with a `purchase_date_from_receipt` warning.
 Confirm a receipt candidate with its `raw_name`, `store_name`, and
 `specificity` along with the reviewed item fields. The service learns the
 mapping in the same transaction as the inventory and restock changes.
+Only items with receipt `specificity` and a raw label contribute to alias
+history.
 History is scoped to the normalized store and receipt label. A receipt with
 an unknown store has its own history. The receipt label is normalized for
 case, width, whitespace, and recognizable trailing prices and quantities.
