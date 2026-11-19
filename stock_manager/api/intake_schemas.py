@@ -2,16 +2,19 @@
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_serializer
 
 from stock_manager.api.recipe_schemas import AIWarning
 from stock_manager.api.schemas import DateStr, ExpirationStr
 
 MAX_DRAFT_ITEMS = 100
 MAX_TEXT_LENGTH = 4000
+MAX_IMAGES = 8
+MAX_IMAGE_BYTES = 5 * 1024 * 1024
 
 ExpirationSource = Literal["printed", "stated", "estimated", "none"]
-InputKind = Literal["text", "receipt", "product_closeup", "product_overview"]
+ImageKind = Literal["receipt", "product_closeup", "product_overview"]
+InputKind = Literal["text", ImageKind]
 RestockAction = Literal["done", "partial", "none"]
 DeleteReason = Literal["user_requested", "duplicate", "non_product_line"]
 QuestionCode = Literal["ambiguous_target", "ambiguous_quantity", "ambiguous_date"]
@@ -68,30 +71,45 @@ class IntakeContext(BaseModel):
     purchase_date: DateStr | None = None
 
 
-class ParseRequest(BaseModel):
-    input: TextInput
+class ParseDraftRequest(BaseModel):
     draft: IntakeDraft
     context: IntakeContext = Field(default_factory=IntakeContext)
 
 
-class AddOperation(BaseModel):
+class ParseRequest(ParseDraftRequest):
+    input: TextInput
+
+
+class SourcedOperation(BaseModel):
+    source: CandidateSource | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize_source(self, serialize):
+        result = serialize(self)
+        # Text responses retain their existing operation shape.
+        if self.source is None:
+            result.pop("source", None)
+        return result
+
+
+class AddOperation(SourcedOperation):
     op: Literal["add"]
     candidate: IntakeCandidate
 
 
-class UpdateOperation(BaseModel):
+class UpdateOperation(SourcedOperation):
     op: Literal["update"]
     temporary_id: TemporaryId
     changes: dict[EditableField | Literal["restock_action"], str | float | int | None]
 
 
-class DeleteOperation(BaseModel):
+class DeleteOperation(SourcedOperation):
     op: Literal["delete"]
     temporary_id: TemporaryId
     reason_code: DeleteReason
 
 
-class ClarifyOperation(BaseModel):
+class ClarifyOperation(SourcedOperation):
     op: Literal["clarify"]
     temporary_ids: list[TemporaryId]
     question_code: QuestionCode

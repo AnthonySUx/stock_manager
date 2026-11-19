@@ -109,6 +109,38 @@ A cleared link yields `null`. A quantity or unit change on an unlinked
 candidate omits the action. Other updates keep the current action. Apply
 all returned changes normally, including fields written by the backend.
 
+## Parse images
+
+Use the same `POST /api/intake/parse` endpoint with `multipart/form-data`.
+The `payload` field is a JSON string containing `draft` and optional
+`context`. Repeat the `images` field once per uploaded file.
+
+```bash
+curl -X POST "$STOCK_API_URL/api/intake/parse" \
+  -H "Authorization: Bearer $STOCK_API_TOKEN" \
+  -F 'payload={"draft":{"items":[]},"context":{"locale":"en"}}' \
+  -F 'images=@receipt-a.jpg' \
+  -F 'images=@receipt-b.jpg'
+```
+
+Send one to eight files per request. Each file can have up to 5,242,880 bytes,
+and the JSON `payload` can have up to 262,144 bytes. The full multipart request,
+including headers and boundaries, can have up to 42,270,720 bytes.
+The backend identifies JPEG, PNG, and WebP from their file signatures. For a
+larger batch, apply the returned operations to the current draft and submit
+that updated draft with the next batch of images.
+
+Each returned image operation includes `source.input_kind`
+(`receipt`, `product_closeup`, or `product_overview`) and a zero-based
+`source.image_index` in upload order. An add operation also copies that source
+to the candidate. Existing text operations retain their response shape.
+Images are sent to the configured AI provider for parsing. The backend keeps
+uploads in memory and logs the count and total bytes.
+
+Check `GET /api/capabilities` for `ai.vision` before offering image intake.
+It requires a configured AI provider and `AI_VISION_ENABLED=true`.
+The switch defaults to off pending provider validation. See [backend setup](setup.md).
+
 ## Confirm the reviewed draft
 
 Send `POST /api/intake/confirm` with 1–100 reviewed items. Optional `defaults`
@@ -163,14 +195,21 @@ standard validation response.
 
 | HTTP | Error code | Parameters |
 | --- | --- | --- |
+| 413 | `intake_request_too_large` | `max_bytes` |
 | 422 | `intake_text_empty` | |
 | 422 | `intake_text_too_long` | `max` |
 | 422 | `intake_draft_too_large` | `max` |
 | 422 | `intake_duplicate_temporary_id` | `id` |
 | 422 | `intake_timezone_invalid` | |
+| 422 | `intake_images_missing` | |
+| 422 | `intake_multipart_invalid` | |
+| 422 | `intake_images_too_many` | `max` |
+| 422 | `intake_image_too_large` | `index`, `max_bytes` |
+| 422 | `intake_image_type_unsupported` | `index` |
 | 422 | `intake_item_invalid` | `index`, `temporary_id`, `field` |
 | 502 | `ai_upstream_error` | |
 | 503 | `ai_unavailable` | |
+| 503 | `ai_vision_unavailable` | |
 
 Warnings use `{code, params}` with string parameter values. Operation indexes
 are zero-based positions in the model reply.

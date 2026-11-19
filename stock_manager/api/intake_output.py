@@ -20,6 +20,7 @@ from stock_manager.api.intake_schemas import (
     DeleteReason,
     EditableField,
     ExpirationSource,
+    ImageKind,
     IntakeCandidate,
     QuestionCode,
 )
@@ -32,6 +33,7 @@ EDITABLE_FIELDS = frozenset(get_args(EditableField))
 _EXPIRATION_SOURCES = get_args(ExpirationSource)
 _DELETE_REASONS = get_args(DeleteReason)
 _QUESTION_CODES = get_args(QuestionCode)
+_IMAGE_KINDS = get_args(ImageKind)
 _TEXT_LIMITS = {"name": 255, "quantity_unit": 50, "owner": 100, "location": 100, "notes": None}
 _DATE_FIELDS = {"purchase_date", "unopened_expiration_date", "suggested_unopened_expiration_date"}
 _EXPIRATION_FIELDS = _DATE_FIELDS | {"category_id", "expiration_source"}
@@ -121,7 +123,7 @@ def _clean_fields(raw: dict, context: "PreparedParse", warnings: list[dict]) -> 
 
 
 def _add_candidate(
-    raw: dict, context: "PreparedParse", used_ids: set[str]
+    raw: dict, context: "PreparedParse", used_ids: set[str], source: dict | None = None,
 ) -> dict | None:
     warnings: list[dict] = []
     fields = _clean_fields(
@@ -133,7 +135,12 @@ def _add_candidate(
     if fields.get("purchase_date") is None:
         fields["purchase_date"] = context.purchase_date.isoformat()
     fields.update(_expiration_changes(fields, {}, context, warnings))
-    source = raw.get("source")
+    if source is None:
+        raw_source = raw.get("source")
+        source = {
+            "input_kind": "text",
+            "span": _text(raw_source.get("span"), 200) if isinstance(raw_source, dict) else None,
+        }
     field_confidence = raw.get("field_confidence")
     return {
         **fields,
@@ -146,10 +153,7 @@ def _add_candidate(
             if key in EDITABLE_FIELDS
         } if isinstance(field_confidence, dict) else {},
         "warnings": dedupe_warnings(warnings),
-        "source": {
-            "input_kind": "text",
-            "span": _text(source.get("span"), 200) if isinstance(source, dict) else None,
-        },
+        "source": source,
         "restock_action": _restock_action(fields, context.restock),
     }
 
@@ -284,7 +288,8 @@ def _draft_operation(row: dict, draft: dict, locale: str, inventory: Inventory) 
 
 
 def _prepare_operations(
-    rows: list, draft: dict, locale: str, inventory: Inventory, warnings: list[dict]
+    rows: list, draft: dict, locale: str, inventory: Inventory, warnings: list[dict],
+    *, image_count: int = 0,
 ) -> list[tuple[int, dict]]:
     valid: list[tuple[int, dict]] = []
     deletes: set[str] = set()
@@ -292,10 +297,16 @@ def _prepare_operations(
         if not isinstance(row, dict):
             warnings.append(warning("op_invalid", index=index))
             continue
+        source = _image_source(row.get("source"), image_count) if image_count else None
+        if image_count and source is None:
+            warnings.append(warning("op_invalid", index=index))
+            continue
         operation, error = _draft_operation(row, draft, locale, inventory)
         if operation is None:
             warnings.append(warning(error, index=index))
             continue
+        if source is not None:
+            operation = {**operation, "source": source}
         if operation["op"] == "delete":
             deletes.add(operation["temporary_id"])
         valid.append((index, operation))
@@ -307,6 +318,16 @@ def _prepare_operations(
         else:
             operations.append((index, operation))
     return operations
+
+
+def _image_source(raw, image_count: int) -> dict | None:
+    if not isinstance(raw, dict):
+        return None
+    index = raw.get("image_index")
+    kind = raw.get("input_kind")
+    if type(index) is not int or not 0 <= index < image_count or kind not in _IMAGE_KINDS:
+        return None
+    return {"image_index": index, "input_kind": kind, "span": _text(raw.get("span"), 200)}
 
 
 def _fragments(values) -> list[str]:
@@ -322,21 +343,29 @@ def _fragments(values) -> list[str]:
     return fragments
 
 
-def clean_parse_output(reply: dict, items: list[IntakeCandidate], context: "PreparedParse") -> dict:
+def clean_parse_output(
+    reply: dict, items: list[IntakeCandidate], context: "PreparedParse", *, image_count: int = 0,
+) -> dict:
     """Return validated operations in the order the app applies them."""
     draft = {item.temporary_id: item.model_dump() for item in items}
     inventory = Inventory(list(draft.values()))
     used_ids = set(draft)
     warnings = list(context.warnings)
     operations: list[dict] = []
-    for index, operation in _prepare_operations(reply["operations"], draft, context.locale, inventory, warnings):
+    prepared = _prepare_operations(
+        reply["operations"], draft, context.locale, inventory, warnings, image_count=image_count,
+    )
+    for index, operation in prepared:
         match operation["op"]:
             case "add":
-                candidate = _add_candidate(operation["candidate"], context, used_ids)
+                source = operation.get("source") if image_count else None
+                candidate = _add_candidate(operation["candidate"], context, used_ids, source)
                 if candidate is None:
                     warnings.append(warning("op_invalid", index=index))
                     continue
                 operation = {"op": "add", "candidate": candidate}
+                if source is not None:
+                    operation["source"] = source
             case "update":
                 field_warnings: list[dict] = []
                 changes = _update_changes(operation["changes"], context, field_warnings)

@@ -100,6 +100,9 @@ API_PORT=8000
 # AI_BASE_URL=https://api.deepseek.com
 # AI_API_KEY=
 # AI_MODEL=deepseek-flash
+# Image intake is opt-in after checking that the provider supports images with JSON mode.
+# AI_VISION_ENABLED=false
+# AI_IMAGE_DETAIL=high
 # AI_TEMPERATURE=0.2
 # Text replies are streamed from the provider; set false for one JSON body per request.
 # AI_STREAM=true
@@ -122,6 +125,11 @@ API_PORT=8000
 `DATABASE_URL` is mandatory. The backend has no localhost fallback. When
 `MYSQL_HOST_PORT` is present, the backend verifies that the URL uses the same
 port and exits with a configuration error if they differ.
+
+`AI_VISION_ENABLED` defaults to `false`. Image intake also requires the
+backend's AI feature and key to be configured. `AI_IMAGE_DETAIL` accepts
+`low`, `high` (default), or `auto`. An invalid detail disables image intake.
+Restart the backend after changing either setting.
 
 ### 2.3 Start MySQL
 
