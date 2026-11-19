@@ -364,3 +364,32 @@ def test_0004_adopts_existing_column_and_preserves_configured_values(fresh_db):
     assert _shelf_life_by_slug(engine) == {
         "vegetables": 12, "eggs": 30, "dairy": None, "custom-tea": 50,
     }
+
+
+def test_0005_receipt_alias_schema_upgrades_and_downgrades(fresh_db):
+    url, engine = fresh_db
+    config = _alembic(url)
+    command.upgrade(config, "0004")
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO categories (name, slug) VALUES ('Existing', 'existing')"))
+    assert "receipt_item_aliases" not in inspect(engine).get_table_names()
+
+    command.upgrade(config, "0005")
+    inspector = inspect(engine)
+    assert _revision(engine) == "0005"
+    assert _schema_diff(engine) == []
+    assert "family_id" not in {column["name"] for column in inspector.get_columns("receipt_item_aliases")}
+    assert {tuple(constraint["column_names"]) for constraint in inspector.get_unique_constraints("receipt_item_aliases")} == {
+        ("store_key", "raw_name_normalized"),
+    }
+    alias_fk = inspector.get_foreign_keys("receipt_item_aliases")[0]
+    assert (alias_fk["referred_table"], alias_fk["options"]["ondelete"]) == ("categories", "SET NULL")
+    name_fk = inspector.get_foreign_keys("receipt_alias_names")[0]
+    assert (name_fk["referred_table"], name_fk["options"]["ondelete"]) == ("receipt_item_aliases", "CASCADE")
+    assert inspector.get_pk_constraint("receipt_alias_names")["constrained_columns"] == ["alias_id", "confirmed_item_name"]
+
+    command.downgrade(config, "0004")
+    assert _revision(engine) == "0004"
+    assert {"receipt_alias_names", "receipt_item_aliases"}.isdisjoint(inspect(engine).get_table_names())
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT name FROM categories WHERE slug = 'existing'")).scalar_one() == "Existing"

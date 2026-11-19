@@ -103,6 +103,8 @@ API_PORT=8000
 # Image intake is opt-in after checking that the provider supports images with JSON mode.
 # AI_VISION_ENABLED=false
 # AI_IMAGE_DETAIL=high
+# First-seen receipt products use the AI's built-in knowledge.
+# RECEIPT_PRODUCT_LOOKUP_PROVIDER=none
 # AI_TEMPERATURE=0.2
 # Text replies are streamed from the provider; set false for one JSON body per request.
 # AI_STREAM=true

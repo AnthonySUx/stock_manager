@@ -25,6 +25,8 @@ from stock_manager.api.intake_schemas import (
     QuestionCode,
 )
 from stock_manager.api.quantity import same_unit
+from stock_manager.api.receipt_aliases import AliasHistory
+from stock_manager.api.receipt_output import ReceiptLine, apply_receipt_line, receipt_line, receipt_review_reason
 
 if TYPE_CHECKING:
     from stock_manager.api.intake_services import PreparedParse
@@ -124,21 +126,36 @@ def _clean_fields(raw: dict, context: "PreparedParse", warnings: list[dict]) -> 
 
 def _add_candidate(
     raw: dict, context: "PreparedParse", used_ids: set[str], source: dict | None = None,
+    *, receipt: tuple[ReceiptLine, AliasHistory | None] | None = None,
 ) -> dict | None:
     warnings: list[dict] = []
     fields = _clean_fields(
         {key: value for key, value in raw.items() if key in EDITABLE_FIELDS},
         context, warnings,
     )
-    if not fields.get("name"):
+    confidence = _confidence(raw.get("confidence"))
+    metadata = {}
+    if receipt is not None:
+        line, history = receipt
+        if context.purchase_date_explicit:
+            fields["purchase_date"] = context.purchase_date.isoformat()
+        elif fields.get("purchase_date"):
+            warnings.append(warning("purchase_date_from_receipt"))
+        metadata = apply_receipt_line(line, history, fields, confidence, warnings)
+    generic = metadata.get("specificity") == "generic_category" and metadata.get("raw_name")
+    if not fields.get("name") and not generic:
         return None
     if fields.get("purchase_date") is None:
         fields["purchase_date"] = context.purchase_date.isoformat()
     fields.update(_expiration_changes(fields, {}, context, warnings, allow_stated=source is None))
+    if receipt is not None:
+        metadata["review_reason"] = (
+            None if metadata["auto_apply_allowed"] else receipt_review_reason(line, history, confidence, warnings)
+        )
     if source is None:
         raw_source = raw.get("source")
         source = {
-            "input_kind": "text",
+            "input_kind": "receipt" if receipt is not None else "text",
             "span": _text(raw_source.get("span"), 200) if isinstance(raw_source, dict) else None,
         }
     field_confidence = raw.get("field_confidence")
@@ -146,7 +163,7 @@ def _add_candidate(
         **fields,
         "temporary_id": _new_id(used_ids),
         "raw_name": _text(raw.get("raw_name"), 255),
-        "confidence": _confidence(raw.get("confidence")),
+        "confidence": confidence,
         "field_confidence": {
             key: _confidence(value)
             for key, value in field_confidence.items()
@@ -155,6 +172,7 @@ def _add_candidate(
         "warnings": dedupe_warnings(warnings),
         "source": source,
         "restock_action": _restock_action(fields, context.restock),
+        **metadata,
     }
 
 
@@ -330,6 +348,21 @@ def _image_source(raw, image_count: int) -> dict | None:
     return {"image_index": index, "input_kind": kind, "span": _text(raw.get("span"), 200)}
 
 
+def find_receipt_lines(reply: dict, image_count: int) -> dict[int, ReceiptLine]:
+    """Recognize receipt adds from the model's source classification."""
+    lines = {}
+    for index, operation in enumerate(reply["operations"]):
+        if not isinstance(operation, dict) or operation.get("op") != "add":
+            continue
+        raw = operation.get("candidate")
+        if not isinstance(raw, dict):
+            continue
+        source = _image_source(operation.get("source"), image_count) if image_count else raw.get("source")
+        if isinstance(source, dict) and source.get("input_kind") == "receipt":
+            lines[index] = receipt_line(raw, source)
+    return lines
+
+
 def _fragments(values) -> list[str]:
     if not isinstance(values, list):
         return []
@@ -345,12 +378,14 @@ def _fragments(values) -> list[str]:
 
 def clean_parse_output(
     reply: dict, items: list[IntakeCandidate], context: "PreparedParse", *, image_count: int = 0,
+    receipts: dict[int, tuple[ReceiptLine, AliasHistory | None]] | None = None,
 ) -> dict:
     """Return validated operations in the order the app applies them."""
     draft = {item.temporary_id: item.model_dump() for item in items}
     inventory = Inventory(list(draft.values()))
     used_ids = set(draft)
     warnings = list(context.warnings)
+    seen_generic: set[tuple] = set()
     operations: list[dict] = []
     prepared = _prepare_operations(
         reply["operations"], draft, context.locale, inventory, warnings, image_count=image_count,
@@ -359,10 +394,17 @@ def clean_parse_output(
         match operation["op"]:
             case "add":
                 source = operation.get("source") if image_count else None
-                candidate = _add_candidate(operation["candidate"], context, used_ids, source)
+                receipt = (receipts or {}).get(index)
+                candidate = _add_candidate(operation["candidate"], context, used_ids, source, receipt=receipt)
                 if candidate is None:
                     warnings.append(warning("op_invalid", index=index))
                     continue
+                if receipt and receipt[0].specificity == "generic_category" and receipt[0].key:
+                    line = receipt[0]
+                    duplicate_key = (line.group, line.key)
+                    if duplicate_key in seen_generic:
+                        candidate["warnings"].append(warning("duplicate_generic_line"))
+                    seen_generic.add(duplicate_key)
                 operation = {"op": "add", "candidate": candidate}
                 if source is not None:
                     operation["source"] = source

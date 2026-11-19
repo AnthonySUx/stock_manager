@@ -132,12 +132,12 @@ async def parse(
         payload = _validate_payload(ParseDraftRequest, data, ("body", "payload"))
         prepared = await run_in_threadpool(prepare_parse, db, payload, accept_language)
         return await parse_images(
-            payload, prepared, [{**image, "detail": config.image_detail} for image in images],
+            db, payload, prepared, [{**image, "detail": config.image_detail} for image in images],
         )
 
     payload = await _read_text_request(request)
     prepared = await run_in_threadpool(prepare_parse, db, payload, accept_language)
-    return await parse_intake(payload, prepared)
+    return await parse_intake(db, payload, prepared)
 
 
 @router.post("/confirm", response_model=ConfirmResponse, status_code=201)

@@ -162,7 +162,7 @@ def test_image_prompt_and_operations_use_validated_source(db_session, fake_visio
     images = [{"data": image, "mime": mime, "detail": "low"} for image, mime in (
         (JPEG, "image/jpeg"), (PNG, "image/png"), (WEBP, "image/webp"),
     )]
-    result = asyncio.run(intake_services.parse_images(request, prepared, images))
+    result = asyncio.run(intake_services.parse_images(db_session, request, prepared, images))
 
     assert [op["op"] for op in result["operations"]] == ["add", "update", "clarify", "delete"]
     assert [op["source"]["image_index"] for op in result["operations"]] == [0, 1, 2, 0]
@@ -201,7 +201,7 @@ def test_invalid_image_source_drops_operation(db_session, fake_vision, source):
     prepared = intake_services.prepare_parse(db_session, request, None)
     fake_vision.reply = json.dumps({"operations": [_image_add(source=source)]})
     result = asyncio.run(intake_services.parse_images(
-        request, prepared, [{"data": JPEG, "mime": "image/jpeg"}],
+        db_session, request, prepared, [{"data": JPEG, "mime": "image/jpeg"}],
     ))
     assert result["operations"] == []
     assert result["warnings"] == [
