@@ -326,3 +326,20 @@ def test_problem_summary_is_capped():
     assert _summary([]) == "no details"
     assert _summary(["a", "b"]) == "a | b"
     assert _summary([str(i) for i in range(8)]) == "0 | 1 | 2 | 3 | 4 | (+3 more)"
+
+
+# ─── Test isolation ──────────────────────────────────────────────
+
+
+class TestNoRealProvider:
+    """Tests must never reach the real provider, whatever the local .env says."""
+
+    def test_ai_is_off_by_default(self):
+        assert not ai_client.get_config().available
+
+    def test_an_unmocked_call_fails_the_test(self, monkeypatch):
+        monkeypatch.setenv("AI_RECIPE_ENABLED", "true")
+        monkeypatch.setenv("AI_API_KEY", "k")
+        ai_client.reload_config()
+        with pytest.raises(AssertionError, match="real AI provider"):
+            _chat()

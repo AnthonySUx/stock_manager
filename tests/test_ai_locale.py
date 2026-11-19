@@ -418,6 +418,19 @@ class TestExpand:
         fake_ai.reply = _draft(servings=servings)
         assert _expand(client).json()["recipe_draft"]["servings"] == expected
 
+    def test_saved_draft_matches_stock_in_consume_preview(self, client, db_session, fake_ai):
+        """#66 part 5: stock 番茄 → draft says 番茄 (not 西红柿) → consume-preview finds the item."""
+        tomato = _create_item(client, db_session, "番茄", quantity_unit="个")
+        fake_ai.reply = _draft(ingredients=[{"ingredient_name": "西红柿", "quantity": "2", "unit": "个"}])
+        draft = _expand(client).json()["recipe_draft"]
+        assert draft["ingredients"][0]["ingredient_name"] == "番茄"
+
+        # The edited draft is sent as-is as the POST /api/recipes body.
+        recipe = client.post("/api/recipes", json={k: v for k, v in draft.items() if k != "warnings"})
+        assert recipe.status_code == 201, recipe.text
+        preview = client.get(f"/api/recipes/{recipe.json()['id']}/consume-preview").json()
+        assert [(s["ingredient_name"], s["item_id"]) for s in preview["suggestions"]] == [("番茄", tomato["id"])]
+
     def test_ingredients_use_stock_names_and_units(self, client, db_session, fake_ai):
         _create_item(client, db_session, "番茄", quantity_unit="个")
         _create_item(client, db_session, "鸡蛋", slug="eggs", quantity_unit="盒")

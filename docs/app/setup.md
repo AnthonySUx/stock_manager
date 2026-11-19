@@ -302,7 +302,9 @@ python3 -m ruff check stock_manager scripts tests
 python3 -m pytest -q --cov --cov-report=term-missing
 ```
 
-Tests use in-memory SQLite and never touch your MySQL data. Coverage counts the API only
+Tests use in-memory SQLite and never touch your MySQL data. They do not read `.env`, AI is
+off unless a test turns it on, and an AI request that a test did not mock fails that test
+instead of reaching the provider. Coverage counts the API only
 (the legacy CLI is excluded); the run fails if it drops below `fail_under` in `pyproject.toml`.
 To run the suite on MySQL instead, point `TEST_DATABASE_URL` at an empty, throwaway database
 (all its tables are dropped after each test):

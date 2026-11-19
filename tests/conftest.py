@@ -11,6 +11,7 @@ import json
 import os
 from typing import Optional
 
+import dotenv
 import httpx
 import pytest
 from fastapi.testclient import TestClient
@@ -18,14 +19,18 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+# Tests never read the real .env: db.py loads it on import, which would turn on
+# the real AI provider (and anything else configured there) for every test.
+dotenv.load_dotenv = lambda *args, **kwargs: False
+
 # Production requires an explicit database target. Tests install an explicit
 # in-memory value before importing the application and replace its engine below.
 os.environ.setdefault("DATABASE_URL", "sqlite://")
 
-from stock_manager.api.db import get_session
-from stock_manager.api.main import app
-from stock_manager.api.models import Base
-from stock_manager.api.schema_version import stamp_head
+from stock_manager.api.db import get_session  # noqa: E402
+from stock_manager.api.main import app  # noqa: E402
+from stock_manager.api.models import Base  # noqa: E402
+from stock_manager.api.schema_version import stamp_head  # noqa: E402
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL") or "sqlite://"
 IS_SQLITE = TEST_DATABASE_URL.startswith("sqlite")
@@ -101,11 +106,25 @@ def client(db_session, monkeypatch):
 # ─── AI (never calls the real provider) ──────────────────────────
 
 
+AI_ENV_VARS = ("AI_RECIPE_ENABLED", "AI_API_KEY", "AI_BASE_URL")
+
+
+def _refuse_real_ai(request: httpx.Request) -> httpx.Response:
+    raise AssertionError(f"test tried to call the real AI provider: {request.url}")
+
+
 @pytest.fixture(autouse=True)
-def _fresh_ai_config():
-    """Each test reads the AI settings from its own environment (#66)."""
+def _fresh_ai_config(monkeypatch):
+    """Each test reads the AI settings from its own environment (#66).
+
+    AI is off unless the test turns it on, and any AI request that is not
+    answered by `fake_ai` fails the test instead of reaching the network.
+    """
     from stock_manager.api import ai_client
 
+    for var in AI_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setattr(ai_client, "_transport", httpx.MockTransport(_refuse_real_ai))
     ai_client._config = None
     yield
     ai_client._config = None
