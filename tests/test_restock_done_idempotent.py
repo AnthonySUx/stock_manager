@@ -100,6 +100,7 @@ class TestDoneIsAtomic:
         assert restock.done_at is not None
         with pytest.raises(RestockAlreadyDoneError):
             apply_restock_purchase(db_session, restock, 12, stock_data)
+        assert db_session.query(Item).count() == 1
 
         # The rejected duplicate must not unwind the caller's earlier work.
         assert db_session.get(Item, item_id) is item
