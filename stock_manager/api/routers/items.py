@@ -7,8 +7,8 @@ from sqlalchemy.orm import Session
 
 from stock_manager.api import schemas
 from stock_manager.api.db import get_session
-from stock_manager.api.localization import today as household_today
 from stock_manager.api.services import (
+    calculate_current_expiration_date,
     calculate_item_status,
     consume_item,
     create_item,
@@ -17,6 +17,7 @@ from stock_manager.api.services import (
     get_item,
     get_items,
     get_reminder_items,
+    prepare_item_data,
     search_items as search_items_service,
     update_item,
 )
@@ -25,18 +26,6 @@ router = APIRouter()
 
 # Statuses that POST /clean may delete in bulk (issue #40).
 CLEANABLE_ITEM_STATUSES = {"consumed", "expired"}
-
-
-def _calculate_current_expiration_date(item_data: dict) -> str:
-    """Determine the effective expiration date for new stock items."""
-    opened_date = item_data.get("opened_date")
-    opened_expiration = item_data.get("opened_expiration_date")
-    unopened_expiration = item_data.get("unopened_expiration_date", "infinite")
-
-    if opened_date and opened_expiration:
-        return opened_expiration
-
-    return unopened_expiration
 
 
 @router.get("", response_model=list[schemas.ItemResponse])
@@ -109,20 +98,7 @@ def create_item_endpoint(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    item_data = payload.model_dump()
-    if item_data.get("purchase_date") is None:
-        item_data["purchase_date"] = household_today(db).isoformat()
-    item_data["current_expiration_date"] = _calculate_current_expiration_date(
-        item_data
-    )
-
-    # Calculate initial status
-    item_data["status"] = calculate_item_status(
-        item_data["quantity_value"],
-        item_data["current_expiration_date"],
-        db,
-    )
-
+    item_data = prepare_item_data(db, payload.model_dump())
     return create_item(db, item_data)
 
 
@@ -158,9 +134,7 @@ def update_item_endpoint(
                     "unopened_expiration_date", existing.unopened_expiration_date
                 ),
             }
-            item_data["current_expiration_date"] = (
-                _calculate_current_expiration_date(merged)
-            )
+            item_data["current_expiration_date"] = calculate_current_expiration_date(merged)
 
     # Refresh status from quantity or expiration changes
     if "quantity_value" in item_data or "current_expiration_date" in item_data:

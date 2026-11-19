@@ -5,7 +5,11 @@ from datetime import date, timedelta
 import pytest
 
 from stock_manager.api.models import Item, RestockItem
-from tests.helpers import make_restock_create_payload
+from tests.helpers import (
+    make_item_model_data,
+    make_restock_create_payload,
+    make_restock_model_data,
+)
 
 
 def _cat_id(db_session, slug):
@@ -73,6 +77,40 @@ class TestDoneIsIdempotent:
 
 
 class TestDoneIsAtomic:
+    @pytest.mark.parametrize("original_quantity", [12, None])
+    def test_batch_owns_restock_purchase_transaction(self, db_session, original_quantity):
+        from stock_manager.api.services import (
+            RestockAlreadyDoneError,
+            apply_restock_purchase,
+            create_restock_item,
+        )
+
+        restock = create_restock_item(
+            db_session, make_restock_model_data(quantity_value=original_quantity)
+        )
+        stock_data = make_item_model_data(
+            name=restock.name, category_id=_cat_id(db_session, "dairy"), quantity_value=12
+        )
+
+        item = apply_restock_purchase(db_session, restock, 12, stock_data)
+
+        item_id = item.id
+        assert item_id is not None
+        assert restock.status == "done"
+        assert restock.done_at is not None
+        with pytest.raises(RestockAlreadyDoneError):
+            apply_restock_purchase(db_session, restock, 12, stock_data)
+
+        # The rejected duplicate must not unwind the caller's earlier work.
+        assert db_session.get(Item, item_id) is item
+        assert restock.status == "done"
+
+        db_session.rollback()
+        assert db_session.get(Item, item_id) is None
+        assert restock.status == "pending"
+        assert restock.quantity_value == original_quantity
+        assert restock.done_at is None
+
     def test_stock_failure_leaves_restock_untouched(self, client, db_session, monkeypatch):
         """If creating the stock item fails, the restock update is rolled back."""
         created = _create_restock(client)

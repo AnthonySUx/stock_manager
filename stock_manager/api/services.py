@@ -175,12 +175,41 @@ def get_item(db: Session, item_id: int) -> Optional[Item]:
     return db.query(Item).filter(Item.id == item_id).first()
 
 
-def create_item(db: Session, item_data: dict) -> Item:
-    """Create a new stock item."""
+def calculate_current_expiration_date(item_data: dict) -> str:
+    """Determine the effective expiration date for new stock items."""
+    opened_date = item_data.get("opened_date")
+    opened_expiration = item_data.get("opened_expiration_date")
+    unopened_expiration = item_data.get("unopened_expiration_date", "infinite")
+
+    if opened_date and opened_expiration:
+        return opened_expiration
+
+    return unopened_expiration
+
+
+def prepare_item_data(db: Session, data: dict) -> dict:
+    """Fill the purchase date and derive expiration and status before insertion."""
+    item_data = data.copy()
+    if item_data.get("purchase_date") is None:
+        item_data["purchase_date"] = household_today(db).isoformat()
+    item_data["current_expiration_date"] = calculate_current_expiration_date(item_data)
+    item_data["status"] = calculate_item_status(
+        item_data["quantity_value"],
+        item_data["current_expiration_date"],
+        db,
+    )
+    return item_data
+
+
+def create_item(db: Session, item_data: dict, *, commit: bool = True) -> Item:
+    """Create a stock item, leaving the transaction open when requested."""
     item = Item(**item_data)
     db.add(item)
-    db.commit()
-    db.refresh(item)
+    if commit:
+        db.commit()
+        db.refresh(item)
+    else:
+        db.flush()
     return item
 
 
@@ -369,17 +398,17 @@ class RestockAlreadyDoneError(Exception):
     """Raised when a restock item is no longer pending (already done)."""
 
 
-def complete_restock_purchase(
+def apply_restock_purchase(
     db: Session,
     restock_item: RestockItem,
     purchased_quantity: float,
     stock_data: dict,
 ) -> Item:
-    """Add a purchase to stock and update the restock item in one transaction.
+    """Add a purchase to stock and update restock in the caller's transaction.
 
     The restock row is updated with a guarded UPDATE (still pending, quantity
     unchanged since it was read), so a repeated or concurrent request cannot
-    add the same purchase twice. Nothing is written unless both steps succeed.
+    add the same purchase twice. The caller manages commit and rollback.
 
     Raises:
         RestockAlreadyDoneError: the item is done, or changed since it was read.
@@ -402,19 +431,30 @@ def complete_restock_purchase(
     else:
         values = {RestockItem.status: "done", RestockItem.done_at: utcnow()}
 
+    updated = guard.update(values, synchronize_session=False)
+    if updated != 1:
+        raise RestockAlreadyDoneError(restock_item.id)
+
+    stock_item = create_item(db, stock_data, commit=False)
+    db.expire(restock_item)
+    return stock_item
+
+
+def complete_restock_purchase(
+    db: Session,
+    restock_item: RestockItem,
+    purchased_quantity: float,
+    stock_data: dict,
+) -> Item:
+    """Commit a standalone restock purchase or roll back both writes."""
     try:
-        updated = guard.update(values, synchronize_session=False)
-        if updated != 1:
-            raise RestockAlreadyDoneError(restock_item.id)
-        stock_item = Item(**stock_data)
-        db.add(stock_item)
+        stock_item = apply_restock_purchase(db, restock_item, purchased_quantity, stock_data)
         db.commit()
     except Exception:
         db.rollback()
         raise
 
     db.refresh(stock_item)
-    db.expire(restock_item)
     return stock_item
 
 

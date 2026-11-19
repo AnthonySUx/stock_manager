@@ -2,6 +2,8 @@
 
 from datetime import date, timedelta
 
+import pytest
+
 from tests.helpers import make_item_model_data
 
 
@@ -27,11 +29,76 @@ class TestCreateAndGetItem:
         assert found is not None
         assert found.name == item.name
 
+    def test_create_item_leaves_transaction_open(self, db_session, monkeypatch):
+        from stock_manager.api.services import create_item, get_item
+
+        def unexpected_refresh(*args, **kwargs):
+            pytest.fail("create_item(commit=False) must not refresh")
+
+        monkeypatch.setattr(db_session, "refresh", unexpected_refresh)
+        model = make_item_model_data(category_id=_cat_id(db_session, "dairy"))
+        item = create_item(db_session, model, commit=False)
+
+        item_id = item.id
+        assert item_id is not None
+        assert get_item(db_session, item_id) is item
+
+        db_session.rollback()
+        assert get_item(db_session, item_id) is None
+
     def test_get_item_not_found(self, db_session):
         """get_item returns None for non-existing id."""
         from stock_manager.api.services import get_item
 
         assert get_item(db_session, 999999) is None
+
+
+class TestPrepareItemData:
+    @pytest.mark.parametrize(
+        ("fields", "purchase_date", "expiration", "status"),
+        [
+            (
+                {"opened_date": "2026-11-15", "opened_expiration_date": "2026-11-18"},
+                "2026-11-19", "2026-11-18", "expired",
+            ),
+            (
+                {"purchase_date": "2026-11-15", "opened_expiration_date": "2026-11-18"},
+                "2026-11-15", "2026-11-20", "expiring soon",
+            ),
+            (
+                {"opened_date": "2026-11-15", "quantity_value": 0},
+                "2026-11-19", "2026-11-20", "consumed",
+            ),
+        ],
+    )
+    def test_prepare_item_data(
+        self, db_session, monkeypatch, fields, purchase_date, expiration, status
+    ):
+        from stock_manager.api.services import prepare_item_data
+
+        monkeypatch.setattr(
+            "stock_manager.api.services.household_today", lambda db: date(2026, 11, 19)
+        )
+        data = make_item_model_data(
+            unopened_expiration_date="2026-11-20",
+            current_expiration_date="infinite",
+            purchase_date=None,
+        )
+        data.update(fields)
+
+        prepared = prepare_item_data(db_session, data)
+
+        assert prepared["purchase_date"] == purchase_date
+        assert prepared["current_expiration_date"] == expiration
+        assert prepared["status"] == status
+
+    def test_prepare_item_data_without_dates(self, db_session):
+        from stock_manager.api.services import prepare_item_data
+
+        data = prepare_item_data(db_session, {"quantity_value": 1})
+
+        assert data["current_expiration_date"] == "infinite"
+        assert data["status"] == "active"
 
 
 class TestUpdateItem:
