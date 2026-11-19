@@ -11,6 +11,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
@@ -51,6 +52,46 @@ class Category(Base):
     parent = relationship("Category", remote_side="Category.id", back_populates="children")
     children = relationship("Category", back_populates="parent")
 
+
+
+class ReceiptItemAlias(Base):
+    """The latest confirmation for a normalized receipt line at one store."""
+
+    __tablename__ = "receipt_item_aliases"
+    __table_args__ = (
+        UniqueConstraint("store_key", "raw_name_normalized", name="uq_receipt_alias_store_raw"),
+        {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_bin"},
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    store_key = Column(String(255), nullable=False)
+    store_name = Column(String(255), nullable=True)
+    raw_name_normalized = Column(String(255), nullable=False)
+    raw_name_original = Column(String(255), nullable=False)
+    confirmed_item_name = Column(String(255), nullable=False)
+    confirmed_category_id = Column(Integer, ForeignKey("categories.id", ondelete="SET NULL"), nullable=True)
+    confirmed_quantity_unit = Column(String(50), nullable=False)
+    confirmed_location = Column(String(100), nullable=False)
+    specificity = Column(String(32), nullable=False, server_default="unknown")
+    alias_mode = Column(String(8), nullable=False, server_default="suggest")
+    confirmed_count = Column(Integer, nullable=False, server_default="0")
+    distinct_confirmed_names_count = Column(Integer, nullable=False, server_default="0")
+    last_confirmed_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=utcnow, server_default=func.now())
+    updated_at = Column(DateTime, nullable=False, default=utcnow, server_default=func.now(), onupdate=utcnow)
+
+    names = relationship("ReceiptAliasName")
+
+
+class ReceiptAliasName(Base):
+    """Frequency of a confirmed name within one receipt alias."""
+
+    __tablename__ = "receipt_alias_names"
+    __table_args__ = {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_bin"}
+
+    alias_id = Column(Integer, ForeignKey("receipt_item_aliases.id", ondelete="CASCADE"), primary_key=True)
+    confirmed_item_name = Column(String(255), primary_key=True)
+    count = Column(Integer, nullable=False, server_default="0")
 
 
 class Item(Base):

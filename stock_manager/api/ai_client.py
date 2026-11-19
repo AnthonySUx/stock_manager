@@ -106,6 +106,7 @@ class AIConfig:
     stream: bool = True
     vision_enabled: bool = False
     image_detail: str = "high"
+    receipt_lookup_provider: str = "none"
     max_tokens: int = 8192
     # Streamed text calls: first data, then the longest gap between chunks.
     first_token_timeout: float = 20.0
@@ -161,6 +162,11 @@ def load_config(environ=None) -> AIConfig:
     else:
         logger.error("Invalid AI_IMAGE_DETAIL (use low, high or auto); AI vision is disabled.")
         values["vision_enabled"] = False
+    receipt_lookup = env.get("RECEIPT_PRODUCT_LOOKUP_PROVIDER", "").strip().lower() or "none"
+    if receipt_lookup != "none":
+        logger.warning("Unsupported RECEIPT_PRODUCT_LOOKUP_PROVIDER; using none.")
+    else:
+        values["receipt_lookup_provider"] = receipt_lookup
     stream = env.get("AI_STREAM", "").strip().lower()
     if stream in ("", "true"):
         values["stream"] = True

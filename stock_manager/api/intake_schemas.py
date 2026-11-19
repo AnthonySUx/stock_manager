@@ -5,6 +5,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field, model_serializer
 
 from stock_manager.api.recipe_schemas import AIWarning
+from stock_manager.api.receipt_schemas import ReceiptCandidateFields, ReceiptSpecificity
 from stock_manager.api.schemas import DateStr, ExpirationStr
 
 MAX_DRAFT_ITEMS = 100
@@ -34,7 +35,7 @@ class CandidateSource(BaseModel):
     span: str | None = Field(None, max_length=200)
 
 
-class IntakeCandidate(BaseModel):
+class IntakeCandidate(ReceiptCandidateFields):
     temporary_id: TemporaryId
     name: str | None = Field(None, max_length=255)
     raw_name: str | None = Field(None, max_length=255)
@@ -54,6 +55,15 @@ class IntakeCandidate(BaseModel):
     matched_restock_id: int | None = Field(None, gt=0)
     restock_action: RestockAction | None = None
     notes: str | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize_receipt_fields(self, serialize):
+        result = serialize(self)
+        if self.source.input_kind != "receipt":
+            for field in ReceiptCandidateFields.model_fields:
+                if getattr(self, field) is None:
+                    result.pop(field, None)
+        return result
 
 
 class TextInput(BaseModel):
@@ -148,6 +158,8 @@ class ConfirmItem(BaseModel):
     location: str | None = None
     notes: str | None = None
     raw_name: str | None = Field(None, max_length=255)
+    store_name: str | None = Field(None, max_length=255)
+    specificity: ReceiptSpecificity | None = None
     matched_restock_id: int | None = None
     restock_action: RestockAction | None = None
 

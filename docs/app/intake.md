@@ -144,6 +144,43 @@ Check `GET /api/capabilities` for `ai.vision` before offering image intake.
 It requires a configured AI provider and `AI_VISION_ENABLED=true`.
 The switch defaults to off pending provider validation. See [backend setup](setup.md).
 
+## Receipt lines and learned aliases
+
+Receipt text and receipt photos use the same parse endpoints. Receipt lines
+appear as separate `add` operations, with subtotals, taxes, coupons, and other
+non-product lines in `unparsed_fragments`. Receipt candidates can include
+`raw_name`, `generic_name`, `store_name`, `price`, `specificity`,
+`alias_mode`, `auto_apply_allowed`, `requires_user_review`, `review_reason`,
+`match_method`, and up to five `suggestions` ranked by confirmation count.
+Prices are only used during review. A receipt purchase date can fill in an
+omitted `context.purchase_date`, with a `purchase_date_from_receipt` warning.
+
+Confirm a receipt candidate with its `raw_name`, `store_name`, and
+`specificity` along with the reviewed item fields. The service learns the
+mapping in the same transaction as the inventory and restock changes.
+History is scoped to the normalized store and receipt label. A receipt with
+an unknown store has its own history. The receipt label is normalized for
+case, width, whitespace, and recognizable trailing prices and quantities.
+
+| Mode | Behavior |
+| --- | --- |
+| `auto` | A specific label with at least three confirmations of exactly one name can reuse the confirmed name, category, and unit with `match_method=alias`. A deleted category makes that mapping reviewable. |
+| `suggest` | The proposed name stays editable and prior confirmed names appear as suggestions. A label associated with multiple distinct confirmed names stays in this mode. |
+| `blocked` | The stored mapping stays blocked from automatic reuse. |
+
+Generic labels such as “produce” and “蔬菜” always require review, including
+after repeated confirmations. The candidate has `name: null` so the user can
+choose or enter a specific item. Distinct rows with the same generic label
+remain separate. Repeated rows on one receipt after the first include
+`duplicate_generic_line`. Other review reasons include `first_seen`,
+`low_confidence` (below 0.6), `multi_mapped_alias`, `inferred_fields`, and
+`alias_suggestion`.
+
+`RECEIPT_PRODUCT_LOOKUP_PROVIDER=none` is the available lookup mode. First-seen
+labels use `match_method=ai_knowledge`. Future providers plug into
+`receipt_lookup.lookup_products(raw_names, store)`, whose inputs are limited
+to the store and raw item labels.
+
 ## Confirm the reviewed draft
 
 Send `POST /api/intake/confirm` with 1–100 reviewed items. Optional `defaults`
@@ -235,6 +272,9 @@ are zero-based positions in the model reply.
 | `expiration_before_purchase` | | The returned expiration date is before the purchase date. |
 | `restock_match_dropped` | `field` | The referenced restock item was unavailable or no longer pending. |
 | `restock_already_done` | `restock_id` | Confirmation saved stock and skipped the restock action. |
+| `duplicate_generic_line` | | This generic label occurs on more than one row of the receipt. |
+| `purchase_date_from_receipt` | | The candidate purchase date came from a receipt. |
+| `quantity_unit_inferred`, `location_inferred` | `field` | A receipt field was inferred and can be reviewed. |
 
 ## Default shelf life
 
