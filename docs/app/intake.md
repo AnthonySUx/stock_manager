@@ -148,6 +148,11 @@ such as a candidate from a receipt. The model reports structured label
 evidence. The backend calculates the expiration date and returns the usual
 candidate or update fields.
 
+When a close-up matches a new receipt row in the same upload, the result can
+be a single receipt `add` with the date derived from the other image. The
+operation keeps the receipt as its source. The backend checks that the label
+evidence points to a different image in the batch.
+
 - For `best_before` and `use_by`, the printed date is the expiration date.
 - For `production_plus_shelf_life`, the backend adds the displayed shelf life
   to the production date. Days use elapsed calendar days. Months and years
@@ -158,7 +163,8 @@ candidate or update fields.
 - An unclear label or out-of-range result adds `printed_date_unclear`. A date
   that can be calculated is returned in `suggested_unopened_expiration_date`.
   A previously trusted draft date stays in place when the new label is unclear.
-  Structured evidence is accepted only from a product close-up.
+  Labels showing only a year and month are treated as unclear.
+  Evidence from an ineligible source is discarded with `printed_evidence_dropped`.
 
 An overview photo produces one `add` per recognizable item. Inferred
 quantities carry `quantity_value_inferred` with a
@@ -293,6 +299,7 @@ are zero-based positions in the model reply.
 | `ai_expiration_ignored` | `date` | A model date was discarded in favor of a category estimate or a trusted draft date. |
 | `expiration_before_purchase` | | The returned expiration date is before the purchase date. |
 | `printed_date_unclear` | | A close-up label lacks usable evidence or yields an out-of-range date. A calculable date is kept as a suggestion. |
+| `printed_evidence_dropped` | | The label was attached to an unsupported operation or referenced an ineligible image index. |
 | `quantity_value_inferred` | | An overview photo did not establish the exact quantity. |
 | `restock_match_dropped` | `field` | The referenced restock item was unavailable or no longer pending. |
 | `restock_already_done` | `restock_id` | Confirmation saved stock and skipped the restock action. |

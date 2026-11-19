@@ -13,6 +13,7 @@ PARSE = "/api/intake/parse"
 TODAY = date(2026, 11, 20)
 DRAFT_ID = "cand_12345678"
 UNCLEAR = {"code": "printed_date_unclear", "params": {}}
+EVIDENCE_DROPPED = {"code": "printed_evidence_dropped", "params": {}}
 QUANTITY_INFERRED = {"code": "quantity_value_inferred", "params": {}}
 
 
@@ -94,11 +95,11 @@ def _update(kind="product_closeup", **changes):
     return {"op": "update", "source": _source(kind), "temporary_id": DRAFT_ID, "changes": changes}
 
 
-def _photo_parse(client, photo_ai, *operations, draft=()):
+def _photo_parse(client, photo_ai, *operations, draft=(), image_count=1):
     photo_ai.reply = json.dumps({"operations": operations})
     response = client.post(PARSE, files=[
         ("payload", (None, json.dumps({"draft": {"items": draft}, "context": {"locale": "en"}}))),
-        ("images", ("product.jpg", b"\xff\xd8\xffmock product image", "image/jpeg")),
+        *(("images", (f"image-{index}.jpg", b"\xff\xd8\xffmock image", "image/jpeg")) for index in range(image_count)),
     ])
     assert response.status_code == 200, response.text
     return response.json()
@@ -135,6 +136,7 @@ def test_closeup_updates_existing_receipt_draft_with_calculated_expiry(client, p
     assert "Use update with the existing temporary_id if the close-up" in prompt
     assert "already added from a receipt" in prompt
     assert "Do not compute or return the final unopened_expiration_date" in prompt
+    assert "If the package shows only a year and month, use readable=false" in prompt
     assert DRAFT_ID in photo_ai.requests[0]["messages"][1]["content"][0]["text"]
 
 
@@ -229,6 +231,56 @@ def test_invalid_printed_evidence_does_not_store_any_expiration(client, photo_ai
     assert candidate["warnings"] == [UNCLEAR]
 
 
+@pytest.mark.parametrize("operation_level", [False, True])
+def test_same_batch_receipt_add_uses_dates_from_matching_closeup(client, photo_ai, operation_level):
+    receipt = _add(
+        kind="receipt", raw_name="MILK", specificity="specific_product",
+        printed=_shelf("2027-01-31", 1, "month", image_index=1),
+    )
+    if operation_level:
+        receipt["printed"] = receipt["candidate"].pop("printed")
+    result = _photo_parse(client, photo_ai, receipt, image_count=2)
+
+    assert len(result["operations"]) == 1
+    operation = result["operations"][0]
+    assert operation["op"] == "add" and operation["source"]["image_index"] == 0
+    candidate = operation["candidate"]
+    assert candidate["unopened_expiration_date"] == "2027-02-28"
+    assert candidate["expiration_source"] == "printed"
+    assert candidate["suggested_unopened_expiration_date"] is None
+    assert candidate["source"]["input_kind"] == "receipt" and candidate["raw_name"] == "MILK"
+    assert candidate["warnings"] == []
+    prompt = photo_ai.system_prompts[0]
+    assert "If a close-up matches a new receipt row in the same batch, use the receipt's single add." in prompt
+    assert "set printed.image_index to the close-up's" in prompt
+    assert "Do not emit a separate add or update for that close-up." in prompt
+
+
+@pytest.mark.parametrize("index", [0, 2, -1, True, "1", None])
+def test_receipt_add_drops_invalid_printed_image_reference(client, photo_ai, index):
+    label = _label("2026-12-12")
+    if index is not None:
+        label["image_index"] = index
+    result = _photo_parse(client, photo_ai, _add(
+        kind="receipt", printed=label, unopened_expiration_date="2026-12-12", expiration_source="printed",
+    ), image_count=2)
+    candidate = result["operations"][0]["candidate"]
+    assert candidate["unopened_expiration_date"] is None
+    assert candidate["suggested_unopened_expiration_date"] is None
+    assert candidate["expiration_source"] == "none"
+    assert candidate["warnings"] == [EVIDENCE_DROPPED]
+
+
+def test_unrecognized_printed_kind_cannot_use_valid_shelf_life_to_create_a_date(client, photo_ai):
+    label = _label("2026-12-12", "production_date", shelf_life={"value": 5, "unit": "day"})
+    result = _photo_parse(client, photo_ai, _add(printed=label))
+    candidate = result["operations"][0]["candidate"]
+    assert candidate["unopened_expiration_date"] is None
+    assert candidate["suggested_unopened_expiration_date"] is None
+    assert candidate["expiration_source"] == "none"
+    assert candidate["warnings"] == [UNCLEAR]
+
+
 def test_text_parse_cannot_promote_structured_or_raw_printed_dates(client, fake_ai, monkeypatch):
     monkeypatch.setattr(intake_services.localization, "today", lambda db: TODAY)
     operations = [
@@ -250,15 +302,27 @@ def test_text_parse_cannot_promote_structured_or_raw_printed_dates(client, fake_
     assert candidate["unopened_expiration_date"] is None
     assert candidate["suggested_unopened_expiration_date"] == "2026-12-01"
     assert candidate["expiration_source"] == "estimated"
-    assert {"code": "op_field_dropped", "params": {"field": "printed", "index": "1"}} in result["warnings"]
+    assert EVIDENCE_DROPPED in candidate["warnings"]
+    assert EVIDENCE_DROPPED in result["warnings"]
 
 
-@pytest.mark.parametrize("source_kind", ["receipt", "product_overview"])
-def test_non_closeup_image_cannot_supply_structured_printed_date(client, photo_ai, source_kind):
-    result = _photo_parse(client, photo_ai, _add(kind=source_kind, printed=_label("2026-12-12")))
+def test_overview_cannot_supply_structured_printed_date(client, photo_ai):
+    result = _photo_parse(client, photo_ai, _add(
+        kind="product_overview", printed=_label("2026-12-12", image_index=1),
+    ), image_count=2)
     candidate = result["operations"][0]["candidate"]
     assert candidate["unopened_expiration_date"] is None
     assert candidate["expiration_source"] == "none"
+    assert EVIDENCE_DROPPED in candidate["warnings"]
+
+
+def test_receipt_update_cannot_supply_cross_image_printed_evidence(client, photo_ai):
+    result = _photo_parse(
+        client, photo_ai, _update(kind="receipt", printed=_label("2026-12-12", image_index=1)),
+        image_count=2, draft=[_draft()],
+    )
+    assert result["operations"] == []
+    assert EVIDENCE_DROPPED in result["warnings"]
 
 
 def test_overview_keeps_distinct_adds_and_caps_inferred_quantities(client, photo_ai):

@@ -137,12 +137,27 @@ def printed_expiration(printed, today: date) -> tuple[date | None, list[dict]]:
     return expiration, []
 
 
-def _extract_printed(raw: dict, source: dict | None, today: date) -> tuple[dict, tuple[date | None, list[dict]] | None]:
-    if not source or source.get("input_kind") != "product_closeup" or "printed" not in raw:
+def _extract_printed(
+    raw: dict, source: dict | None, today: date, warnings: list[dict], *, receipt_add_image_count: int = 0,
+) -> tuple[dict, tuple[date | None, list[dict]] | None]:
+    if "printed" not in raw:
         return raw, None
-    # The structured label is the evidence. Ignore a model-computed expiration accompanying it.
-    fields = {key: value for key, value in raw.items() if key != "printed" and key not in _EXPIRATION_VALUES}
-    return fields, printed_expiration(raw["printed"], today)
+    printed = raw["printed"]
+    kind = source.get("input_kind") if source else None
+    allowed = kind == "product_closeup"
+    if kind == "receipt" and receipt_add_image_count and isinstance(printed, dict):
+        index = printed.get("image_index")
+        allowed = type(index) is int and 0 <= index < receipt_add_image_count and index != source["image_index"]
+
+    # Image evidence cannot fall back to a model-computed expiration accompanying the label.
+    fields = {
+        key: value for key, value in raw.items()
+        if key != "printed" and (source is None or key not in _EXPIRATION_VALUES)
+    }
+    if not allowed:
+        warnings.append(warning("printed_evidence_dropped"))
+        return fields, None
+    return fields, printed_expiration(printed, today)
 
 
 def _known_id(value, entries: dict[int, dict]) -> int | None:
@@ -182,10 +197,10 @@ def _clean_fields(raw: dict, context: "PreparedParse", warnings: list[dict]) -> 
 
 def _add_candidate(
     raw: dict, context: "PreparedParse", used_ids: set[str], source: dict | None = None,
-    *, receipt: tuple[ReceiptLine, AliasHistory | None] | None = None,
+    *, receipt: tuple[ReceiptLine, AliasHistory | None] | None = None, image_count: int = 0,
 ) -> dict | None:
     warnings: list[dict] = []
-    raw, printed = _extract_printed(raw, source, context.today)
+    raw, printed = _extract_printed(raw, source, context.today, warnings, receipt_add_image_count=image_count)
     fields = _clean_fields(
         {key: value for key, value in raw.items() if key in EDITABLE_FIELDS},
         context, warnings,
@@ -363,7 +378,12 @@ def _draft_operation(row: dict, draft: dict, locale: str, inventory: Inventory) 
     """Check an operation's structure, targets and fixed enums."""
     op = row.get("op")
     if op == "add":
-        return (row, None) if isinstance(row.get("candidate"), dict) else (None, "op_invalid")
+        candidate = row.get("candidate")
+        if not isinstance(candidate, dict):
+            return None, "op_invalid"
+        if "printed" in row and "printed" not in candidate:
+            row = {**row, "candidate": {**candidate, "printed": row["printed"]}}
+        return row, None
     if op == "clarify":
         ids = row.get("temporary_ids")
         if not isinstance(ids, list) or not ids or not all(isinstance(key, str) for key in ids):
@@ -482,7 +502,9 @@ def clean_parse_output(
             case "add":
                 source = operation.get("source") if image_count else None
                 receipt = (receipts or {}).get(index)
-                candidate = _add_candidate(operation["candidate"], context, used_ids, source, receipt=receipt)
+                candidate = _add_candidate(
+                    operation["candidate"], context, used_ids, source, receipt=receipt, image_count=image_count,
+                )
                 if candidate is None:
                     warnings.append(warning("op_invalid", index=index))
                     continue
@@ -497,7 +519,9 @@ def clean_parse_output(
                     operation["source"] = source
             case "update":
                 field_warnings: list[dict] = []
-                raw_changes, printed = _extract_printed(operation["changes"], operation.get("source"), context.today)
+                raw_changes, printed = _extract_printed(
+                    operation["changes"], operation.get("source"), context.today, field_warnings,
+                )
                 changes = _update_changes(raw_changes, context, field_warnings)
                 warnings.extend(
                     warning(w["code"], index=index, **w["params"])
