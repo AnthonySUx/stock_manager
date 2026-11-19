@@ -39,6 +39,9 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+_DATA_URI = re.compile(r"""\bdata:[^\s"'<>\x60]+""", re.IGNORECASE)
+_LONG_BASE64 = re.compile(r"[A-Za-z0-9+/_-]{100,}={0,2}")
+
 DEFAULT_BASE_URL = "https://api.deepseek.com"
 DEFAULT_MODEL = "deepseek-flash"  # deepseek-chat is retired (#66)
 
@@ -257,7 +260,7 @@ def _error_message(body: Any) -> Optional[str]:
     return message if isinstance(message, str) and message.strip() else None
 
 
-def _error_detail(response: httpx.Response) -> str:
+def _error_detail(response: httpx.Response, *, protect_content: bool = False) -> str:
     """The provider's error message, for the server log.
 
     401 / 403 only say to check the key: their body may echo part of it.
@@ -268,7 +271,12 @@ def _error_detail(response: httpx.Response) -> str:
         message = _error_message(response.json())
     except ValueError:
         message = None
-    message = _short(message or response.text)
+    message = message or response.text
+    if protect_content:
+        # Redact first so an embedded upload cannot consume the diagnostic budget.
+        message = _DATA_URI.sub("[redacted]", message)
+        message = _LONG_BASE64.sub("[redacted]", message)
+    message = _short(message)
     return f": {message}" if message else ""
 
 
@@ -455,7 +463,9 @@ async def _request(
                                 "AI returned HTTP %d (attempt %d), retrying", response.status_code, attempt
                             )
                             continue
-                        detail = "" if protect_content else _error_detail(response)
+                        if protect_content and response.status_code not in (401, 403):
+                            await response.aread()
+                        detail = _error_detail(response, protect_content=protect_content)
                         raise AIUpstreamError(
                             f"AI returned HTTP {response.status_code}{detail}", "http_error"
                         )

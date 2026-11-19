@@ -134,7 +134,7 @@ def _add_candidate(
         return None
     if fields.get("purchase_date") is None:
         fields["purchase_date"] = context.purchase_date.isoformat()
-    fields.update(_expiration_changes(fields, {}, context, warnings))
+    fields.update(_expiration_changes(fields, {}, context, warnings, allow_stated=source is None))
     if source is None:
         raw_source = raw.get("source")
         source = {
@@ -174,7 +174,7 @@ def _update_changes(raw: dict, context: "PreparedParse", warnings: list[dict]) -
 
 
 def _expiration_changes(
-    fields: dict, previous: dict, context: "PreparedParse", warnings: list[dict]
+    fields: dict, previous: dict, context: "PreparedParse", warnings: list[dict], *, allow_stated: bool,
 ) -> dict:
     actual_field = "unopened_expiration_date"
     suggestion_field = "suggested_unopened_expiration_date"
@@ -185,7 +185,7 @@ def _expiration_changes(
     prior_date = previous.get(actual_field)
     prior_source = previous.get("expiration_source")
     new_suggestion = fields.get(suggestion_field)
-    if new_date is not None and fields.get("expiration_source") == "stated":
+    if allow_stated and new_date is not None and fields.get("expiration_source") == "stated":
         actual, suggested, source = new_date, None, "stated"
     elif prior_date and prior_source in ("printed", "stated") and (
         actual_field not in fields or new_date is not None
@@ -381,7 +381,9 @@ def clean_parse_output(
                 key = operation["temporary_id"]
                 previous = draft[key]
                 if _EXPIRATION_FIELDS.intersection(changes):
-                    changes.update(_expiration_changes(changes, previous, context, field_warnings))
+                    changes.update(_expiration_changes(
+                        changes, previous, context, field_warnings, allow_stated=image_count == 0,
+                    ))
                 match_id = changes.get("matched_restock_id", previous.get("matched_restock_id"))
                 if _RESTOCK_FIELDS.intersection(changes) and (
                     match_id is not None or "matched_restock_id" in changes

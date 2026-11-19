@@ -134,6 +134,9 @@ Each returned image operation includes `source.input_kind`
 (`receipt`, `product_closeup`, or `product_overview`) and a zero-based
 `source.image_index` in upload order. An add operation also copies that source
 to the candidate. Existing text operations retain their response shape.
+Dates read from images are suggestions. The category default takes precedence
+when available. An image operation preserves a previously trusted draft date
+when the model proposes a replacement.
 Images are sent to the configured AI provider for parsing. The backend keeps
 uploads in memory and logs the count and total bytes.
 

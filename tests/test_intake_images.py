@@ -4,11 +4,13 @@ import asyncio
 import base64
 import json
 import logging
+from datetime import date, timedelta
 
 import httpx
 import pytest
 
 from stock_manager.api import ai_client, intake_services, uploads
+from stock_manager.api.category_services import get_category_by_slug
 from stock_manager.api.errors import APIError
 from stock_manager.api.intake_schemas import ParseDraftRequest
 from stock_manager.api.uploads import image_mime
@@ -173,6 +175,9 @@ def test_image_prompt_and_operations_use_validated_source(db_session, fake_visio
     assert "classify each image" in system["content"]
     assert "overlap" in system["content"]
     assert "one long receipt" in system["content"]
+    assert "Write item names and questions in English" in system["content"]
+    assert "Keep brand names exactly as printed on the packaging" in system["content"]
+    assert "Mark dates read from an image as printed. Never use stated for image dates." in system["content"]
     prompt, *parts = user["content"]
     context = json.loads(prompt["text"])
     assert context["image_count"] == 3 and context["purchase_date"] == "2026-11-20"
@@ -205,12 +210,10 @@ def test_invalid_image_source_drops_operation(db_session, fake_vision, source):
     ]
 
 
-@pytest.mark.parametrize("provider_reply", ["http", "invalid_json", "metadata", "transport"])
+@pytest.mark.parametrize("provider_reply", ["invalid_json", "metadata", "transport"])
 def test_image_call_excludes_provider_echoes_from_logs(fake_vision, caplog, provider_reply):
     echo = "PRIVATE_UPLOAD_CONTENT"
-    if provider_reply == "http":
-        fake_vision.responses = [httpx.Response(400, json={"error": {"message": echo}})]
-    elif provider_reply == "invalid_json":
+    if provider_reply == "invalid_json":
         fake_vision.reply = echo
     elif provider_reply == "transport":
         fake_vision.responses = [httpx.ConnectError(echo), httpx.ConnectError(echo)]
@@ -243,6 +246,117 @@ def _multipart(*images, payload='{"draft":{"items":[]},"context":{"locale":"en"}
     return fields + [
         ("images", (f"image-{index}.bin", image, "application/octet-stream"))
         for index, image in enumerate(images)
+    ]
+
+
+def test_image_http_error_logs_provider_reason(client, fake_vision, caplog):
+    fake_vision.responses = [httpx.Response(400, json={
+        "error": {"message": "image_url is not supported"},
+    })]
+
+    response = client.post(PARSE, files=_multipart(JPEG))
+
+    assert response.status_code == 502
+    assert response.json() == {"code": "ai_upstream_error"}
+    assert "AI returned HTTP 400: image_url is not supported" in caplog.text
+
+
+def test_image_http_error_strips_data_uris_before_truncating(client, fake_vision, caplog):
+    encoded = "/9j/" + "ABCD" * 70
+    fake_vision.responses = [httpx.Response(400, json={
+        "error": {"message": f"data:image/jpeg;base64,{encoded} was rejected. DATA:text/plain,secret"},
+    })]
+
+    response = client.post(PARSE, files=_multipart(JPEG))
+
+    assert response.status_code == 502
+    assert "was rejected" in caplog.text
+    assert "data:image" not in caplog.text
+    assert "DATA:text" not in caplog.text
+    assert "secret" not in caplog.text
+    assert encoded[:40] not in caplog.text
+
+
+def test_image_http_error_redacts_bare_base64_and_limits_message(client, fake_vision, caplog):
+    encoded = "aB+/0123" * 12 + "qR-_"
+    explanation = "Could not process this image. " * 12
+    fake_vision.responses = [httpx.Response(400, json={
+        "error": {"message": f"{encoded} {explanation.strip()}"},
+    })]
+
+    response = client.post(PARSE, files=_multipart(JPEG))
+
+    assert response.status_code == 502
+    assert "aB+/0123" not in caplog.text
+    details = [
+        record.getMessage().split("AI returned HTTP 400: ", 1)[1]
+        for record in caplog.records if "AI returned HTTP 400: " in record.getMessage()
+    ]
+    assert details
+    assert all(len(detail) == 200 and detail.startswith("[redacted] Could not process") for detail in details)
+
+
+@pytest.mark.parametrize("source", ["stated", "printed"])
+def test_image_add_and_update_treat_model_dates_as_suggestions(client, fake_vision, db_session, source):
+    purchase = date.today()
+    model_date = (purchase + timedelta(days=12)).isoformat()
+    dairy = get_category_by_slug(db_session, "dairy")
+    payload = {
+        "draft": {"items": [{
+            "temporary_id": "cand_12345678", "name": "Milk", "confidence": 1,
+            "category_id": dairy.id, "source": {"input_kind": "text"},
+        }]},
+        "context": {"locale": "en", "purchase_date": purchase.isoformat()},
+    }
+    dates = {"unopened_expiration_date": model_date, "expiration_source": source}
+    image_source = _source("product_closeup")
+    fake_vision.reply = json.dumps({"operations": [
+        _image_add(source=image_source, **dates),
+        {"op": "update", "temporary_id": "cand_12345678", "source": image_source, "changes": dates},
+    ]})
+
+    response = client.post(PARSE, files=_multipart(JPEG, payload=json.dumps(payload)))
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    add, update = body["operations"]
+    assert add["candidate"]["unopened_expiration_date"] is None
+    assert add["candidate"]["suggested_unopened_expiration_date"] == model_date
+    assert add["candidate"]["expiration_source"] == "estimated"
+    assert add["candidate"]["warnings"] == [{"code": "expiration_moved_to_suggested", "params": {}}]
+    assert update["changes"] == {
+        "unopened_expiration_date": None,
+        "suggested_unopened_expiration_date": (purchase + timedelta(days=7)).isoformat(),
+        "expiration_source": "estimated",
+    }
+    assert body["warnings"] == [
+        {"code": "expiration_date_inferred", "params": {"basis": "category_default"}},
+        {"code": "ai_expiration_ignored", "params": {"date": model_date}},
+    ]
+
+
+def test_image_cannot_replace_previously_stated_date(client, fake_vision):
+    purchase = date.today()
+    existing_date = (purchase + timedelta(days=3)).isoformat()
+    model_date = (purchase + timedelta(days=9)).isoformat()
+    payload = {"draft": {"items": [{
+        "temporary_id": "cand_12345678", "name": "Milk", "confidence": 1,
+        "source": {"input_kind": "text"}, "unopened_expiration_date": existing_date,
+        "expiration_source": "stated",
+    }]}}
+    fake_vision.reply = json.dumps({"operations": [{
+        "op": "update", "temporary_id": "cand_12345678", "source": _source(),
+        "changes": {"unopened_expiration_date": model_date, "expiration_source": "stated"},
+    }]})
+
+    response = client.post(PARSE, files=_multipart(JPEG, payload=json.dumps(payload)))
+
+    assert response.status_code == 200, response.text
+    assert response.json()["operations"][0]["changes"] == {
+        "unopened_expiration_date": existing_date, "expiration_source": "stated",
+    }
+    assert response.json()["warnings"] == [
+        {"code": "ai_expiration_ignored", "params": {"date": model_date}},
     ]
 
 
@@ -423,11 +537,11 @@ def test_vision_off_does_not_read_the_body(client, fake_ai):
 
 def test_content_length_over_total_limit_rejects_before_body(client, fake_vision):
     response, seen = _stream_post(
-        client, [b"unread body"], **{"Content-Length": str(uploads.MAX_REQUEST_BYTES + 1)},
+        client, [b"unread body"], **{"Content-Length": str(42_270_720 + 1)},
     )
     assert response.status_code == 413
     assert response.json()["code"] == "intake_request_too_large"
-    assert response.json()["params"] == {"max_bytes": uploads.MAX_REQUEST_BYTES}
+    assert response.json()["params"] == {"max_bytes": 42_270_720}
     assert not seen and not fake_vision.requests
 
 
@@ -436,6 +550,18 @@ def test_invalid_content_length_is_rejected_without_reading_body(client, fake_vi
     assert response.status_code == 422
     assert response.json()["code"] == "intake_multipart_invalid"
     assert not seen and not fake_vision.requests
+
+
+def test_duplicate_content_disposition_rejects_part_before_reading_file(client, fake_vision):
+    payload = _part_header("payload") + b'{"draft":{"items":[]}}\r\n'
+    header = (
+        b'--example\r\nContent-Disposition: form-data; name="images"; filename="test.jpg"\r\n'
+        b'content-disposition: form-data; name="images"; filename="test.jpg"\r\n\r\n'
+    )
+    response, seen = _stream_post(client, [payload + header, JPEG + b"\r\n--example--\r\n"])
+    assert response.status_code == 422
+    assert response.json()["code"] == "intake_multipart_invalid"
+    assert seen == [0] and not fake_vision.requests
 
 
 @pytest.mark.parametrize("claimed_length", [None, "1"])
