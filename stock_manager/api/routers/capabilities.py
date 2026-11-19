@@ -25,4 +25,5 @@ class CapabilitiesResponse(BaseModel):
 @router.get("", response_model=CapabilitiesResponse)
 def capabilities():
     """Which optional features are available."""
-    return CapabilitiesResponse(ai=AICapabilities(text=ai_client.is_available()))
+    config = ai_client.get_config()
+    return CapabilitiesResponse(ai=AICapabilities(text=config.available, vision=config.vision_available))

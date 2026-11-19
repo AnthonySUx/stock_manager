@@ -106,7 +106,7 @@ def client(db_session, monkeypatch):
 # ─── AI (never calls the real provider) ──────────────────────────
 
 
-AI_ENV_VARS = ("AI_RECIPE_ENABLED", "AI_API_KEY", "AI_BASE_URL")
+AI_ENV_VARS = ("AI_RECIPE_ENABLED", "AI_API_KEY", "AI_BASE_URL", "AI_VISION_ENABLED", "AI_IMAGE_DETAIL")
 
 
 def _refuse_real_ai(request: httpx.Request) -> httpx.Response:

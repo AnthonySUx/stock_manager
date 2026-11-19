@@ -39,6 +39,9 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+_DATA_URI = re.compile(r"""\bdata:[^\s"'<>\x60]+""", re.IGNORECASE)
+_LONG_BASE64 = re.compile(r"[A-Za-z0-9+/_-]{100,}={0,2}")
+
 DEFAULT_BASE_URL = "https://api.deepseek.com"
 DEFAULT_MODEL = "deepseek-flash"  # deepseek-chat is retired (#66)
 
@@ -75,6 +78,10 @@ class AIUnavailableError(AIError):
     reason = "not_configured"
 
 
+class AIVisionUnavailableError(AIUnavailableError):
+    code = "ai_vision_unavailable"
+
+
 class AIUpstreamError(AIError):
     code = "ai_upstream_error"
     status_code = 502
@@ -97,6 +104,8 @@ class AIConfig:
     model: str = DEFAULT_MODEL
     temperature: float = 0.2
     stream: bool = True
+    vision_enabled: bool = False
+    image_detail: str = "high"
     max_tokens: int = 8192
     # Streamed text calls: first data, then the longest gap between chunks.
     first_token_timeout: float = 20.0
@@ -113,6 +122,10 @@ class AIConfig:
     @property
     def available(self) -> bool:
         return self.enabled and bool(self.api_key)
+
+    @property
+    def vision_available(self) -> bool:
+        return self.available and self.vision_enabled
 
 
 # (env var, field, type, minimum)
@@ -140,7 +153,14 @@ def load_config(environ=None) -> AIConfig:
         "base_url": env.get("AI_BASE_URL", "").strip() or DEFAULT_BASE_URL,
         "api_key": env.get("AI_API_KEY", "").strip(),
         "model": env.get("AI_MODEL", "").strip() or DEFAULT_MODEL,
+        "vision_enabled": env.get("AI_VISION_ENABLED", "").strip().lower() == "true",
     }
+    image_detail = env.get("AI_IMAGE_DETAIL", "").strip().lower() or "high"
+    if image_detail in ("low", "high", "auto"):
+        values["image_detail"] = image_detail
+    else:
+        logger.error("Invalid AI_IMAGE_DETAIL (use low, high or auto); AI vision is disabled.")
+        values["vision_enabled"] = False
     stream = env.get("AI_STREAM", "").strip().lower()
     if stream in ("", "true"):
         values["stream"] = True
@@ -240,7 +260,7 @@ def _error_message(body: Any) -> Optional[str]:
     return message if isinstance(message, str) and message.strip() else None
 
 
-def _error_detail(response: httpx.Response) -> str:
+def _error_detail(response: httpx.Response, *, protect_content: bool = False) -> str:
     """The provider's error message, for the server log.
 
     401 / 403 only say to check the key: their body may echo part of it.
@@ -251,7 +271,12 @@ def _error_detail(response: httpx.Response) -> str:
         message = _error_message(response.json())
     except ValueError:
         message = None
-    message = _short(message or response.text)
+    message = message or response.text
+    if protect_content:
+        # Redact first so an embedded upload cannot consume the diagnostic budget.
+        message = _DATA_URI.sub("[redacted]", message)
+        message = _LONG_BASE64.sub("[redacted]", message)
+    message = _short(message)
     return f": {message}" if message else ""
 
 
@@ -411,7 +436,7 @@ def _stall_error(stats: CallStats, config: AIConfig) -> AIUpstreamError:
 
 async def _request(
     config: AIConfig, payload: dict, stream: bool, timeout: float, total: float,
-    stats: CallStats, reply: _Reply, on_text: Optional[TextCallback],
+    stats: CallStats, reply: _Reply, on_text: Optional[TextCallback], *, protect_content: bool = False,
 ) -> None:
     """Send the request, retrying connection errors, 429 and 5xx once (by
     default) while no content has arrived. Timeouts are not retried."""
@@ -431,14 +456,18 @@ async def _request(
             try:
                 async with client.stream("POST", url, headers=headers, json=payload) as response:
                     if response.status_code >= 400:
-                        await response.aread()
+                        if not protect_content:
+                            await response.aread()
                         if _is_retryable_status(response.status_code) and not last:
                             logger.warning(
                                 "AI returned HTTP %d (attempt %d), retrying", response.status_code, attempt
                             )
                             continue
+                        if protect_content and response.status_code not in (401, 403):
+                            await response.aread()
+                        detail = _error_detail(response, protect_content=protect_content)
                         raise AIUpstreamError(
-                            f"AI returned HTTP {response.status_code}{_error_detail(response)}", "http_error"
+                            f"AI returned HTTP {response.status_code}{detail}", "http_error"
                         )
                     if stream and "text/event-stream" in response.headers.get("content-type", ""):
                         await _read_stream(response, config, stats, reply, on_text, total)
@@ -458,9 +487,13 @@ async def _request(
                     raise _stall_error(stats, config) from exc
                 raise AIUpstreamError(f"AI request timed out after {timeout:g}s", "timeout") from exc
             except httpx.TransportError as exc:
+                detail = "" if protect_content else f": {exc}"
                 if last or reply.parts:
-                    raise AIUpstreamError(f"AI connection failed: {exc}", "connection") from exc
-                logger.warning("AI connection failed (attempt %d), retrying: %s", attempt, exc)
+                    error = AIUpstreamError(f"AI connection failed{detail}", "connection")
+                    if protect_content:
+                        raise error from None
+                    raise error from exc
+                logger.warning("AI connection failed (attempt %d), retrying%s", attempt, detail)
     raise AIUpstreamError("AI request failed")  # pragma: no cover - loop always returns or raises
 
 
@@ -514,13 +547,20 @@ async def chat_json(
     reply = _Reply()
     mode = "stream" if stream else "plain"
 
+    def diagnostics() -> str:
+        # Providers can echo image input in response metadata and error bodies.
+        return f"{stats.now():.1f}s attempts={stats.attempts}" if images else stats.describe()
+
     def fail(error: AIUpstreamError) -> AIUpstreamError:
         logger.warning("AI %s fail %s model=%s %s %s: %s",
-                       label, error.reason, config.model, mode, stats.describe(), error)
+                       label, error.reason, config.model, mode, diagnostics(), error)
         return error
 
     try:
-        await asyncio.wait_for(_request(config, payload, stream, timeout, total, stats, reply, on_text), total)
+        await asyncio.wait_for(
+            _request(config, payload, stream, timeout, total, stats, reply, on_text, protect_content=bool(images)),
+            total,
+        )
     except asyncio.TimeoutError as exc:
         raise fail(_round_error(total)) from exc
     except AIUpstreamError as exc:
@@ -534,6 +574,7 @@ async def chat_json(
             raise fail(AIUpstreamError(
                 f"AI reply was cut off at max_tokens={payload['max_tokens']}", "truncated"
             ))
-        raise fail(AIUpstreamError(f"AI reply is not JSON: {_short(reply.text, 120)!r}", "not_json"))
-    logger.info("AI %s ok model=%s %s %s", label, config.model, mode, stats.describe())
+        detail = "" if images else f": {_short(reply.text, 120)!r}"
+        raise fail(AIUpstreamError(f"AI reply is not JSON{detail}", "not_json"))
+    logger.info("AI %s ok model=%s %s %s", label, config.model, mode, diagnostics())
     return parsed
