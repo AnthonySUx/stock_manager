@@ -22,6 +22,8 @@ The app supports recording:
 
 For items without an expiration date, use `infinite`.
 
+The backend also supports [AI-assisted text intake](intake.md) for drafting and reviewing multiple items before saving.
+
 ### Stock Overview
 
 Displays current stock with:

@@ -1,0 +1,377 @@
+"""Validate the intake operations received from the model."""
+
+from calendar import monthrange
+from datetime import date, timedelta
+from math import isfinite
+from typing import TYPE_CHECKING, get_args
+from uuid import uuid4
+
+from stock_manager.api.ai_output import (
+    Inventory,
+    clean_enum,
+    clean_quantity,
+    dedupe_warnings,
+    in_locale,
+    positive_int_or_none,
+    text_or_none,
+    warning,
+)
+from stock_manager.api.intake_schemas import (
+    DeleteReason,
+    EditableField,
+    ExpirationSource,
+    IntakeCandidate,
+    QuestionCode,
+)
+from stock_manager.api.quantity import same_unit
+
+if TYPE_CHECKING:
+    from stock_manager.api.intake_services import PreparedParse
+
+EDITABLE_FIELDS = frozenset(get_args(EditableField))
+_EXPIRATION_SOURCES = get_args(ExpirationSource)
+_DELETE_REASONS = get_args(DeleteReason)
+_QUESTION_CODES = get_args(QuestionCode)
+_TEXT_LIMITS = {"name": 255, "quantity_unit": 50, "owner": 100, "location": 100, "notes": None}
+_DATE_FIELDS = {"purchase_date", "unopened_expiration_date", "suggested_unopened_expiration_date"}
+_EXPIRATION_FIELDS = _DATE_FIELDS | {"category_id", "expiration_source"}
+_RESTOCK_FIELDS = {"matched_restock_id", "quantity_value", "quantity_unit"}
+
+
+def _text(value, limit: int | None = None) -> str | None:
+    text = text_or_none(value) if isinstance(value, str) else None
+    return text[:limit] if text is not None else None
+
+
+def _numeric(value) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if isfinite(number) else None
+
+
+def _quantity(value, locale: str) -> float | None:
+    if isinstance(value, str):
+        # The shared grammar also understands recipe units, but intake takes
+        # quantity and unit in separate fields and accepts custom unit names.
+        value, unit, ok = clean_quantity(value, None, locale, None)
+        if not ok or unit is not None:
+            return None
+    number = _numeric(value)
+    return number if number is not None and number > 0 else None
+
+
+def _confidence(value) -> float:
+    number = _numeric(value)
+    return max(0.0, min(1.0, number)) if number is not None else 0.0
+
+
+def _parse_date(value, field: str, today: date) -> str | None:
+    if value == "infinite" and field == "unopened_expiration_date":
+        return value
+    if not isinstance(value, str) or len(value) != 10:
+        return None
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError:
+        return None
+    last_day = monthrange(today.year + 5, today.month)[1]
+    limit = today.replace(year=today.year + 5, day=min(today.day, last_day))
+    if parsed.isoformat() == value and today - timedelta(days=30) <= parsed <= limit:
+        return value
+    return None
+
+
+def _known_id(value, entries: dict[int, dict]) -> int | None:
+    # Bound digit strings before conversion to avoid Python's large-int limit.
+    if isinstance(value, str) and len(value.strip()) > 20:
+        return None
+    key = positive_int_or_none(value)
+    return key if key in entries else None
+
+
+def _clean_fields(raw: dict, context: "PreparedParse", warnings: list[dict]) -> dict:
+    """Clean values shared by add candidates and update changes."""
+    fields = {}
+    for field, value in raw.items():
+        if field in _TEXT_LIMITS:
+            fields[field] = _text(value, _TEXT_LIMITS[field])
+            code = "field_value_dropped"
+        elif field in _DATE_FIELDS:
+            fields[field] = _parse_date(value, field, context.today)
+            code = "date_dropped"
+        elif field == "quantity_value":
+            fields[field] = _quantity(value, context.locale)
+            code = "quantity_dropped"
+        elif field == "category_id":
+            fields[field] = _known_id(value, context.categories)
+            code = "category_dropped"
+        elif field == "matched_restock_id":
+            fields[field] = _known_id(value, context.restock)
+            code = "restock_match_dropped"
+        else:
+            fields[field] = clean_enum(value, _EXPIRATION_SOURCES, field, [])
+            code = "field_value_dropped"
+        if value is not None and fields[field] is None:
+            warnings.append(warning(code, field=field))
+    return fields
+
+
+def _add_candidate(
+    raw: dict, context: "PreparedParse", used_ids: set[str]
+) -> dict | None:
+    warnings: list[dict] = []
+    fields = _clean_fields(
+        {key: value for key, value in raw.items() if key in EDITABLE_FIELDS},
+        context, warnings,
+    )
+    if not fields.get("name"):
+        return None
+    if fields.get("purchase_date") is None:
+        fields["purchase_date"] = context.purchase_date.isoformat()
+    fields.update(_expiration_changes(fields, {}, context, warnings))
+    source = raw.get("source")
+    field_confidence = raw.get("field_confidence")
+    return {
+        **fields,
+        "temporary_id": _new_id(used_ids),
+        "raw_name": _text(raw.get("raw_name"), 255),
+        "confidence": _confidence(raw.get("confidence")),
+        "field_confidence": {
+            key: _confidence(value)
+            for key, value in field_confidence.items()
+            if key in EDITABLE_FIELDS
+        } if isinstance(field_confidence, dict) else {},
+        "warnings": dedupe_warnings(warnings),
+        "source": {
+            "input_kind": "text",
+            "span": _text(source.get("span"), 200) if isinstance(source, dict) else None,
+        },
+        "restock_action": _restock_action(fields, context.restock),
+    }
+
+
+def _update_changes(raw: dict, context: "PreparedParse", warnings: list[dict]) -> dict:
+    editable = {}
+    for key, value in raw.items():
+        if key in EDITABLE_FIELDS:
+            editable[key] = value
+        else:
+            warnings.append(warning("op_field_dropped", field=key))
+    changes = _clean_fields(editable, context, warnings)
+    # Only an explicit null can clear a field the model tried to update.
+    return {
+        key: value for key, value in changes.items()
+        if value is not None or editable[key] is None
+    }
+
+
+def _expiration_changes(
+    fields: dict, previous: dict, context: "PreparedParse", warnings: list[dict]
+) -> dict:
+    actual_field = "unopened_expiration_date"
+    suggestion_field = "suggested_unopened_expiration_date"
+    effective = {**previous, **fields}
+    purchase_date = effective.get("purchase_date")
+    purchased = date.fromisoformat(purchase_date) if purchase_date else context.purchase_date
+    new_date = fields.get(actual_field)
+    prior_date = previous.get(actual_field)
+    prior_source = previous.get("expiration_source")
+    new_suggestion = fields.get(suggestion_field)
+    if new_date is not None and fields.get("expiration_source") == "stated":
+        actual, suggested, source = new_date, None, "stated"
+    elif prior_date and prior_source in ("printed", "stated") and (
+        actual_field not in fields or new_date is not None
+    ):
+        # A new model date without a stated source cannot replace a trusted draft date.
+        actual, suggested, source = prior_date, previous.get(suggestion_field), prior_source
+        if new_date and new_date != actual:
+            warnings.append(warning("ai_expiration_ignored", date=new_date))
+    else:
+        actual = None
+        inferred = _category_expiration(effective.get("category_id"), purchased, context, warnings)
+        if inferred is not None:
+            suggested = inferred
+            warnings.append(warning("expiration_date_inferred", basis="category_default"))
+            for model_date in (new_date, new_suggestion):
+                if model_date is not None:
+                    warnings.append(warning("ai_expiration_ignored", date=model_date))
+        else:
+            suggested = effective.get(suggestion_field)
+            if new_date and new_date != "infinite":
+                suggested = new_date
+                warnings.append(warning("expiration_moved_to_suggested"))
+            elif new_date == "infinite":
+                warnings.append(warning("date_dropped", field=actual_field))
+        source = "estimated" if suggested is not None else "none"
+
+    expiration = actual or suggested
+    if expiration and expiration != "infinite" and date.fromisoformat(expiration) < purchased:
+        warnings.append(warning("expiration_before_purchase"))
+    result = {actual_field: actual, suggestion_field: suggested, "expiration_source": source}
+    if not previous:
+        return result
+    return {key: value for key, value in result.items() if key in fields or value != previous.get(key)}
+
+
+def _category_expiration(
+    category_id: int | None, purchased: date, context: "PreparedParse", warnings: list[dict]
+) -> str | None:
+    days = context.categories.get(category_id, {}).get("default_shelf_life_days")
+    if days is None:
+        return None
+    try:
+        return (purchased + timedelta(days=days)).isoformat()
+    except OverflowError:
+        warnings.append(warning("date_dropped", field="suggested_unopened_expiration_date"))
+        return None
+
+
+def _restock_action(candidate: dict, restock: dict[int, dict]) -> str | None:
+    item = restock.get(candidate.get("matched_restock_id"))
+    if item is None:
+        return None
+    quantity = candidate.get("quantity_value")
+    if (
+        quantity is None
+        or item["quantity_value"] is None
+        or not same_unit(candidate.get("quantity_unit"), item["quantity_unit"])
+    ):
+        return "none"
+    return "done" if quantity >= item["quantity_value"] else "partial"
+
+
+def _new_id(used_ids: set[str]) -> str:
+    while True:
+        temporary_id = f"cand_{uuid4().hex[:8]}"
+        if temporary_id not in used_ids:
+            used_ids.add(temporary_id)
+            return temporary_id
+
+
+def _draft_operation(row: dict, draft: dict, locale: str, inventory: Inventory) -> tuple[dict | None, str | None]:
+    """Check an operation's structure, targets and fixed enums."""
+    op = row.get("op")
+    if op == "add":
+        return (row, None) if isinstance(row.get("candidate"), dict) else (None, "op_invalid")
+    if op == "clarify":
+        ids = row.get("temporary_ids")
+        if not isinstance(ids, list) or not ids or not all(isinstance(key, str) for key in ids):
+            return None, "op_invalid"
+        if any(key not in draft for key in ids):
+            return None, "op_target_unknown"
+        code = clean_enum(row.get("question_code"), _QUESTION_CODES, "question_code", [])
+        question = _text(row.get("question"))
+        if not code or not question or len(question) > 200 or not in_locale(question, locale, inventory):
+            return None, "op_invalid"
+        return {"op": op, "temporary_ids": ids, "question_code": code, "question": question}, None
+    if op in ("update", "delete"):
+        target = row.get("temporary_id")
+        if not isinstance(target, str) or target not in draft:
+            return None, "op_target_unknown"
+        if op == "delete":
+            reason = clean_enum(row.get("reason_code"), _DELETE_REASONS, "reason_code", [])
+            if reason is None:
+                return None, "op_invalid"
+            return {"op": op, "temporary_id": target, "reason_code": reason}, None
+        changes = row.get("changes")
+        if isinstance(changes, dict):
+            return {"op": op, "temporary_id": target, "changes": changes}, None
+    return None, "op_invalid"
+
+
+def _prepare_operations(
+    rows: list, draft: dict, locale: str, inventory: Inventory, warnings: list[dict]
+) -> list[tuple[int, dict]]:
+    valid: list[tuple[int, dict]] = []
+    deletes: set[str] = set()
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            warnings.append(warning("op_invalid", index=index))
+            continue
+        operation, error = _draft_operation(row, draft, locale, inventory)
+        if operation is None:
+            warnings.append(warning(error, index=index))
+            continue
+        if operation["op"] == "delete":
+            deletes.add(operation["temporary_id"])
+        valid.append((index, operation))
+
+    operations = []
+    for index, operation in valid:
+        if operation["op"] == "update" and operation["temporary_id"] in deletes:
+            warnings.append(warning("op_conflict", index=index))
+        else:
+            operations.append((index, operation))
+    return operations
+
+
+def _fragments(values) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    fragments = []
+    for value in values:
+        fragment = _text(value, 200)
+        if fragment is not None:
+            fragments.append(fragment)
+            if len(fragments) == 20:
+                break
+    return fragments
+
+
+def clean_parse_output(reply: dict, items: list[IntakeCandidate], context: "PreparedParse") -> dict:
+    """Return validated operations in the order the app applies them."""
+    draft = {item.temporary_id: item.model_dump() for item in items}
+    inventory = Inventory(list(draft.values()))
+    used_ids = set(draft)
+    warnings = list(context.warnings)
+    operations: list[dict] = []
+    for index, operation in _prepare_operations(reply["operations"], draft, context.locale, inventory, warnings):
+        match operation["op"]:
+            case "add":
+                candidate = _add_candidate(operation["candidate"], context, used_ids)
+                if candidate is None:
+                    warnings.append(warning("op_invalid", index=index))
+                    continue
+                operation = {"op": "add", "candidate": candidate}
+            case "update":
+                field_warnings: list[dict] = []
+                changes = _update_changes(operation["changes"], context, field_warnings)
+                warnings.extend(
+                    warning(w["code"], index=index, **w["params"])
+                    if w["code"] == "op_field_dropped" else w
+                    for w in field_warnings
+                )
+                if not changes:
+                    warnings.append(warning("op_invalid", index=index))
+                    continue
+                field_warnings = []
+                key = operation["temporary_id"]
+                previous = draft[key]
+                if _EXPIRATION_FIELDS.intersection(changes):
+                    changes.update(_expiration_changes(changes, previous, context, field_warnings))
+                match_id = changes.get("matched_restock_id", previous.get("matched_restock_id"))
+                if _RESTOCK_FIELDS.intersection(changes) and (
+                    match_id is not None or "matched_restock_id" in changes
+                ):
+                    merged = {**previous, **changes}
+                    if match_id is not None and match_id not in context.restock:
+                        changes["matched_restock_id"] = None
+                        field_warnings.append(warning("restock_match_dropped", field="matched_restock_id"))
+                    changes["restock_action"] = _restock_action(merged, context.restock)
+                warnings.extend(field_warnings)
+                operation["changes"] = changes
+                draft[key] = {**previous, **changes}
+        operations.append(operation)
+    dropped = len(reply["operations"]) - len(operations)
+    if dropped:
+        warnings.append(warning("ops_dropped", count=dropped))
+    return {
+        "operations": operations,
+        "unparsed_fragments": _fragments(reply.get("unparsed_fragments")),
+        "locale": context.locale,
+        "warnings": dedupe_warnings(warnings),
+    }
