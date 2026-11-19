@@ -41,10 +41,14 @@ ExpirationStr = Annotated[str, AfterValidator(_check_date_or_infinite)]
 RecipeUsage = Literal["always", "conditional", "never"]
 
 
+ShelfLifeDays = Annotated[int, Field(ge=1, le=3650, strict=True)]
+
+
 class CategoryCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     parent_id: Optional[int] = None
     recipe_usage: Optional[RecipeUsage] = None
+    default_shelf_life_days: Optional[ShelfLifeDays] = None
     sort_order: int = 0
 
 
@@ -52,6 +56,7 @@ class CategoryUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     parent_id: Optional[int] = None
     recipe_usage: Optional[RecipeUsage] = None
+    default_shelf_life_days: Optional[ShelfLifeDays] = None
     sort_order: Optional[int] = None
 
 
@@ -61,6 +66,7 @@ class CategoryResponse(BaseModel):
     slug: str
     parent_id: Optional[int] = None
     recipe_usage: RecipeUsage
+    default_shelf_life_days: Optional[int] = None
     is_system: bool
     sort_order: int
     created_at: Optional[datetime] = None

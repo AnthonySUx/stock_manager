@@ -1,5 +1,7 @@
 """Category API tests."""
 
+import pytest
+
 
 def _cat_id(db_session, slug):
     from stock_manager.api.category_services import get_category_by_slug
@@ -47,6 +49,7 @@ class TestCreateCategory:
         assert data["parent_id"] is None
         assert data["recipe_usage"] == "never"
         assert data["is_system"] is False
+        assert data["default_shelf_life_days"] is None
 
     def test_create_subcategory_inherits_recipe_usage(self, client, db_session):
         """Subcategory inherits parent recipe_usage."""
@@ -75,6 +78,74 @@ class TestCreateCategory:
             "parent_id": dairy_id,
         })
         assert response.status_code == 400
+
+
+class TestDefaultShelfLife:
+    def test_system_defaults_in_flat_and_tree(self, client):
+        flat_response = client.get("/api/categories/flat")
+        tree_response = client.get("/api/categories")
+        assert flat_response.status_code == tree_response.status_code == 200
+        flat = {row["slug"]: row["default_shelf_life_days"] for row in flat_response.json()}
+        expected = {
+            "vegetables": 7, "fruit": 7, "meat": 3, "seafood": 2, "eggs": 30,
+            "dairy": 7, "staples_grains": 180, "soy_products": 5,
+            "seasonings_spices": 365, "baking": 180, "drinks": 180,
+            "snacks": 90, "frozen_food": 90, "canned_packaged": 365,
+            "ready_to_eat": 2, "baby_food": 30, "formula": 365, "pet_food": 180,
+            "pet_treats": 180,
+        }
+        assert {slug: days for slug, days in flat.items() if days is not None} == expected
+        tree = tree_response.json()
+        from_tree = {row["slug"]: row["default_shelf_life_days"] for row in tree}
+        from_tree.update(
+            {row["slug"]: row["default_shelf_life_days"] for root in tree for row in root["children"]}
+        )
+        assert from_tree == flat
+
+    def test_create_update_omit_and_clear(self, client):
+        response = client.post(
+            "/api/categories", json={"name": "Garden", "default_shelf_life_days": 1}
+        )
+        assert response.status_code == 201
+        assert response.json()["default_shelf_life_days"] == 1
+        url = f"/api/categories/{response.json()['id']}"
+
+        for payload, expected in [
+            ({"default_shelf_life_days": 3650}, 3650),
+            ({"sort_order": 10}, 3650),
+            ({"default_shelf_life_days": None}, None),
+        ]:
+            response = client.patch(url, json=payload)
+            assert response.status_code == 200
+            assert response.json()["default_shelf_life_days"] == expected
+            assert client.get(url).json()["default_shelf_life_days"] == expected
+
+    def test_system_category_override_survives_seeding(self, client, db_session):
+        from stock_manager.api.category_services import seed_default_categories
+
+        category_id = _cat_id(db_session, "dairy")
+        url = f"/api/categories/{category_id}"
+        for days in [12, None]:
+            response = client.patch(url, json={"default_shelf_life_days": days})
+            assert response.status_code == 200
+            assert response.json()["default_shelf_life_days"] == days
+
+            seed_default_categories(db_session)
+
+            assert client.get(url).json()["default_shelf_life_days"] == days
+
+    @pytest.mark.parametrize("days", [0, 3651, 1.5, 2.0, "5", True])
+    def test_rejects_out_of_range_or_non_integer_values(self, client, db_session, days):
+        category_id = _cat_id(db_session, "dairy")
+        url = f"/api/categories/{category_id}"
+        responses = [
+            client.post("/api/categories", json={"name": "Garden", "default_shelf_life_days": days}),
+            client.patch(url, json={"default_shelf_life_days": days}),
+        ]
+        for response in responses:
+            assert response.status_code == 422
+            assert response.json()["detail"][0]["loc"] == ["body", "default_shelf_life_days"]
+        assert client.get(url).json()["default_shelf_life_days"] == 7
 
 
 class TestDeleteCategory:
