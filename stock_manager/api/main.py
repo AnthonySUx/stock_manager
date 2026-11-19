@@ -12,7 +12,8 @@ from stock_manager.api import ai_client
 from stock_manager.api.auth import check_auth_config, require_api_token
 from stock_manager.api.schema_version import check_schema_current
 from stock_manager.api.db import engine
-from stock_manager.api.routers import capabilities, categories, items, recipes, restock, settings
+from stock_manager.api.errors import APIError
+from stock_manager.api.routers import capabilities, categories, intake, items, recipes, restock, settings
 
 
 def configure_logging() -> None:
@@ -93,6 +94,15 @@ app.include_router(settings.router, prefix="/api/settings", tags=["Settings"], d
 app.include_router(recipes.router, prefix="/api/recipes", tags=["Recipes"], dependencies=_auth)
 app.include_router(categories.router, prefix="/api/categories", tags=["Categories"], dependencies=_auth)
 app.include_router(capabilities.router, prefix="/api/capabilities", tags=["Capabilities"], dependencies=_auth)
+app.include_router(intake.router, prefix="/api/intake", tags=["Intake"], dependencies=_auth)
+
+
+@app.exception_handler(APIError)
+async def api_error_handler(request: Request, exc: APIError):
+    body = {"code": exc.code, "params": exc.params}
+    if exc.detail:
+        body["detail"] = exc.detail
+    return JSONResponse(status_code=exc.status_code, content=body)
 
 
 @app.exception_handler(ai_client.AIError)
