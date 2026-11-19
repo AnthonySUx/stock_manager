@@ -279,6 +279,47 @@ def _shelf_life_by_slug(engine):
         return dict(rows.tuples().all())
 
 
+def test_0004_backfills_every_system_category(fresh_db):
+    from stock_manager.api.category_services import DEFAULT_CATEGORIES
+
+    url, engine = fresh_db
+    config = _alembic(url)
+    command.upgrade(config, "0003")
+    categories = [{"name": name, "slug": slug} for name, slug, *_ in DEFAULT_CATEGORIES]
+    with engine.begin() as connection:
+        connection.execute(
+            text("INSERT INTO categories (name, slug, is_system) VALUES (:name, :slug, 1)"),
+            categories,
+        )
+
+    command.upgrade(config, "0004")
+
+    # PR 2 intake plan defaults. Other system categories should stay NULL.
+    expected = dict.fromkeys(category["slug"] for category in categories)
+    expected.update({
+        "vegetables": 7,
+        "fruit": 7,
+        "meat": 3,
+        "seafood": 2,
+        "eggs": 30,
+        "dairy": 7,
+        "staples_grains": 180,
+        "soy_products": 5,
+        "seasonings_spices": 365,
+        "baking": 180,
+        "drinks": 180,
+        "snacks": 90,
+        "frozen_food": 90,
+        "canned_packaged": 365,
+        "ready_to_eat": 2,
+        "baby_food": 30,
+        "formula": 365,
+        "pet_food": 180,
+        "pet_treats": 180,
+    })
+    assert _shelf_life_by_slug(engine) == expected
+
+
 def test_0004_upgrade_and_downgrade_preserve_categories(fresh_db):
     url, engine = fresh_db
     config = _alembic(url)
