@@ -29,6 +29,7 @@ import asyncio
 import base64
 import json
 import logging
+import math
 import os
 import re
 import time
@@ -107,6 +108,8 @@ class AIConfig:
     vision_enabled: bool = False
     image_detail: str = "high"
     receipt_lookup_provider: str = "none"
+    asr_provider: str = "none"
+    asr_timeout: float = 60.0
     max_tokens: int = 8192
     # Streamed text calls: first data, then the longest gap between chunks.
     first_token_timeout: float = 20.0
@@ -127,6 +130,10 @@ class AIConfig:
     @property
     def vision_available(self) -> bool:
         return self.available and self.vision_enabled
+
+    @property
+    def asr_available(self) -> bool:
+        return self.asr_provider == "deepseek" and bool(self.api_key)
 
 
 # (env var, field, type, minimum)
@@ -167,6 +174,21 @@ def load_config(environ=None) -> AIConfig:
         logger.warning("Unsupported RECEIPT_PRODUCT_LOOKUP_PROVIDER; using none.")
     else:
         values["receipt_lookup_provider"] = receipt_lookup
+    asr_provider = env.get("AI_ASR_PROVIDER", "").strip().lower() or "none"
+    if asr_provider not in ("none", "deepseek"):
+        logger.warning("Unsupported AI_ASR_PROVIDER; using none.")
+        asr_provider = "none"
+    asr_timeout = env.get("AI_ASR_TIMEOUT_SECONDS", "").strip() or "60"
+    try:
+        timeout = float(asr_timeout)
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError
+    except ValueError:
+        logger.error("Invalid AI_ASR_TIMEOUT_SECONDS; speech transcription is disabled.")
+        asr_provider = "none"
+    else:
+        values["asr_timeout"] = timeout
+    values["asr_provider"] = asr_provider
     stream = env.get("AI_STREAM", "").strip().lower()
     if stream in ("", "true"):
         values["stream"] = True
@@ -266,7 +288,9 @@ def _error_message(body: Any) -> Optional[str]:
     return message if isinstance(message, str) and message.strip() else None
 
 
-def _error_detail(response: httpx.Response, *, protect_content: bool = False) -> str:
+def provider_error_detail(
+    response: httpx.Response, *, protect_content: bool = False, structured_only: bool = False,
+) -> str:
     """The provider's error message, for the server log.
 
     401 / 403 only say to check the key: their body may echo part of it.
@@ -277,7 +301,7 @@ def _error_detail(response: httpx.Response, *, protect_content: bool = False) ->
         message = _error_message(response.json())
     except ValueError:
         message = None
-    message = message or response.text
+    message = message or ("" if structured_only else response.text)
     if protect_content:
         # Redact first so an embedded upload cannot consume the diagnostic budget.
         message = _DATA_URI.sub("[redacted]", message)
@@ -471,7 +495,7 @@ async def _request(
                             continue
                         if protect_content and response.status_code not in (401, 403):
                             await response.aread()
-                        detail = _error_detail(response, protect_content=protect_content)
+                        detail = provider_error_detail(response, protect_content=protect_content)
                         raise AIUpstreamError(
                             f"AI returned HTTP {response.status_code}{detail}", "http_error"
                         )

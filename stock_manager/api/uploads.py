@@ -1,7 +1,9 @@
-"""Bounded multipart parsing for stock intake without temporary files."""
+"""Bounded multipart parsing without temporary files."""
 
 import json
 import re
+from collections.abc import Callable
+from dataclasses import dataclass
 from email.message import Message
 
 from python_multipart import MultipartParser
@@ -13,6 +15,9 @@ from stock_manager.api.intake_schemas import MAX_IMAGE_BYTES, MAX_IMAGES
 
 MAX_PAYLOAD_BYTES = 256 * 1024
 MAX_REQUEST_BYTES = MAX_IMAGES * MAX_IMAGE_BYTES + MAX_PAYLOAD_BYTES + 64 * 1024
+MAX_AUDIO_BYTES = 8 * 1024 * 1024
+_MAX_AUDIO_REQUEST_BYTES = MAX_AUDIO_BYTES + 64 * 1024
+_MAX_AUDIO_FIELD_BYTES = 256
 _SIGNATURE_BYTES = 12
 _BOUNDARY = re.compile(r"[a-zA-Z0-9'()+_,./:=? -]{1,70}")
 
@@ -40,30 +45,17 @@ def _request_too_large() -> APIError:
     )
 
 
-def _parse_boundary(content_type: str) -> str:
-    header = Message()
-    header["Content-Type"] = content_type
-    boundary = header.get_boundary()
-    if not boundary or not _BOUNDARY.fullmatch(boundary):
-        raise _invalid_multipart()
-    return boundary
-
-
-class _ImageForm:
-    """Collect a JSON payload and validated images through parser callbacks."""
+class _MultipartForm:
+    """Collect the part headers shared by the image and audio uploads."""
 
     def __init__(self):
-        self.payload: bytes | None = None
-        self.images: list[dict] = []
         self.complete = False
 
     def on_part_begin(self) -> None:
         self.part = bytearray()
-        self.mime: str | None = None
         self.disposition: bytes | None = None
         self.header_name = bytearray()
         self.header_value = bytearray()
-        self.is_image = False
 
     def on_header_field(self, data: bytes, start: int, end: int) -> None:
         self.header_name.extend(memoryview(data)[start:end])
@@ -74,20 +66,39 @@ class _ImageForm:
     def on_header_end(self) -> None:
         if self.header_name.lower() == b"content-disposition":
             if self.disposition is not None:
-                raise _invalid_multipart()
+                raise self.invalid()
             self.disposition = bytes(self.header_value)
         self.header_name.clear()
         self.header_value.clear()
 
     def on_headers_finished(self) -> None:
         if self.disposition is None:
-            raise _invalid_multipart()
+            raise self.invalid()
         header = Message()
         header["Content-Disposition"] = self.disposition.decode("latin-1")
         if header.get_content_disposition() != "form-data":
-            raise _invalid_multipart()
+            raise self.invalid()
         name = header.get_param("name", header="Content-Disposition")
         is_file = header.get_param("filename", header="Content-Disposition") is not None
+        self.start_field(name, is_file)
+
+    def on_end(self) -> None:
+        self.complete = True
+
+
+class _ImageForm(_MultipartForm):
+    """Collect a JSON payload and validated images through parser callbacks."""
+
+    invalid = staticmethod(_invalid_multipart)
+
+    def __init__(self):
+        super().__init__()
+        self.payload: bytes | None = None
+        self.images: list[dict] = []
+
+    def start_field(self, name: str | None, is_file: bool) -> None:
+        self.is_image = False
+        self.mime: str | None = None
         if name == "images" and is_file:
             if len(self.images) >= MAX_IMAGES:
                 raise APIError(422, "intake_images_too_many", "Too many images", max=MAX_IMAGES)
@@ -119,12 +130,7 @@ class _ImageForm:
             self.payload = content
         self.part.clear()
 
-    def on_end(self) -> None:
-        self.complete = True
-
     def result(self) -> tuple[dict, list[dict]]:
-        if not self.complete:
-            raise _invalid_multipart()
         if not self.images:
             raise APIError(422, "intake_images_missing", "At least one image is required")
         if self.payload is None:
@@ -138,18 +144,94 @@ class _ImageForm:
         return payload, self.images
 
 
+@dataclass(frozen=True)
+class AudioUpload:
+    data: bytes
+    feature: str | None
+
+
+def audio_too_large() -> APIError:
+    return APIError(413, "audio_too_large", "Audio is too large", max_bytes=MAX_AUDIO_BYTES)
+
+
+class _AudioForm(_MultipartForm):
+    def __init__(self):
+        super().__init__()
+        self.audio: bytes | None = None
+        self.feature: str | None = None
+
+    @staticmethod
+    def invalid() -> APIError:
+        return APIError(422, "audio_upload_invalid", "Expected one audio file and an optional feature")
+
+    def start_field(self, name: str | None, is_file: bool) -> None:
+        if name == "audio" and is_file and self.audio is None:
+            self.is_audio = True
+        elif name == "feature" and not is_file and self.feature is None:
+            self.is_audio = False
+        else:
+            raise self.invalid()
+
+    def on_part_data(self, data: bytes, start: int, end: int) -> None:
+        size = len(self.part) + end - start
+        if self.is_audio:
+            if size > MAX_AUDIO_BYTES:
+                raise audio_too_large()
+        elif size > _MAX_AUDIO_FIELD_BYTES:
+            raise self.invalid()
+        self.part.extend(memoryview(data)[start:end])
+
+    def on_part_end(self) -> None:
+        if self.is_audio:
+            self.audio = bytes(self.part)
+        else:
+            try:
+                value = self.part.decode("utf-8")
+            except UnicodeDecodeError:
+                raise self.invalid() from None
+            if value not in ("stock_intake", "recipe_explore"):
+                raise self.invalid()
+            self.feature = value
+        self.part.clear()
+
+    def result(self) -> AudioUpload:
+        if not self.audio:
+            raise self.invalid()
+        return AudioUpload(self.audio, self.feature)
+
+
 async def read_image_upload(request: Request) -> tuple[dict, list[dict]]:
+    form = _ImageForm()
+    await _read_multipart(request, form, MAX_REQUEST_BYTES, _request_too_large)
+    return form.result()
+
+
+async def read_audio_upload(request: Request) -> AudioUpload:
+    form = _AudioForm()
+    await _read_multipart(request, form, _MAX_AUDIO_REQUEST_BYTES, audio_too_large)
+    return form.result()
+
+
+async def _read_multipart(
+    request: Request,
+    form: _ImageForm | _AudioForm,
+    max_request_bytes: int,
+    too_large: Callable[[], APIError],
+) -> None:
     """Check limits before retaining bytes, including when Content-Length is absent."""
     length = request.headers.get("content-length")
     if length is not None:
         if not length.isascii() or not length.isdecimal():
-            raise _invalid_multipart()
+            raise form.invalid()
         digits = length.lstrip("0") or "0"
-        if len(digits) > len(str(MAX_REQUEST_BYTES)) or int(digits) > MAX_REQUEST_BYTES:
-            raise _request_too_large()
+        if len(digits) > len(str(max_request_bytes)) or int(digits) > max_request_bytes:
+            raise too_large()
 
-    boundary = _parse_boundary(request.headers.get("content-type", ""))
-    form = _ImageForm()
+    header = Message()
+    header["Content-Type"] = request.headers.get("content-type", "")
+    boundary = header.get_boundary()
+    if header.get_content_type() != "multipart/form-data" or not boundary or not _BOUNDARY.fullmatch(boundary):
+        raise form.invalid()
     parser = MultipartParser(boundary, {
         "on_part_begin": form.on_part_begin,
         "on_header_field": form.on_header_field,
@@ -164,11 +246,12 @@ async def read_image_upload(request: Request) -> tuple[dict, list[dict]]:
     try:
         async for chunk in request.stream():
             received += len(chunk)
-            if received > MAX_REQUEST_BYTES:
-                raise _request_too_large()
+            if received > max_request_bytes:
+                raise too_large()
             if not form.complete:
                 parser.write(chunk)
         parser.finalize()
     except (MultipartParseError, ClientDisconnect):
-        raise _invalid_multipart() from None
-    return form.result()
+        raise form.invalid() from None
+    if not form.complete:
+        raise form.invalid()

@@ -103,6 +103,9 @@ API_PORT=8000
 # Image intake is opt-in after checking that the provider supports images with JSON mode.
 # AI_VISION_ENABLED=false
 # AI_IMAGE_DETAIL=high
+# DeepSeek speech transcription is independent of recipe and vision features.
+# AI_ASR_PROVIDER=none
+# AI_ASR_TIMEOUT_SECONDS=60
 # First-seen receipt products use the AI's built-in knowledge.
 # RECEIPT_PRODUCT_LOOKUP_PROVIDER=none
 # AI_TEMPERATURE=0.2
@@ -132,6 +135,12 @@ port and exits with a configuration error if they differ.
 backend's AI feature and key to be configured. `AI_IMAGE_DETAIL` accepts
 `low`, `high` (default), or `auto`. An invalid detail disables image intake.
 Restart the backend after changing either setting.
+
+Speech transcription is off by default (`AI_ASR_PROVIDER=none`). To enable it,
+set `AI_ASR_PROVIDER=deepseek` and configure `AI_API_KEY`. The backend appends
+`/v1/tools/asr` to `AI_BASE_URL`, which defaults to
+`https://api.deepseek.com`. `AI_ASR_TIMEOUT_SECONDS` defaults to 60 seconds per
+attempt. Restart the backend after changing these settings.
 
 ### 2.3 Start MySQL
 
