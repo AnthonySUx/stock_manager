@@ -38,6 +38,7 @@ _QUESTION_CODES = get_args(QuestionCode)
 _IMAGE_KINDS = get_args(ImageKind)
 _TEXT_LIMITS = {"name": 255, "quantity_unit": 50, "owner": 100, "location": 100, "notes": None}
 _DATE_FIELDS = {"purchase_date", "unopened_expiration_date", "suggested_unopened_expiration_date"}
+_EXPIRATION_VALUES = {"unopened_expiration_date", "suggested_unopened_expiration_date", "expiration_source"}
 _EXPIRATION_FIELDS = _DATE_FIELDS | {"category_id", "expiration_source"}
 _RESTOCK_FIELDS = {"matched_restock_id", "quantity_value", "quantity_unit"}
 
@@ -76,17 +77,72 @@ def _confidence(value) -> float:
 def _parse_date(value, field: str, today: date) -> str | None:
     if value == "infinite" and field == "unopened_expiration_date":
         return value
+    parsed = _iso_date(value)
+    if parsed is not None and _date_in_window(parsed, today):
+        return value
+    return None
+
+
+def _iso_date(value) -> date | None:
     if not isinstance(value, str) or len(value) != 10:
         return None
     try:
         parsed = date.fromisoformat(value)
     except ValueError:
         return None
+    return parsed if parsed.isoformat() == value else None
+
+
+def _date_in_window(parsed: date, today: date) -> bool:
     last_day = monthrange(today.year + 5, today.month)[1]
     limit = today.replace(year=today.year + 5, day=min(today.day, last_day))
-    if parsed.isoformat() == value and today - timedelta(days=30) <= parsed <= limit:
-        return value
-    return None
+    return today - timedelta(days=30) <= parsed <= limit
+
+
+def _printed_value(printed: dict) -> date | None:
+    start = _iso_date(printed.get("date"))
+    kind = printed.get("kind")
+    if start is None or kind not in ("best_before", "use_by", "production_plus_shelf_life"):
+        return None
+    if kind in ("best_before", "use_by"):
+        return start
+
+    shelf_life = printed.get("shelf_life")
+    if not isinstance(shelf_life, dict):
+        return None
+    value, unit = shelf_life.get("value"), shelf_life.get("unit")
+    if type(value) is not int or value <= 0 or unit not in ("day", "month", "year"):
+        return None
+    try:
+        if unit == "day":
+            return start + timedelta(days=value)
+        months = value * 12 if unit == "year" else value
+        year, month_index = divmod(start.year * 12 + start.month - 1 + months, 12)
+        month = month_index + 1
+        return date(year, month, min(start.day, monthrange(year, month)[1]))
+    except (OverflowError, ValueError):
+        return None
+
+
+def printed_expiration(printed, today: date) -> tuple[date | None, list[dict]]:
+    """Resolve structured label evidence. A date with warnings is only a suggestion."""
+    if not isinstance(printed, dict):
+        return None, [warning("printed_date_unclear")]
+    expiration = _printed_value(printed)
+    if (
+        expiration is None or printed.get("readable") is not True
+        or not _text(printed.get("raw")) or not _date_in_window(expiration, today)
+    ):
+        return expiration, [warning("printed_date_unclear")]
+    return expiration, []
+
+
+def _extract_printed(raw: dict, source: dict | None, today: date) -> tuple[dict, tuple[date | None, list[dict]] | None]:
+    if not source or source.get("input_kind") != "product_closeup" or "printed" not in raw:
+        return raw, None
+    # The structured label is the evidence. Ignore a model-computed expiration accompanying it.
+    fields = {key: value for key, value in raw.items() if key != "printed" and key not in _EXPIRATION_VALUES}
+    return fields, printed_expiration(raw["printed"], today)
 
 
 def _known_id(value, entries: dict[int, dict]) -> int | None:
@@ -129,6 +185,7 @@ def _add_candidate(
     *, receipt: tuple[ReceiptLine, AliasHistory | None] | None = None,
 ) -> dict | None:
     warnings: list[dict] = []
+    raw, printed = _extract_printed(raw, source, context.today)
     fields = _clean_fields(
         {key: value for key, value in raw.items() if key in EDITABLE_FIELDS},
         context, warnings,
@@ -147,7 +204,7 @@ def _add_candidate(
         return None
     if fields.get("purchase_date") is None:
         fields["purchase_date"] = context.purchase_date.isoformat()
-    fields.update(_expiration_changes(fields, {}, context, warnings, allow_stated=source is None))
+    fields.update(_expiration_changes(fields, {}, context, warnings, allow_stated=source is None, printed=printed))
     if receipt is not None:
         metadata["review_reason"] = (
             None if metadata["auto_apply_allowed"] else receipt_review_reason(line, history, confidence, warnings)
@@ -158,17 +215,26 @@ def _add_candidate(
             "input_kind": "receipt" if receipt is not None else "text",
             "span": _text(raw_source.get("span"), 200) if isinstance(raw_source, dict) else None,
         }
-    field_confidence = raw.get("field_confidence")
+    raw_confidence = raw.get("field_confidence")
+    field_confidence = {
+        key: _confidence(value) for key, value in raw_confidence.items() if key in EDITABLE_FIELDS
+    } if isinstance(raw_confidence, dict) else {}
+    if source["input_kind"] == "product_overview":
+        quantity_score = field_confidence.get("quantity_value", 0.5)
+        inferred = raw.get("inferred_fields")
+        if (
+            fields.get("quantity_value") is None or quantity_score <= 0.5
+            or raw.get("quantity_value_inferred") is True
+            or (isinstance(inferred, list) and "quantity_value" in inferred)
+        ):
+            field_confidence["quantity_value"] = min(quantity_score, 0.5)
+            warnings.append(warning("quantity_value_inferred"))
     return {
         **fields,
         "temporary_id": _new_id(used_ids),
         "raw_name": _text(raw.get("raw_name"), 255),
         "confidence": confidence,
-        "field_confidence": {
-            key: _confidence(value)
-            for key, value in field_confidence.items()
-            if key in EDITABLE_FIELDS
-        } if isinstance(field_confidence, dict) else {},
+        "field_confidence": field_confidence,
         "warnings": dedupe_warnings(warnings),
         "source": source,
         "restock_action": _restock_action(fields, context.restock),
@@ -193,6 +259,7 @@ def _update_changes(raw: dict, context: "PreparedParse", warnings: list[dict]) -
 
 def _expiration_changes(
     fields: dict, previous: dict, context: "PreparedParse", warnings: list[dict], *, allow_stated: bool,
+    printed: tuple[date | None, list[dict]] | None = None,
 ) -> dict:
     actual_field = "unopened_expiration_date"
     suggestion_field = "suggested_unopened_expiration_date"
@@ -203,7 +270,18 @@ def _expiration_changes(
     prior_date = previous.get(actual_field)
     prior_source = previous.get("expiration_source")
     new_suggestion = fields.get(suggestion_field)
-    if allow_stated and new_date is not None and fields.get("expiration_source") == "stated":
+    printed_date, printed_warnings = printed if printed is not None else (None, [])
+    warnings.extend(printed_warnings)
+    if printed_date is not None:
+        if not printed_warnings:
+            actual, suggested, source = printed_date.isoformat(), None, "printed"
+        else:
+            suggested = printed_date.isoformat()
+            if prior_date and prior_source in ("printed", "stated"):
+                actual, source = prior_date, prior_source
+            else:
+                actual, source = None, "estimated"
+    elif allow_stated and new_date is not None and fields.get("expiration_source") == "stated":
         actual, suggested, source = new_date, None, "stated"
     elif prior_date and prior_source in ("printed", "stated") and (
         actual_field not in fields or new_date is not None
@@ -236,7 +314,14 @@ def _expiration_changes(
     result = {actual_field: actual, suggestion_field: suggested, "expiration_source": source}
     if not previous:
         return result
-    return {key: value for key, value in result.items() if key in fields or value != previous.get(key)}
+    if printed_date is None:
+        evidence_fields = set()
+    else:
+        evidence_fields = {suggestion_field} if printed_warnings else {actual_field, "expiration_source"}
+    return {
+        key: value for key, value in result.items()
+        if key in fields or key in evidence_fields or value != previous.get(key)
+    }
 
 
 def _category_expiration(
@@ -301,6 +386,8 @@ def _draft_operation(row: dict, draft: dict, locale: str, inventory: Inventory) 
             return {"op": op, "temporary_id": target, "reason_code": reason}, None
         changes = row.get("changes")
         if isinstance(changes, dict):
+            if "printed" in row and "printed" not in changes:
+                changes = {**changes, "printed": row["printed"]}
             return {"op": op, "temporary_id": target, "changes": changes}, None
     return None, "op_invalid"
 
@@ -410,21 +497,24 @@ def clean_parse_output(
                     operation["source"] = source
             case "update":
                 field_warnings: list[dict] = []
-                changes = _update_changes(operation["changes"], context, field_warnings)
+                raw_changes, printed = _extract_printed(operation["changes"], operation.get("source"), context.today)
+                changes = _update_changes(raw_changes, context, field_warnings)
                 warnings.extend(
                     warning(w["code"], index=index, **w["params"])
                     if w["code"] == "op_field_dropped" else w
                     for w in field_warnings
                 )
-                if not changes:
+                if not changes and (printed is None or printed[0] is None):
+                    if printed is not None:
+                        warnings.extend(printed[1])
                     warnings.append(warning("op_invalid", index=index))
                     continue
                 field_warnings = []
                 key = operation["temporary_id"]
                 previous = draft[key]
-                if _EXPIRATION_FIELDS.intersection(changes):
+                if _EXPIRATION_FIELDS.intersection(changes) or printed is not None:
                     changes.update(_expiration_changes(
-                        changes, previous, context, field_warnings, allow_stated=image_count == 0,
+                        changes, previous, context, field_warnings, allow_stated=image_count == 0, printed=printed,
                     ))
                 match_id = changes.get("matched_restock_id", previous.get("matched_restock_id"))
                 if _RESTOCK_FIELDS.intersection(changes) and (

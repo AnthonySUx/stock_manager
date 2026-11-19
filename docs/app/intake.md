@@ -134,15 +134,35 @@ Each returned image operation includes `source.input_kind`
 (`receipt`, `product_closeup`, or `product_overview`) and a zero-based
 `source.image_index` in upload order. An add operation also copies that source
 to the candidate. Existing text operations retain their response shape.
-Dates read from images are suggestions. The category default takes precedence
-when available. An image operation preserves a previously trusted draft date
-when the model proposes a replacement.
 Images are sent to the configured AI provider for parsing. The backend keeps
 uploads in memory and logs the count and total bytes.
 
 Check `GET /api/capabilities` for `ai.vision` before offering image intake.
 It requires a configured AI provider and `AI_VISION_ENABLED=true`.
 The switch defaults to off pending provider validation. See [backend setup](setup.md).
+
+### Product photos and printed dates
+
+A close-up can add a product or update a matching item already in the draft,
+such as a candidate from a receipt. The model reports structured label
+evidence. The backend calculates the expiration date and returns the usual
+candidate or update fields.
+
+- For `best_before` and `use_by`, the printed date is the expiration date.
+- For `production_plus_shelf_life`, the backend adds the displayed shelf life
+  to the production date. Days use elapsed calendar days. Months and years
+  keep the day of the month when possible and use the last day otherwise.
+- A readable, valid result within the allowed date window is returned in
+  `unopened_expiration_date` with `expiration_source: "printed"`.
+  The window runs from 30 days before today to five calendar years after today.
+- An unclear label or out-of-range result adds `printed_date_unclear`. A date
+  that can be calculated is returned in `suggested_unopened_expiration_date`.
+  A previously trusted draft date stays in place when the new label is unclear.
+  Structured evidence is accepted only from a product close-up.
+
+An overview photo produces one `add` per recognizable item. Inferred
+quantities carry `quantity_value_inferred` with a
+`field_confidence.quantity_value` of at most 0.5.
 
 ## Receipt lines and learned aliases
 
@@ -272,6 +292,8 @@ are zero-based positions in the model reply.
 | `expiration_date_inferred` | `basis` | The backend calculated a suggestion using `category_default`. |
 | `ai_expiration_ignored` | `date` | A model date was discarded in favor of a category estimate or a trusted draft date. |
 | `expiration_before_purchase` | | The returned expiration date is before the purchase date. |
+| `printed_date_unclear` | | A close-up label lacks usable evidence or yields an out-of-range date. A calculable date is kept as a suggestion. |
+| `quantity_value_inferred` | | An overview photo did not establish the exact quantity. |
 | `restock_match_dropped` | `field` | The referenced restock item was unavailable or no longer pending. |
 | `restock_already_done` | `restock_id` | Confirmation saved stock and skipped the restock action. |
 | `duplicate_generic_line` | | This generic label occurs on more than one row of the receipt. |
