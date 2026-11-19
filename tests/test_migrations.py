@@ -110,6 +110,8 @@ def test_offline_sql_creates_every_table(fresh_db, capsys):
     sql = capsys.readouterr().out
     for table in APP_TABLES:
         assert f"CREATE TABLE {table}" in sql
+    assert "ALTER TABLE categories ADD COLUMN default_shelf_life_days INTEGER" in sql
+    assert "UPDATE categories SET default_shelf_life_days" in sql
 
 
 def test_migrations_have_a_single_head():
@@ -244,7 +246,7 @@ def test_0003_repairs_legacy_category_columns_without_losing_rows(fresh_db):
         connection.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"))
         connection.execute(text("INSERT INTO alembic_version VALUES ('0002')"))
 
-    command.upgrade(_alembic(url), "head")
+    command.upgrade(_alembic(url), "0003")
 
     inspector = inspect(engine)
     assert {column["name"] for column in inspector.get_columns("items")} == {
@@ -266,3 +268,99 @@ def test_0003_repairs_legacy_category_columns_without_losing_rows(fresh_db):
     assert items == [("牛奶", 14), ("番茄", 9), ("旧记录", uncategorized)]
     assert restock == [("酸奶", 14), ("待分类", None)]
     assert _revision(engine) == "0003"
+
+
+# ─── 0004 (category shelf-life defaults) ──────────────────────────
+
+
+def _shelf_life_by_slug(engine):
+    with engine.connect() as connection:
+        rows = connection.execute(text("SELECT slug, default_shelf_life_days FROM categories"))
+        return dict(rows.tuples().all())
+
+
+def test_0004_backfills_every_system_category(fresh_db):
+    from stock_manager.api.category_services import DEFAULT_CATEGORIES
+
+    url, engine = fresh_db
+    config = _alembic(url)
+    command.upgrade(config, "0003")
+    categories = [{"name": name, "slug": slug} for name, slug, *_ in DEFAULT_CATEGORIES]
+    with engine.begin() as connection:
+        connection.execute(
+            text("INSERT INTO categories (name, slug, is_system) VALUES (:name, :slug, 1)"),
+            categories,
+        )
+
+    command.upgrade(config, "0004")
+
+    # PR 2 intake plan defaults. Other system categories should stay NULL.
+    expected = dict.fromkeys(category["slug"] for category in categories)
+    expected.update({
+        "vegetables": 7,
+        "fruit": 7,
+        "meat": 3,
+        "seafood": 2,
+        "eggs": 30,
+        "dairy": 7,
+        "staples_grains": 180,
+        "soy_products": 5,
+        "seasonings_spices": 365,
+        "baking": 180,
+        "drinks": 180,
+        "snacks": 90,
+        "frozen_food": 90,
+        "canned_packaged": 365,
+        "ready_to_eat": 2,
+        "baby_food": 30,
+        "formula": 365,
+        "pet_food": 180,
+        "pet_treats": 180,
+    })
+    assert _shelf_life_by_slug(engine) == expected
+
+
+def test_0004_upgrade_and_downgrade_preserve_categories(fresh_db):
+    url, engine = fresh_db
+    config = _alembic(url)
+    command.upgrade(config, "0003")
+    with engine.begin() as connection:
+        connection.execute(text(
+            "INSERT INTO categories (name, slug, is_system) VALUES "
+            "('Vegetables', 'vegetables', 1), ('Formula', 'formula', 1), "
+            "('Pet food', 'pet_food', 1), ('Medication', 'medicine', 1), "
+            "('Custom drink', 'drinks', 0)"
+        ))
+
+    command.upgrade(config, "0004")
+    expected = {"vegetables": 7, "formula": 365, "pet_food": 180, "medicine": None, "drinks": None}
+    assert _revision(engine) == "0004"
+    assert _shelf_life_by_slug(engine) == expected
+
+    command.downgrade(config, "0003")
+    assert _revision(engine) == "0003"
+    assert "default_shelf_life_days" not in {c["name"] for c in inspect(engine).get_columns("categories")}
+    with engine.connect() as connection:
+        assert set(connection.execute(text("SELECT slug FROM categories")).scalars()) == expected.keys()
+
+    command.upgrade(config, "0004")
+    assert _shelf_life_by_slug(engine) == expected
+
+
+def test_0004_adopts_existing_column_and_preserves_configured_values(fresh_db):
+    url, engine = fresh_db
+    config = _alembic(url)
+    command.upgrade(config, "0003")
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE categories ADD COLUMN default_shelf_life_days INTEGER"))
+        connection.execute(text(
+            "INSERT INTO categories (name, slug, is_system, default_shelf_life_days) VALUES "
+            "('Vegetables', 'vegetables', 1, 12), ('Eggs', 'eggs', 1, NULL), "
+            "('Custom dairy', 'dairy', 0, NULL), ('Custom tea', 'custom-tea', 0, 50)"
+        ))
+
+    command.upgrade(config, "0004")
+
+    assert _shelf_life_by_slug(engine) == {
+        "vegetables": 12, "eggs": 30, "dairy": None, "custom-tea": 50,
+    }

@@ -16,82 +16,82 @@ RECIPE_USAGES = {"always", "conditional", "never"}
 RECIPE_ALLOWED_USAGES = ("always", "conditional")
 
 DEFAULT_CATEGORIES = [
-    # (name, slug, parent_slug, recipe_usage)
+    # (name, slug, parent_slug, recipe_usage, default_shelf_life_days)
     # Top-level
-    ("食品", "food", None, "conditional"),
-    ("药品/健康", "health", None, "never"),
-    ("家居清洁", "household", None, "never"),
-    ("个人护理", "personal_care", None, "never"),
-    ("宠物", "pet", None, "never"),
-    ("母婴", "baby", None, "never"),
-    ("电子/工具", "tools_electronics", None, "never"),
-    ("其他", "other", None, "never"),
+    ("食品", "food", None, "conditional", None),
+    ("药品/健康", "health", None, "never", None),
+    ("家居清洁", "household", None, "never", None),
+    ("个人护理", "personal_care", None, "never", None),
+    ("宠物", "pet", None, "never", None),
+    ("母婴", "baby", None, "never", None),
+    ("电子/工具", "tools_electronics", None, "never", None),
+    ("其他", "other", None, "never", None),
     # Food subcategories
-    ("蔬菜", "vegetables", "food", "always"),
-    ("水果", "fruit", "food", "always"),
-    ("肉类", "meat", "food", "always"),
-    ("海鲜", "seafood", "food", "always"),
-    ("蛋类", "eggs", "food", "always"),
-    ("乳制品", "dairy", "food", "always"),
-    ("主食/谷物", "staples_grains", "food", "always"),
-    ("豆制品", "soy_products", "food", "always"),
-    ("调味品/香料", "seasonings_spices", "food", "always"),
-    ("烘焙材料", "baking", "food", "always"),
-    ("饮品", "drinks", "food", "conditional"),
-    ("零食", "snacks", "food", "conditional"),
-    ("冷冻食品", "frozen_food", "food", "conditional"),
-    ("罐头/包装食品", "canned_packaged", "food", "conditional"),
-    ("即食/熟食", "ready_to_eat", "food", "conditional"),
-    ("其他食品", "other_food", "food", "conditional"),
+    ("蔬菜", "vegetables", "food", "always", 7),
+    ("水果", "fruit", "food", "always", 7),
+    ("肉类", "meat", "food", "always", 3),
+    ("海鲜", "seafood", "food", "always", 2),
+    ("蛋类", "eggs", "food", "always", 30),
+    ("乳制品", "dairy", "food", "always", 7),
+    ("主食/谷物", "staples_grains", "food", "always", 180),
+    ("豆制品", "soy_products", "food", "always", 5),
+    ("调味品/香料", "seasonings_spices", "food", "always", 365),
+    ("烘焙材料", "baking", "food", "always", 180),
+    ("饮品", "drinks", "food", "conditional", 180),
+    ("零食", "snacks", "food", "conditional", 90),
+    ("冷冻食品", "frozen_food", "food", "conditional", 90),
+    ("罐头/包装食品", "canned_packaged", "food", "conditional", 365),
+    ("即食/熟食", "ready_to_eat", "food", "conditional", 2),
+    ("其他食品", "other_food", "food", "conditional", None),
     # Health subcategories
-    ("药品", "medicine", "health", "never"),
-    ("保健品", "supplements", "health", "never"),
-    ("急救用品", "first_aid", "health", "never"),
-    ("医疗器械/耗材", "medical_supplies", "health", "never"),
-    ("消毒防护", "disinfection_protection", "health", "never"),
-    ("其他健康用品", "other_health", "health", "never"),
+    ("药品", "medicine", "health", "never", None),
+    ("保健品", "supplements", "health", "never", None),
+    ("急救用品", "first_aid", "health", "never", None),
+    ("医疗器械/耗材", "medical_supplies", "health", "never", None),
+    ("消毒防护", "disinfection_protection", "health", "never", None),
+    ("其他健康用品", "other_health", "health", "never", None),
     # Household subcategories
-    ("清洁剂", "cleaners", "household", "never"),
-    ("洗衣用品", "laundry", "household", "never"),
-    ("纸品", "paper_goods", "household", "never"),
-    ("厨房耗材", "kitchen_supplies", "household", "never"),
-    ("垃圾袋/收纳", "trash_storage", "household", "never"),
-    ("空气/除味", "air_deodorizing", "household", "never"),
-    ("其他家居用品", "other_household", "household", "never"),
+    ("清洁剂", "cleaners", "household", "never", None),
+    ("洗衣用品", "laundry", "household", "never", None),
+    ("纸品", "paper_goods", "household", "never", None),
+    ("厨房耗材", "kitchen_supplies", "household", "never", None),
+    ("垃圾袋/收纳", "trash_storage", "household", "never", None),
+    ("空气/除味", "air_deodorizing", "household", "never", None),
+    ("其他家居用品", "other_household", "household", "never", None),
     # Personal care subcategories
-    ("洗发护发", "hair_care", "personal_care", "never"),
-    ("沐浴身体护理", "body_care", "personal_care", "never"),
-    ("护肤", "skincare", "personal_care", "never"),
-    ("口腔护理", "oral_care", "personal_care", "never"),
-    ("剃须/美容工具", "grooming_tools", "personal_care", "never"),
-    ("女性护理", "feminine_care", "personal_care", "never"),
-    ("其他个人护理", "other_personal_care", "personal_care", "never"),
+    ("洗发护发", "hair_care", "personal_care", "never", None),
+    ("沐浴身体护理", "body_care", "personal_care", "never", None),
+    ("护肤", "skincare", "personal_care", "never", None),
+    ("口腔护理", "oral_care", "personal_care", "never", None),
+    ("剃须/美容工具", "grooming_tools", "personal_care", "never", None),
+    ("女性护理", "feminine_care", "personal_care", "never", None),
+    ("其他个人护理", "other_personal_care", "personal_care", "never", None),
     # Pet subcategories
-    ("宠物食品", "pet_food", "pet", "never"),
-    ("宠物零食", "pet_treats", "pet", "never"),
-    ("宠物药品/保健", "pet_health", "pet", "never"),
-    ("清洁护理", "pet_cleaning_care", "pet", "never"),
-    ("玩具用品", "pet_toys_supplies", "pet", "never"),
-    ("猫砂/垫料", "litter_bedding", "pet", "never"),
-    ("其他宠物用品", "other_pet", "pet", "never"),
+    ("宠物食品", "pet_food", "pet", "never", 180),
+    ("宠物零食", "pet_treats", "pet", "never", 180),
+    ("宠物药品/保健", "pet_health", "pet", "never", None),
+    ("清洁护理", "pet_cleaning_care", "pet", "never", None),
+    ("玩具用品", "pet_toys_supplies", "pet", "never", None),
+    ("猫砂/垫料", "litter_bedding", "pet", "never", None),
+    ("其他宠物用品", "other_pet", "pet", "never", None),
     # Baby subcategories
-    ("婴儿食品/辅食", "baby_food", "baby", "never"),
-    ("奶粉", "formula", "baby", "never"),
-    ("尿布/湿巾", "diapers_wipes", "baby", "never"),
-    ("喂养用品", "feeding_supplies", "baby", "never"),
-    ("婴儿护理", "baby_care", "baby", "never"),
-    ("玩具用品", "baby_toys", "baby", "never"),
-    ("其他母婴用品", "other_baby", "baby", "never"),
+    ("婴儿食品/辅食", "baby_food", "baby", "never", 30),
+    ("奶粉", "formula", "baby", "never", 365),
+    ("尿布/湿巾", "diapers_wipes", "baby", "never", None),
+    ("喂养用品", "feeding_supplies", "baby", "never", None),
+    ("婴儿护理", "baby_care", "baby", "never", None),
+    ("玩具用品", "baby_toys", "baby", "never", None),
+    ("其他母婴用品", "other_baby", "baby", "never", None),
     # Tools/electronics subcategories
-    ("电池", "batteries", "tools_electronics", "never"),
-    ("灯泡/照明", "lighting", "tools_electronics", "never"),
-    ("小工具", "tools", "tools_electronics", "never"),
-    ("胶带/粘合剂", "tape_adhesives", "tools_electronics", "never"),
-    ("维修耗材", "repair_supplies", "tools_electronics", "never"),
-    ("电子配件", "electronics_accessories", "tools_electronics", "never"),
-    ("其他工具配件", "other_tools_electronics", "tools_electronics", "never"),
+    ("电池", "batteries", "tools_electronics", "never", None),
+    ("灯泡/照明", "lighting", "tools_electronics", "never", None),
+    ("小工具", "tools", "tools_electronics", "never", None),
+    ("胶带/粘合剂", "tape_adhesives", "tools_electronics", "never", None),
+    ("维修耗材", "repair_supplies", "tools_electronics", "never", None),
+    ("电子配件", "electronics_accessories", "tools_electronics", "never", None),
+    ("其他工具配件", "other_tools_electronics", "tools_electronics", "never", None),
     # Other subcategories
-    ("未分类", "uncategorized", "other", "never"),
+    ("未分类", "uncategorized", "other", "never", None),
 ]
 
 
@@ -110,7 +110,7 @@ def seed_default_categories(db: Session) -> None:
     # Build lookup: slug -> Category
     cats: dict[str, Category] = {}
 
-    for name, slug, parent_slug, recipe_usage in DEFAULT_CATEGORIES:
+    for name, slug, parent_slug, recipe_usage, default_shelf_life_days in DEFAULT_CATEGORIES:
         if slug in existing:
             continue
         parent_id = None
@@ -124,6 +124,7 @@ def seed_default_categories(db: Session) -> None:
             slug=slug,
             parent_id=parent_id,
             recipe_usage=recipe_usage,
+            default_shelf_life_days=default_shelf_life_days,
             is_system=True,
             sort_order=0,
         )
@@ -165,6 +166,7 @@ def get_category_tree(db: Session) -> list[dict]:
             "slug": c.slug,
             "parent_id": c.parent_id,
             "recipe_usage": c.recipe_usage,
+            "default_shelf_life_days": c.default_shelf_life_days,
             "is_system": c.is_system,
             "sort_order": c.sort_order,
             "created_at": c.created_at,
@@ -260,6 +262,7 @@ def create_category(db: Session, data: dict) -> Category:
         slug=slug,
         parent_id=parent_id,
         recipe_usage=recipe_usage,
+        default_shelf_life_days=data.get("default_shelf_life_days"),
         is_system=False,
         sort_order=sort_order,
     )
@@ -327,6 +330,8 @@ def update_category(db: Session, category_id: int, data: dict) -> Optional[Categ
         cat.recipe_usage = recipe_usage
     if sort_order is not None:
         cat.sort_order = sort_order
+    if "default_shelf_life_days" in data:
+        cat.default_shelf_life_days = data["default_shelf_life_days"]
 
     db.commit()
     db.refresh(cat)

@@ -42,6 +42,7 @@ class Category(Base):
     slug = Column(String(100), nullable=False, unique=True)
     parent_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
     recipe_usage = Column(String(20), nullable=False, default="never", server_default="never")
+    default_shelf_life_days = Column(Integer, nullable=True)
     is_system = Column(Boolean, nullable=False, default=False, server_default="0")
     sort_order = Column(Integer, nullable=False, default=0, server_default="0")
     created_at = Column(DateTime, nullable=False, default=utcnow, server_default=func.now())
