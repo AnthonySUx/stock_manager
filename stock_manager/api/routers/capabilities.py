@@ -26,4 +26,6 @@ class CapabilitiesResponse(BaseModel):
 def capabilities():
     """Which optional features are available."""
     config = ai_client.get_config()
-    return CapabilitiesResponse(ai=AICapabilities(text=config.available, vision=config.vision_available))
+    return CapabilitiesResponse(ai=AICapabilities(
+        text=config.available, vision=config.vision_available, asr=config.asr_available,
+    ))

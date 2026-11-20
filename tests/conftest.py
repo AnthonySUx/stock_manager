@@ -109,6 +109,7 @@ def client(db_session, monkeypatch):
 AI_ENV_VARS = (
     "AI_RECIPE_ENABLED", "AI_API_KEY", "AI_BASE_URL", "AI_VISION_ENABLED",
     "AI_IMAGE_DETAIL", "RECEIPT_PRODUCT_LOOKUP_PROVIDER",
+    "AI_ASR_PROVIDER", "AI_ASR_TIMEOUT_SECONDS",
 )
 
 
@@ -123,11 +124,12 @@ def _fresh_ai_config(monkeypatch):
     AI is off unless the test turns it on, and any AI request that is not
     answered by `fake_ai` fails the test instead of reaching the network.
     """
-    from stock_manager.api import ai_client
+    from stock_manager.api import ai_client, asr_client
 
     for var in AI_ENV_VARS:
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setattr(ai_client, "_transport", httpx.MockTransport(_refuse_real_ai))
+    monkeypatch.setattr(asr_client, "_transport", httpx.MockTransport(_refuse_real_ai))
     ai_client._config = None
     yield
     ai_client._config = None

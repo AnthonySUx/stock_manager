@@ -13,6 +13,38 @@ flowchart LR
 
 Both endpoints require the shared API token.
 
+## Transcribe a recording
+
+Call `POST /api/speech/transcribe` with the shared API token and
+`multipart/form-data`. Send one file in `audio` and optionally set `feature`
+to `stock_intake` or `recipe_explore` for server logs. DeepSeek detects the
+spoken language automatically. The API returns the transcript and duration
+in milliseconds. The app can use the transcript as text for the intake draft.
+
+```json
+{"transcript": "Two bottles of milk", "duration_ms": 5230}
+```
+
+The audio file can be up to 8,388,608 bytes and 120 seconds. The backend
+accepts 16-bit PCM WAV or Ogg Opus and checks the file contents before upload
+to DeepSeek. WAV supports mono or stereo at 8000, 16000, 22050, 24000, 32000,
+44100, or 48000 Hz. For iOS, record 16-bit mono PCM WAV at 16000 Hz and stop
+at 120 seconds. Stereo WAV includes
+`"warnings": [{"code": "audio_stereo_left_only"}]` because DeepSeek recognizes
+only the left channel.
+
+Use `GET /api/capabilities` and check `ai.asr` before offering recording.
+Transcription errors use the API's standard `code` and `params` fields.
+
+| Code | HTTP | Meaning |
+| --- | --- | --- |
+| `asr_unavailable` | 503 | Speech transcription is disabled or lacks a key. |
+| `audio_upload_invalid` | 422 | The multipart form is malformed, a field is invalid, or the file is missing. |
+| `audio_too_large` | 413 | The upload exceeds the size limit. |
+| `audio_format_unsupported` | 422 | The audio format is invalid or unsupported. |
+| `audio_too_long` | 422 | The recording exceeds 120 seconds. |
+| `asr_upstream_error` | 502 | DeepSeek failed to transcribe the recording. |
+
 ## Parse text
 
 Send `POST /api/intake/parse` with `Content-Type: application/json`.
