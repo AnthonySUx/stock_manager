@@ -393,6 +393,114 @@ final class IntakeContractTests: XCTestCase {
         XCTAssertEqual(DisplayText.intakeWarning(unspecified), "入库结果包含一条提示，请检查内容。")
     }
 
+    @MainActor func testPhotoIntakeBatchesRetryWithoutReapplyingPreviousDraft() async throws {
+        let photos = (1...17).map {
+            PreparedIntakeImage(jpeg: Data("image-\($0)".utf8))
+        }
+        let milk = try decode(IntakeCandidate.self, Self.milk)
+        let existing = try decode(IntakeCandidate.self, Self.milk.replacingOccurrences(of: milk.id, with: "cand_00000001"))
+        XCTAssertNotNil(existing.purchaseDate)
+        let receiptFixture = Self.receipt.replacingOccurrences(of: #""image_index": 1"#,
+                                                                 with: #""image_index": 0, "future_key": true"#)
+        let receipt = try decode(IntakeCandidate.self, receiptFixture)
+        let batches = [Array(1...8), Array(9...16), Array(9...16), [17]]
+        var attempts = 0
+        let client = stubbedClient { request in
+            XCTAssertEqual(request.url?.path, "/api/intake/parse")
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.timeoutInterval, 120)
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-token")
+            let type = try XCTUnwrap(request.value(forHTTPHeaderField: "Content-Type"))
+            XCTAssertTrue(type.hasPrefix("multipart/form-data; boundary="))
+            let boundary = String(type.dropFirst("multipart/form-data; boundary=".count))
+            let data = try XCTUnwrap(request.httpBody ?? request.httpBodyStream.map(APIContractTests.readBody))
+            let fields = String(decoding: data, as: UTF8.self).components(separatedBy: "--" + boundary)
+            let payloadPart = try XCTUnwrap(fields.first { $0.contains("name=\"payload\"") })
+            let json = try XCTUnwrap(payloadPart.components(separatedBy: "\r\n\r\n").last)
+            let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+            XCTAssertEqual(Set(payload.keys), ["draft", "context"])
+            let draft = try XCTUnwrap(payload["draft"] as? [String: Any])
+            let items = try XCTUnwrap(draft["items"] as? [[String: Any]])
+            var expectedIDs = [existing.id]
+            if attempts > 0 { expectedIDs.append(milk.id) }
+            if attempts == 3 {
+                expectedIDs.append(receipt.id)
+                let source = try XCTUnwrap(items.last?["source"] as? [String: Any])
+                XCTAssertEqual(source["image_index"] as? Int, 8)
+                XCTAssertEqual(source["future_key"] as? Bool, true)
+            }
+            XCTAssertEqual(items.map { $0["temporary_id"] as? String }, expectedIDs)
+            let context = try XCTUnwrap(payload["context"] as? [String: String])
+            XCTAssertEqual(context, attempts < 2 ? [:] : ["purchase_date": "2026-11-19"])
+
+            let images = fields.filter { $0.contains("name=\"images\"") }
+            let expected = try XCTUnwrap(batches.indices.contains(attempts) ? batches[attempts] : nil)
+            XCTAssertEqual(images.count, expected.count)
+            for (index, pair) in zip(images, expected).enumerated() {
+                XCTAssertTrue(pair.0.contains("filename=\"photo-\(index + 1).jpg\""))
+                XCTAssertTrue(pair.0.contains("Content-Type: image/jpeg\r\n\r\nimage-\(pair.1)\r\n"))
+            }
+            attempts += 1
+            if attempts == 1 {
+                return (200, """
+                {"operations":[{"op":"add","candidate":\(Self.milk)}],"unparsed_fragments":["first"],
+                 "locale":"en","warnings":[]}
+                """)
+            }
+            if attempts == 2 {
+                return (422, #"{"code":"intake_image_too_large","params":{"index":1},"detail":"Too large"}"#)
+            }
+            if attempts == 3 {
+                return (200, """
+                {"operations":[{"op":"add","candidate":\(receiptFixture)}],"unparsed_fragments":["second"],
+                 "locale":"en","warnings":[]}
+                """)
+            }
+            return (200, #"{"operations":[],"unparsed_fragments":["third"],"locale":"en","warnings":[]}"#)
+        }
+        let store = makeStore(client, candidates: [existing])
+        await store.parse(photos: photos)
+        XCTAssertEqual(attempts, 2)
+        XCTAssertEqual(store.photoUpload?.batch, 2)
+        XCTAssertEqual(store.photoUpload?.totalBatches, 3)
+        XCTAssertEqual(store.candidates.map(\.id), [existing.id, milk.id])
+        XCTAssertEqual(store.action.errorMessage, "第 2 张图片超过大小限制")
+        store.purchaseDate = "2026-11-19"
+
+        await store.retryPhotoUpload()
+        XCTAssertEqual(attempts, 4)
+        XCTAssertNil(store.photoUpload)
+        XCTAssertEqual(store.action, .succeeded(nil))
+        XCTAssertEqual(store.candidates.map(\.id), [existing.id, milk.id, receipt.id])
+        let source = try XCTUnwrap(store.candidates.last?.source)
+        XCTAssertEqual(source.imageIndex, 8)
+        XCTAssertEqual(DisplayText.intakeSource(source), "小票 · 第 9 张")
+        XCTAssertEqual(store.lastParse?.unparsedFragments, ["first", "second", "third"])
+    }
+
+    @MainActor func testUnnamedReceiptLinesRequireNamesAndKeepAliasMetadata() throws {
+        let nameField = try XCTUnwrap(Self.receipt.range(of: #""name": "Eggs""#))
+        let raw = Self.receipt.replacingCharacters(in: nameField, with: #""name": null"#)
+        var first = try decode(IntakeCandidate.self, raw)
+        var second = try decode(IntakeCandidate.self, raw.replacingOccurrences(of: "cand_12345678", with: "cand_00000002"))
+        let client = stubbedClient { _ in (500, "{}") }
+        let store = makeStore(client, candidates: [first, second])
+        XCTAssertEqual(store.confirmationIssues.map(\.field), ["name", "name"])
+        XCTAssertFalse(store.canConfirm)
+        first.name = try XCTUnwrap(first.suggestions?.first?.name)
+        store.replaceCandidate(first)
+        XCTAssertFalse(store.canConfirm)
+        second.name = "Eggs"
+        store.replaceCandidate(second)
+        XCTAssertTrue(store.canConfirm)
+        XCTAssertEqual(store.candidates.map(\.id), [first.id, second.id])
+        let encoded = try encode(IntakeConfirmItem(candidate: first))
+        let item = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        XCTAssertEqual(item["raw_name"] as? String, "EGGS 6PK")
+        XCTAssertEqual(item["store_name"] as? String, "Market")
+        XCTAssertEqual(item["specificity"] as? String, "specific_receipt_label")
+    }
+
     @MainActor private func makeStore(_ client: APIClient, candidates: [IntakeCandidate]) -> IntakeStore {
         IntakeStore(client: client, inventory: InventoryStore(client: client),
                     restock: RestockStore(client: client), candidates: candidates)

@@ -280,6 +280,45 @@ final class StockManagerUITests: XCTestCase {
         XCTAssertTrue(app.buttons["intake.confirm"].isEnabled)
     }
 
+    func testPhotoIntakeReviewsUnnamedReceiptAndPrintedDate() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-ui-testing-reset", "-ui-testing-intake", "-ui-testing-intake-vision",
+            "-ui-testing-intake-photo-fixtures"
+        ]
+        app.launch()
+        let entry = app.buttons["inventory.aiIntake"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 10))
+        entry.tap()
+        let photos = app.buttons["intake.photos"]
+        XCTAssertTrue(photos.waitForExistence(timeout: 10))
+        photos.tap()
+
+        let receipt = app.buttons["intake.candidate.cand_53c03b01"]
+        let closeup = app.buttons["intake.candidate.cand_53c03b02"]
+        XCTAssertTrue(receipt.waitForExistence(timeout: 15))
+        XCTAssertTrue(receipt.label.contains("牛乳900"))
+        XCTAssertTrue(closeup.label.contains("2026-11-30"))
+        XCTAssertTrue(app.staticTexts["小票 · 第 1 张"].exists)
+        XCTAssertTrue(app.staticTexts["商品特写 · 第 2 张"].exists)
+        let confirm = app.buttons["intake.confirm"]
+        XCTAssertFalse(confirm.isEnabled)
+        capture("F6 photo intake review")
+
+        receipt.tap()
+        let name = app.textFields["intake.editor.name"]
+        XCTAssertTrue(name.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["请填写商品名称或选择历史名称。"].exists)
+        capture("F6 receipt editor")
+        name.tap()
+        name.typeText("Whole milk")
+        app.buttons["保存草稿"].tap()
+
+        XCTAssertTrue(confirm.isEnabled)
+        confirm.tap()
+        XCTAssertTrue(app.staticTexts["已入库 2 项"].waitForExistence(timeout: 10))
+    }
+
     private func launchHouseholdSettings() -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-ui-testing-reset", "-ui-testing-household-settings"]

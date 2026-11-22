@@ -80,6 +80,27 @@ protocol APIClientProtocol: Sendable {
     func expand(_ idea: ExploreIdea) async throws -> ExpandResponse
 }
 
+extension APIClientProtocol {
+    func parseIntakeImages(_ images: [PreparedIntakeImage], draft: IntakeDraft,
+                           context: IntakeContext) async throws -> IntakeParseResponse {
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        let payload = try encoder.encode(IntakeImagePayload(draft: draft, context: context))
+        let files = images.enumerated().map { index, image in
+            MultipartFile(field: "images", filename: "photo-\(index + 1).jpg",
+                          contentType: "image/jpeg", data: image.jpeg)
+        }
+        return try await sendMultipart(path: "intake/parse",
+                                       fields: ["payload": String(decoding: payload, as: UTF8.self)],
+                                       files: files, timeout: 120)
+    }
+}
+
+private struct IntakeImagePayload: Encodable {
+    let draft: IntakeDraft
+    let context: IntakeContext
+}
+
 struct APIClient: APIClientProtocol {
     let baseURL: URL
     let token: String

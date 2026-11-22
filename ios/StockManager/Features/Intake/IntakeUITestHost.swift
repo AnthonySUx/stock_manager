@@ -1,5 +1,6 @@
 #if DEBUG
 import SwiftUI
+import UIKit
 
 struct IntakeUITestHost: View {
     @State private var inventory: InventoryStore
@@ -34,6 +35,16 @@ struct IntakeUITestHost: View {
                                                restock: RestockStore(client: client), candidates: candidates))
     }
 
+    static var photoFixtures: [Data]? {
+        guard ProcessInfo.processInfo.arguments.contains("-ui-testing-intake-photo-fixtures") else { return nil }
+        return [UIColor.white, .systemYellow].map { color in
+            UIGraphicsImageRenderer(size: CGSize(width: 64, height: 96)).pngData { context in
+                context.cgContext.setFillColor(color.cgColor)
+                context.cgContext.fill(CGRect(x: 0, y: 0, width: 64, height: 96))
+            }
+        }
+    }
+
     var body: some View {
         NavigationStack { InventoryListView() }
             .environment(inventory)
@@ -65,8 +76,10 @@ private final class IntakeUITestProtocol: URLProtocol {
     private func response(path: String) -> (Int, String) {
         switch (request.httpMethod, path) {
         case ("GET", "/api/capabilities"):
-            let enabled = !ProcessInfo.processInfo.arguments.contains("-ui-testing-intake-unavailable")
-            return (200, #"{"ai":{"text":\#(enabled),"vision":false,"asr":false}}"#)
+            let arguments = ProcessInfo.processInfo.arguments
+            let vision = arguments.contains("-ui-testing-intake-vision")
+            let text = !vision && !arguments.contains("-ui-testing-intake-unavailable")
+            return (200, #"{"ai":{"text":\#(text),"vision":\#(vision),"asr":false}}"#)
         case ("GET", "/api/items"):
             return (200, "[]")
         case ("GET", "/api/restock"):
@@ -74,6 +87,9 @@ private final class IntakeUITestProtocol: URLProtocol {
         case ("GET", "/api/categories"), ("GET", "/api/categories/flat"):
             return (200, Self.categories)
         case ("POST", "/api/intake/parse"):
+            if request.value(forHTTPHeaderField: "Content-Type")?.hasPrefix("multipart/form-data;") == true {
+                return (200, Self.parsedPhotos)
+            }
             let body = requestBody()
             let draft = body["draft"] as? [String: Any]
             guard let items = draft?["items"] as? [[String: Any]] else {
@@ -85,6 +101,15 @@ private final class IntakeUITestProtocol: URLProtocol {
             }
             return (200, #"{"operations":[],"unparsed_fragments":["已用清空购买日期的草稿重新解析"],"locale":"zh-CN","warnings":[]}"#)
         case ("POST", "/api/intake/confirm"):
+            if ProcessInfo.processInfo.arguments.contains("-ui-testing-intake-vision") {
+                let items = requestBody()["items"] as? [[String: Any]]
+                guard let receipt = items?.first(where: { $0["temporary_id"] as? String == "cand_53c03b01" }),
+                      receipt["name"] as? String == "Whole milk", receipt["raw_name"] as? String == "牛乳900",
+                      receipt["store_name"] as? String == "超市", receipt["specificity"] as? String == "unknown" else {
+                    return (422, #"{"detail":"Expected a reviewed receipt line with its original metadata"}"#)
+                }
+                return (201, #"{"created":[{"temporary_id":"cand_53c03b01","item_id":41},{"temporary_id":"cand_53c03b02","item_id":42}],"restock_done":[],"restock_partial":[],"warnings":[]}"#)
+            }
             if ProcessInfo.processInfo.arguments.contains("-ui-testing-intake-existing-draft") {
                 return (201, #"{"created":[{"temporary_id":"cand_1a2b3c4d","item_id":41}],"restock_done":[],"restock_partial":[],"warnings":[]}"#)
             }
@@ -127,6 +152,23 @@ private final class IntakeUITestProtocol: URLProtocol {
         {"op":"add","candidate":{"temporary_id":"cand_00000001","name":"鸡蛋",
          "quantity_value":1,"quantity_unit":"盒","category_id":12,"unopened_expiration_date":"2026-11-30",
          "confidence":0.95,"source":{"input_kind":"text"},"owner":"小林","location":"冰箱"}}
+      ],
+      "unparsed_fragments":[],"locale":"zh-CN","warnings":[]
+    }
+    """
+
+    private static let parsedPhotos = """
+    {
+      "operations": [
+        {"op":"add","candidate":{"temporary_id":"cand_53c03b01","name":null,
+         "raw_name":"牛乳900","generic_name":"牛奶","store_name":"超市","specificity":"unknown",
+         "requires_user_review":true,"suggestions":[{"name":"Whole milk","source":"user_alias_history","confirmed_count":2}],
+         "quantity_value":1,"quantity_unit":"瓶","category_id":12,"unopened_expiration_date":"2026-11-27",
+         "confidence":0.5,"source":{"input_kind":"receipt","image_index":0},"owner":"小林","location":"冰箱"}},
+        {"op":"add","candidate":{"temporary_id":"cand_53c03b02","name":"鸡蛋",
+         "quantity_value":1,"quantity_unit":"盒","category_id":12,"unopened_expiration_date":"2026-11-30",
+         "expiration_source":"printed","confidence":0.95,"source":{"input_kind":"product_closeup","image_index":1},
+         "owner":"小林","location":"冰箱"}}
       ],
       "unparsed_fragments":[],"locale":"zh-CN","warnings":[]
     }

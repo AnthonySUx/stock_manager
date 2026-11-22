@@ -26,8 +26,34 @@ struct IntakeCandidateEditor: View {
 
     var body: some View {
         Form {
+            if candidate.source.inputKind == "receipt" {
+                Section("小票信息") {
+                    if let raw = candidate.rawName?.nilIfBlank {
+                        LabeledContent("小票原文", value: raw)
+                    }
+                    if let generic = candidate.genericName?.nilIfBlank {
+                        LabeledContent("商品类型", value: generic)
+                    }
+                    if candidate.name?.nilIfBlank == nil {
+                        Text("请填写商品名称或选择历史名称。")
+                            .foregroundStyle(.secondary)
+                    }
+                    if let suggestions = candidate.suggestions {
+                        ForEach(Array(suggestions.enumerated()), id: \.offset) { _, suggestion in
+                            Button {
+                                candidate.name = suggestion.name
+                            } label: {
+                                LabeledContent(suggestion.name, value: "采用历史名称")
+                            }
+                        }
+                    }
+                }
+            }
             Section("基本信息") {
-                marked("name") { InventoryTextField(.name, text: text(\.name)) }
+                marked("name", hasIssue: candidate.name?.nilIfBlank == nil || (candidate.name == initialCandidate.name && issues.contains("name"))) {
+                    InventoryTextField(.name, text: text(\.name))
+                        .accessibilityIdentifier("intake.editor.name")
+                }
                 marked("category_id") {
                     InventoryCategoryPicker(categories: categories, selection: $candidate.categoryId)
                 }
