@@ -140,25 +140,20 @@ Create an isolated virtual environment and install the backend plus development 
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -e ".[dev]"
 ```
 
-The shell prompt normally shows `(.venv)` while the environment is active. In every new Terminal window used for backend commands, return to the repository and reactivate it:
-
-```bash
-cd /path/to/stock_manager
-source .venv/bin/activate
-```
+The commands below call the project interpreter explicitly, so a new Terminal cannot
+accidentally run a globally installed `alembic` or `uvicorn` with missing dependencies.
 
 ### 6. Create or Upgrade the Database Tables
 
 Apply all Alembic migrations:
 
 ```bash
-alembic upgrade head
-alembic current
+.venv/bin/python -m alembic upgrade head
+.venv/bin/python -m alembic current
 ```
 
 `alembic current` should show the current revision followed by `(head)`. This step keeps existing application data; it does not recreate the database.
@@ -176,7 +171,7 @@ git clone --depth 1 https://github.com/Anduin2017/HowToCook.git ../HowToCook
 Import its `dishes/` recipes:
 
 ```bash
-python scripts/import_howtocook.py ../HowToCook
+.venv/bin/python scripts/import_howtocook.py ../HowToCook
 ```
 
 A successful run ends with a summary similar to:
@@ -193,14 +188,14 @@ To update the imported library later:
 
 ```bash
 git -C ../HowToCook pull --ff-only
-python scripts/import_howtocook.py ../HowToCook
+.venv/bin/python scripts/import_howtocook.py ../HowToCook
 ```
 
 Imported content retains its HowToCook source and license attribution in the API and app.
 
 ### 8. Start FastAPI
 
-With the virtual environment active, start the backend:
+Start the backend with the project launcher:
 
 ```bash
 ./scripts/start_backend.sh
@@ -211,7 +206,7 @@ Leave this Terminal window open. For a Simulator-only setup the API listens on `
 Alternatively, the equivalent direct command is:
 
 ```bash
-uvicorn stock_manager.api.main:app --reload --host 127.0.0.1 --port 8000
+.venv/bin/python -m uvicorn stock_manager.api.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 The backend checks the database revision and API token during startup. Fix any reported error before opening the app.
@@ -318,7 +313,6 @@ After the first installation, the normal start sequence is short:
 
 ```bash
 docker compose up -d
-source .venv/bin/activate
 ./scripts/start_backend.sh
 ```
 
@@ -349,12 +343,11 @@ Changing the published port recreates only the MySQL container; the named
 
 ```bash
 git pull --ff-only
-source .venv/bin/activate
-python -m pip install -e ".[dev]"
+.venv/bin/python -m pip install -e ".[dev]"
 docker compose up -d
-alembic upgrade head
+.venv/bin/python -m alembic upgrade head
 git -C ../HowToCook pull --ff-only
-python scripts/import_howtocook.py ../HowToCook
+.venv/bin/python scripts/import_howtocook.py ../HowToCook
 ```
 
 Restart FastAPI and rebuild the iOS app after the update. Migrations and the normal HowToCook import preserve existing inventory, settings, favorites, and user-created recipes.

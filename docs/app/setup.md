@@ -164,8 +164,7 @@ brew services start mysql
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
+.venv/bin/python -m pip install -e ".[dev]"
 ```
 
 ### 3.2 Create the Tables, Then Start the API Server
@@ -174,13 +173,13 @@ Tables are created and upgraded by [Alembic](https://alembic.sqlalchemy.org/) mi
 (see 3.5). Run this once now, and again whenever you pull a change that adds a migration:
 
 ```bash
-alembic upgrade head
+.venv/bin/python -m alembic upgrade head
 ```
 
 It uses `DATABASE_URL` from `.env`, the same database as the API. Then start the server:
 
 ```bash
-uvicorn stock_manager.api.main:app --reload --host 127.0.0.1 --port 8000
+./scripts/start_backend.sh
 ```
 
 On startup the API checks that the database is at the newest migration. If it is not, it
@@ -214,12 +213,12 @@ tables itself.
 is kept:
 
 ```bash
-alembic upgrade head
-alembic current        # shows the database's revision, e.g. "0001 (head)"
+.venv/bin/python -m alembic upgrade head
+.venv/bin/python -m alembic current        # shows the database's revision, e.g. "0005 (head)"
 ```
 
 **Databases created before Alembic** (by older versions, which ran `create_all` at startup) have
-the tables but no revision. Run `alembic upgrade head` once: the baseline migration `0001`
+the tables but no revision. Run `.venv/bin/python -m alembic upgrade head` once: the baseline migration `0001`
 skips tables that already exist and records the revision, without touching the data. This only
 works for databases with the current schema (anything created after the structured categories
 change, issue #33); older ones had to be rebuilt already.
@@ -228,27 +227,27 @@ change, issue #33); older ones had to be rebuilt already.
 review a migration, and commit it with the model change:
 
 ```bash
-alembic revision --autogenerate -m "add items.barcode"
+.venv/bin/python -m alembic revision --autogenerate -m "add items.barcode"
 # review the new file in migrations/versions/, then:
-alembic upgrade head
+.venv/bin/python -m alembic upgrade head
 ```
 
 `tests/test_migrations.py` fails if the migrations do not produce exactly the schema in
 `models.py`, so a model change without a migration is caught in CI. To preview the SQL without
-running it: `alembic upgrade head --sql`.
+running it: `.venv/bin/python -m alembic upgrade head --sql`.
 
 **Starting over** (deletes all stock, restock, settings, recipe and favorite data):
 
 ```bash
 mysql -u root -e "DROP DATABASE stock_manager; CREATE DATABASE stock_manager CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 # Docker: docker exec -it stock_manager_mysql mysql -u root -p -e "<same SQL>"
-alembic upgrade head
+.venv/bin/python -m alembic upgrade head
 ```
 
 Then start the backend and re-import HowToCook recipes if you need them:
 
 ```bash
-python3 scripts/import_howtocook.py /path/to/HowToCook
+.venv/bin/python scripts/import_howtocook.py /path/to/HowToCook
 ```
 
 Running the import again on an existing database is safe: recipes already imported are skipped,
@@ -376,9 +375,8 @@ docker compose up -d
 
 # Terminal 2: Backend
 cd /path/to/stock_manager
-source .venv/bin/activate
-alembic upgrade head   # no-op unless you pulled a new migration
-uvicorn stock_manager.api.main:app --reload --host 127.0.0.1 --port 8000
+.venv/bin/python -m alembic upgrade head   # no-op unless you pulled a new migration
+./scripts/start_backend.sh
 
 # Then launch StockManager from Xcode or the installed iOS app.
 ```

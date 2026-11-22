@@ -44,23 +44,21 @@ Set `API_TOKEN` in `.env` (see [Setup §3.7](setup.md#37-api-authentication)), o
 ### Backend fails to start: `... Run `alembic upgrade head` ...`
 
 The database is not at the newest schema revision: it is empty, was created before migrations
-were added, or you pulled a change with a new migration. Run `alembic upgrade head` in the
+were added, or you pulled a change with a new migration. Run `.venv/bin/python -m alembic upgrade head` in the
 project directory, then start the backend again. Existing data is kept
 (see [Setup §3.5](setup.md#35-database-migrations-alembic)).
 
-`alembic: command not found`: run `pip install -e .` (Alembic is a backend dependency). If it is
-installed but its script directory is not on `PATH` (pip warns "installed in
-'~/Library/Python/3.11/bin' which is not on PATH"), use `python3 -m alembic upgrade head`.
+If `.venv/bin/python` does not exist or a module is missing, run `./scripts/setup.sh`.
+This creates the project environment and installs the complete dependency set.
 
 ### Connection refused
 
-Backend not running. Start it with uvicorn.
+Backend not running. Start it with `./scripts/start_backend.sh`.
 
 ### Python module not found
 
 ```bash
-source .venv/bin/activate
-pip install -e .
+./scripts/setup.sh
 ```
 
 ### SwiftUI app does not build
