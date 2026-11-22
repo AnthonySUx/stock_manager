@@ -36,4 +36,13 @@ final class CapabilitiesStore {
         value = .unavailable
         phase = .idle
     }
+
+    func refreshAfterTextUnavailable(using client: any APIClientProtocol) async {
+        // A refresh already in flight predates the 503 and may publish stale flags.
+        generation += 1
+        let ai = value.ai
+        value = Capabilities(ai: .init(text: false, vision: ai.vision, asr: ai.asr))
+        phase = .idle
+        await refresh(using: client)
+    }
 }

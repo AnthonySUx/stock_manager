@@ -72,7 +72,7 @@ protocol APIClientProtocol: Sendable {
     func consumePreview(recipeId: Int) async throws -> ConsumePreview
     func cook(recipeId: Int, _ body: CookRequest) async throws -> CookResponse
     func explore(_ body: ExploreRequest) async throws -> ExploreResponse
-    func expand(_ idea: ExploreIdea) async throws -> RecipeDraft
+    func expand(_ idea: ExploreIdea) async throws -> ExpandResponse
 }
 
 struct APIClient: APIClientProtocol {
@@ -144,10 +144,11 @@ struct APIClient: APIClientProtocol {
     func recipeSources() async throws -> [SourceInfo] { try await send("recipes/sources") }
     func consumePreview(recipeId: Int) async throws -> ConsumePreview { try await send("recipes/\(recipeId)/consume-preview") }
     func cook(recipeId: Int, _ body: CookRequest) async throws -> CookResponse { try await send("recipes/\(recipeId)/cook", method: "POST", body: body) }
-    func explore(_ body: ExploreRequest) async throws -> ExploreResponse { try await send("recipes/explore", method: "POST", body: body, timeout: 70) }
-    func expand(_ idea: ExploreIdea) async throws -> RecipeDraft {
-        let response: ExpandResponse = try await send("recipes/explore/expand", method: "POST", body: ExpandRequest(idea: idea), timeout: 70)
-        return response.recipeDraft
+    func explore(_ body: ExploreRequest) async throws -> ExploreResponse {
+        try await send("recipes/explore", method: "POST", body: body, timeout: 120)
+    }
+    func expand(_ idea: ExploreIdea) async throws -> ExpandResponse {
+        try await send("recipes/explore/expand", method: "POST", body: ExpandRequest(idea: idea), timeout: 120)
     }
 
     private func filterQuery(_ filters: ItemFilters) -> [URLQueryItem] {

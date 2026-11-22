@@ -90,7 +90,7 @@ final class APIContractTests: XCTestCase {
     }
 
     func testExploreDraftToleratesMissingAIFields() throws {
-        let data = #"{"recipe_draft":{"title":"早餐","category":"unknown","ingredients":[{"ingredient_name":"鸡蛋","quantity":"2","unit":"个"}],"steps":[{"instruction":"打散鸡蛋"}],"warnings":["请确认内容"]}}"#.data(using: .utf8)!
+        let data = Data(#"{"recipe_draft":{"title":"早餐","category":"unknown","ingredients":[{"ingredient_name":"鸡蛋","quantity":"2","unit":"个"}],"steps":[{"instruction":"打散鸡蛋"}],"warnings":{"obsolete":true}},"locale":"zh-CN","warnings":[]}"#.utf8)
         let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
 
         let response = try decoder.decode(ExpandResponse.self, from: data)
@@ -98,8 +98,192 @@ final class APIContractTests: XCTestCase {
         XCTAssertNil(response.recipeDraft.category)
         XCTAssertEqual(response.recipeDraft.ingredients.first?.ingredientName, "鸡蛋")
         XCTAssertEqual(response.recipeDraft.steps.first?.stepNumber, 1)
-        XCTAssertEqual(response.recipeDraft.warnings, ["请确认内容"])
+        XCTAssertNil(response.recipeDraft.difficulty)
+        XCTAssertNil(response.recipeDraft.servings)
+        XCTAssertNil(response.recipeDraft.cookTimeMinutes)
     }
+
+    func testExploreDecodesDocumentedWarningAndLinkedRecipeActions() throws {
+        let response = try exploreDecoder.decode(ExploreResponse.self, from: Data(Self.exploreFixture.utf8))
+        XCTAssertEqual(response.locale, "zh-CN")
+        XCTAssertEqual(response.inputMode, "natural_language")
+        XCTAssertEqual(response.warnings.first?.params, ["title": "Tomato soup"])
+        XCTAssertEqual(response.warnings.map(DisplayText.aiWarning), ["创意「Tomato soup」的语言不符，已省略"])
+
+        var idea = try XCTUnwrap(response.ideas.first)
+        XCTAssertEqual(idea.action, .openRecipe(42))
+        idea.canExpandToRecipe = true
+        XCTAssertEqual(idea.action, .openRecipe(42))
+        idea.sourceType = "ai_idea"
+        idea.recipeId = nil
+        XCTAssertEqual(idea.action, .expand)
+        idea.canExpandToRecipe = false
+        XCTAssertEqual(idea.action, .none)
+    }
+
+    func testExpandDecodesDocumentedDraftLocaleAndTopLevelWarnings() throws {
+        let response = try exploreDecoder.decode(ExpandResponse.self, from: Data(Self.expandFixture.utf8))
+        XCTAssertEqual(response.locale, "zh-CN")
+        XCTAssertEqual(response.recipeDraft.title, "番茄炒蛋")
+        XCTAssertEqual(response.recipeDraft.ingredients.first?.ingredientName, "番茄")
+        XCTAssertEqual(response.warnings.map(\.code), ["draft_ai_generated"])
+        XCTAssertEqual(response.warnings.map(DisplayText.aiWarning), ["此草稿由 AI 生成，请检查食材、用量和步骤后再保存。"])
+    }
+
+    func testUnknownWarningsUseServerTextOrGenericNotice() throws {
+        let response = #"{"mode":"ai","input_mode":"natural_language","locale":"zh-CN","ideas":[],"warnings":[{"code":"future","params":{},"message":"A server notice"},{"code":"future","params":{},"detail":"An alternate notice"},{"code":"future","params":{}}]}"#
+        let decoded = try exploreDecoder.decode(ExploreResponse.self, from: Data(response.utf8))
+        XCTAssertEqual(decoded.warnings.map(DisplayText.aiWarning), [
+            "A server notice", "An alternate notice", "AI 结果包含一条提示，请检查内容。"
+        ])
+    }
+
+    func testDifficultyLabelsKeepLegacyFreeText() {
+        XCTAssertEqual(["easy", "medium", "hard", "适合新手"].map(DisplayText.difficulty),
+                       ["简单", "中等", "困难", "适合新手"])
+    }
+
+    func testExploreAndExpandEncodeRequestsWith120SecondTimeout() async throws {
+        let client = stubbedClient { request in
+            XCTAssertEqual(request.timeoutInterval, 120)
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-token")
+            let data = try XCTUnwrap(request.httpBody ?? request.httpBodyStream.map(Self.readBody))
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            switch request.url?.path {
+            case "/api/recipes/explore":
+                XCTAssertEqual(json["mode"] as? String, "natural_language")
+                XCTAssertEqual(json["natural_language"] as? String, "想做晚餐")
+                XCTAssertNil(json["structured"])
+                return (200, Self.exploreFixture)
+            case "/api/recipes/explore/expand":
+                let idea = try XCTUnwrap(json["idea"] as? [String: Any])
+                XCTAssertEqual(idea["source_type"] as? String, "ai_idea")
+                XCTAssertEqual(idea["idea_id"] as? String, "3f2a9c1b")
+                XCTAssertNil(json["locale"])
+                return (200, Self.expandFixture)
+            default:
+                throw URLError(.badURL)
+            }
+        }
+        let explore = try await client.explore(.init(mode: "natural_language", structured: nil, naturalLanguage: "想做晚餐"))
+        var idea = try XCTUnwrap(explore.ideas.first)
+        idea.sourceType = "ai_idea"
+        idea.recipeId = nil
+        idea.canExpandToRecipe = true
+        let expand = try await client.expand(idea)
+        XCTAssertEqual(expand.locale, "zh-CN")
+    }
+
+    @MainActor func testExploreRetainsResultsAndRetriesAfter502() async throws {
+        let request = ExploreRequest(mode: "natural_language", structured: nil, naturalLanguage: "Dinner")
+        let client = stubbedClient { req in
+            req.url?.path == "/api/capabilities"
+                ? (200, #"{"ai":{"text":true,"vision":false,"asr":false}}"#)
+                : (200, Self.exploreFixture)
+        }
+        let capabilities = CapabilitiesStore()
+        let store = ExploreStore(client: client, capabilities: capabilities)
+        await capabilities.refresh(using: client)
+        _ = await store.perform(.generate(request))
+        let previous = try XCTUnwrap(store.state.response)
+
+        URLProtocolStub.handler = { _ in (502, #"{"code":"ai_upstream_error"}"#) }
+        _ = await store.perform(.generate(request))
+        guard case .failed(let retained, let message, .generate(let retry)?) = store.state else {
+            return XCTFail("Expected a failed generation with a retry")
+        }
+        XCTAssertEqual(retained, previous)
+        XCTAssertEqual(message, "AI 服务暂时不可用，请重试")
+        XCTAssertEqual(retry.naturalLanguage, request.naturalLanguage)
+
+        URLProtocolStub.handler = { _ in (200, Self.exploreFixture) }
+        _ = await store.perform(.generate(retry))
+        guard case .loaded = store.state else { return XCTFail("Retry should restore a loaded response") }
+    }
+
+    @MainActor func testExplore503RefreshesCapabilitiesAndDisablesNewRequests() async throws {
+        let request = ExploreRequest(mode: "natural_language", structured: nil, naturalLanguage: "Dinner")
+        let client = stubbedClient { _ in (200, #"{"ai":{"text":true,"vision":true,"asr":false}}"#) }
+        let capabilities = CapabilitiesStore()
+        let store = ExploreStore(client: client, capabilities: capabilities)
+        await capabilities.refresh(using: client)
+
+        URLProtocolStub.handler = { req in
+            XCTAssertEqual(req.url?.path, "/api/recipes/explore")
+            return (200, Self.exploreFixture)
+        }
+        _ = await store.perform(.generate(request))
+        let previous = try XCTUnwrap(store.state.response)
+        let refreshed = expectation(description: "Capabilities refreshed after 503")
+        URLProtocolStub.handler = { req in
+            if req.url?.path == "/api/capabilities" {
+                refreshed.fulfill()
+                return (200, #"{"ai":{"text":false,"vision":true,"asr":false}}"#)
+            }
+            return (503, #"{"code":"ai_unavailable"}"#)
+        }
+        _ = await store.perform(.generate(request))
+        await fulfillment(of: [refreshed], timeout: 1)
+        XCTAssertFalse(store.isAvailable)
+        XCTAssertTrue(capabilities.value.ai.vision)
+        XCTAssertEqual(store.state.response, previous)
+
+        URLProtocolStub.handler = { _ in
+            XCTFail("A disabled Explore operation must not call the API")
+            return (500, "{}")
+        }
+        _ = await store.perform(.generate(request))
+    }
+
+    func testCookConsumptionUsesLocalizedAmountsForValidationAndEncoding() throws {
+        let item = ConsumePreviewItem(ingredientName: "豆腐", itemId: 7, itemName: "豆腐",
+                                      availableQuantity: 2, availableUnit: "盒", recipeQuantity: nil,
+                                      suggestedQuantity: nil, unit: "盒", needsUserInput: true,
+                                      status: "active", currentExpirationDate: nil, confidence: "high")
+        let preview = ConsumePreview(recipeId: 42, title: "红烧豆腐", suggestions: [item], unmatchedIngredients: [])
+        for input in ["１．５", "1,5"] {
+            let items = try XCTUnwrap(preview.consumption(selected: [7], amounts: [7: input]))
+            let body = try encodedObject(CookRequest(consumeItems: items, notes: nil))
+            let values = try XCTUnwrap(body["consume_items"] as? [[String: Any]])
+            XCTAssertEqual(values.first?["quantity"] as? Double, 1.5)
+        }
+        XCTAssertNil(preview.consumption(selected: [7], amounts: [7: "2,5"]))
+        XCTAssertNil(preview.consumption(selected: [7], amounts: [7: "0"]))
+        XCTAssertNil(preview.consumption(selected: [7, 8], amounts: [7: "1"]))
+    }
+
+    private var exploreDecoder: JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        return decoder
+    }
+
+    // recipes.md's Explore idea / done examples and warning parameter table.
+    private static let exploreFixture = """
+    {
+      "mode": "ai", "input_mode": "natural_language", "locale": "zh-CN",
+      "ideas": [{"idea_id": "3f2a9c1b", "title": "番茄炒蛋", "source_type": "existing_recipe", "recipe_id": 42,
+                 "matched_ingredients": [], "expiring_ingredients": [], "missing_ingredients": [],
+                 "flavors": [], "textures": [], "can_expand_to_recipe": false}],
+      "warnings": [{"code": "idea_dropped_wrong_language", "params": {"title": "Tomato soup"}}]
+    }
+    """
+
+    // recipes.md's Expand Idea to Draft example.
+    private static let expandFixture = """
+    {
+      "locale": "zh-CN",
+      "recipe_draft": {
+        "title": "番茄炒蛋", "category": "vegetable_dish", "description": "…",
+        "difficulty": "easy", "servings": "2", "cook_time_minutes": 15, "raw_markdown": null,
+        "ingredients": [{"ingredient_name": "番茄", "normalized_name": null, "quantity": "2",
+                         "unit": "个", "is_optional": false, "is_seasoning": false, "sort_order": 0}],
+        "steps": [{"step_number": 1, "instruction": "…"}]
+      },
+      "warnings": [{"code": "draft_ai_generated", "params": {}}]
+    }
+    """
 
     func testPydanticValidationErrorBecomesReadableMessage() throws {
         let data = Data(#"{"detail":[{"loc":["body","items",0,"quantity"],"msg":"Input should be greater than 0"},{"loc":["body","owner"],"msg":"Field required"}]}"#.utf8)

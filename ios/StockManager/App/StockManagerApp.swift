@@ -18,7 +18,8 @@ struct StockManagerApp: App {
     }
     var body: some Scene {
         WindowGroup {
-            RootView().environment(session).task { await session.restoreAndValidate() }
+            RootView().environment(session).environment(session.capabilities)
+                .task { await session.restoreAndValidate() }
         }
     }
 }
@@ -40,6 +41,8 @@ private struct RootView: View {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-ui-testing-consume") {
             ConsumeItemTestHost()
+        } else if ProcessInfo.processInfo.arguments.contains("-ui-testing-explore") {
+            ExploreUITestHost()
         } else {
             sessionContent
         }

@@ -27,7 +27,7 @@
 - 菜谱分页：`PaginationState` 明确区分可加载、正在加载和已到底，防止列表尾部重复触发相同页；偏移量直接由当前数组数量派生，请求代次确保较旧搜索结果不能覆盖新筛选结果。
 - 菜谱详情：`LoadState<Recipe>` 管理详情；`RecipeDetailPresentation` 独占编辑、烹饪和删除确认。
 - 烹饪：`LoadState<ConsumePreview>` 管理扣库存预览；提交使用 `ActionState`，预览未完成时不能提交。
-- AI 探索：`ExploreInputMode` 取代布尔模式；`ExploreState` 保留上一次结果并明确区分空闲、加载、成功和失败；展开草稿期间不会丢失创意列表。
+- AI 探索：`ExploreState` 在生成、展开和失败时保留上一次响应。502 提供原请求的重试操作。503 立即禁用 AI 文本操作并刷新能力；已有菜谱仍可打开。
 - 设置：设置与来源作为一个 `SettingsSnapshot` 原子加载；`SettingsPresentation` 独占连接编辑和断开确认。
 
 ## 约束
