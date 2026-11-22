@@ -4,7 +4,6 @@ import UniformTypeIdentifiers
 
 struct PreparedIntakeImage: Sendable {
     let jpeg: Data
-    let captureDate: String?
 }
 
 enum ImagePreparation {
@@ -16,9 +15,8 @@ enum ImagePreparation {
         case tooLarge
     }
 
-    static func prepare(_ data: Data, captureDate fallbackDate: String? = nil) throws -> PreparedIntakeImage {
+    static func prepare(_ data: Data) throws -> PreparedIntakeImage {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { throw Failure.unreadable }
-        let captureDate = captureDate(from: source) ?? fallbackDate
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
@@ -30,19 +28,7 @@ enum ImagePreparation {
         var jpeg = try encodeJPEG(image, quality: 0.8)
         if jpeg.count > maximumBytes { jpeg = try encodeJPEG(image, quality: 0.55) }
         guard jpeg.count <= maximumBytes else { throw Failure.tooLarge }
-        return .init(jpeg: jpeg, captureDate: captureDate)
-    }
-
-    private static func captureDate(from source: CGImageSource) -> String? {
-        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-              let exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any],
-              let timestamp = exif[kCGImagePropertyExifDateTimeOriginal] as? String else { return nil }
-        let day = String(timestamp.prefix(10)).replacingOccurrences(of: ":", with: "-")
-        let validator = ISO8601DateFormatter()
-        validator.formatOptions = [.withFullDate]
-        validator.timeZone = .gmt
-        guard let date = validator.date(from: day), validator.string(from: date) == day else { return nil }
-        return day
+        return .init(jpeg: jpeg)
     }
 
     private static func encodeJPEG(_ image: CGImage, quality: Double) throws -> Data {

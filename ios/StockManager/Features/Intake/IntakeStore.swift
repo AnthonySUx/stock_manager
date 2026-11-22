@@ -21,7 +21,6 @@ final class IntakeStore {
 
     struct PhotoUpload {
         fileprivate var remaining: [PreparedIntakeImage]
-        fileprivate let draftPurchaseDate: String?
         let totalBatches: Int
         fileprivate(set) var batch = 1
     }
@@ -146,7 +145,7 @@ final class IntakeStore {
     func parse(photos: [PreparedIntakeImage]) async {
         guard !action.isRunning, photoUpload == nil, !photos.isEmpty, !Task.isCancelled else { return }
         let batches = (photos.count - 1) / Self.photoBatchSize + 1
-        photoUpload = .init(remaining: photos, draftPurchaseDate: contextPurchaseDate, totalBatches: batches)
+        photoUpload = .init(remaining: photos, totalBatches: batches)
         await retryPhotoUpload()
     }
 
@@ -157,11 +156,8 @@ final class IntakeStore {
         while let upload = photoUpload {
             guard validateDraftForParsing() else { return }
             let batch = Array(upload.remaining.prefix(Self.photoBatchSize))
-            // A context date applies to the entire request. Use a photo date only when every photo agrees.
-            let commonDate = batch.first?.captureDate.flatMap { date in
-                batch.allSatisfy { $0.captureDate == date } ? date : nil
-            }
-            let context = IntakeContext(purchaseDate: purchaseDate?.nilIfBlank ?? commonDate ?? upload.draftPurchaseDate)
+            // An explicit context date takes precedence over the date printed on a receipt.
+            let context = IntakeContext(purchaseDate: purchaseDate?.nilIfBlank)
             do {
                 let response = try await client.parseIntakeImages(batch, draft: .init(items: candidates), context: context)
                 try Task.checkCancellation()

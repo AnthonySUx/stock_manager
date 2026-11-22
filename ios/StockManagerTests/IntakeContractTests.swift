@@ -395,9 +395,11 @@ final class IntakeContractTests: XCTestCase {
 
     @MainActor func testPhotoIntakeBatchesRetryWithoutReapplyingPreviousDraft() async throws {
         let photos = (1...17).map {
-            PreparedIntakeImage(jpeg: Data("image-\($0)".utf8), captureDate: "2026-11-20")
+            PreparedIntakeImage(jpeg: Data("image-\($0)".utf8))
         }
         let milk = try decode(IntakeCandidate.self, Self.milk)
+        let existing = try decode(IntakeCandidate.self, Self.milk.replacingOccurrences(of: milk.id, with: "cand_12345678"))
+        XCTAssertNotNil(existing.purchaseDate)
         let batches = [Array(1...8), Array(9...16), Array(9...16), [17]]
         var attempts = 0
         let client = stubbedClient { request in
@@ -416,9 +418,9 @@ final class IntakeContractTests: XCTestCase {
             XCTAssertEqual(Set(payload.keys), ["draft", "context"])
             let draft = try XCTUnwrap(payload["draft"] as? [String: Any])
             let items = try XCTUnwrap(draft["items"] as? [[String: Any]])
-            XCTAssertEqual(items.map { $0["temporary_id"] as? String }, attempts == 0 ? [] : [milk.id])
+            XCTAssertEqual(items.map { $0["temporary_id"] as? String }, attempts == 0 ? [existing.id] : [existing.id, milk.id])
             let context = try XCTUnwrap(payload["context"] as? [String: String])
-            XCTAssertEqual(context, ["purchase_date": attempts < 2 ? "2026-11-20" : "2026-11-19"])
+            XCTAssertEqual(context, attempts < 2 ? [:] : ["purchase_date": "2026-11-19"])
 
             let images = fields.filter { $0.contains("name=\"images\"") }
             let expected = try XCTUnwrap(batches.indices.contains(attempts) ? batches[attempts] : nil)
@@ -439,12 +441,12 @@ final class IntakeContractTests: XCTestCase {
             }
             return (200, #"{"operations":[],"unparsed_fragments":["next"],"locale":"en","warnings":[]}"#)
         }
-        let store = makeStore(client, candidates: [])
+        let store = makeStore(client, candidates: [existing])
         await store.parse(photos: photos)
         XCTAssertEqual(attempts, 2)
         XCTAssertEqual(store.photoUpload?.batch, 2)
         XCTAssertEqual(store.photoUpload?.totalBatches, 3)
-        XCTAssertEqual(store.candidates.map(\.id), [milk.id])
+        XCTAssertEqual(store.candidates.map(\.id), [existing.id, milk.id])
         XCTAssertEqual(store.action.errorMessage, "第 2 张图片超过大小限制")
         store.purchaseDate = "2026-11-19"
 
@@ -452,7 +454,7 @@ final class IntakeContractTests: XCTestCase {
         XCTAssertEqual(attempts, 4)
         XCTAssertNil(store.photoUpload)
         XCTAssertEqual(store.action, .succeeded(nil))
-        XCTAssertEqual(store.candidates.map(\.id), [milk.id])
+        XCTAssertEqual(store.candidates.map(\.id), [existing.id, milk.id])
         XCTAssertEqual(store.lastParse?.unparsedFragments, ["first", "next", "next"])
     }
 

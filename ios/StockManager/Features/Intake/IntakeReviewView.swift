@@ -7,22 +7,19 @@ struct IntakeReviewView: View {
 
     private enum PhotoSelection {
         case library(PhotosPickerItem)
-        case image(Data?, captureDate: String?)
+        case image(Data?)
 
         func prepare() async throws -> PreparedIntakeImage {
             let data: Data?
-            let captureDate: String?
             switch self {
             case .library(let item):
                 data = try await item.loadTransferable(type: Data.self)
-                captureDate = nil
-            case .image(let image, let date):
+            case .image(let image):
                 data = image
-                captureDate = date
             }
             guard let data else { throw ImagePreparation.Failure.unreadable }
             return try await Task.detached(priority: .userInitiated) {
-                try ImagePreparation.prepare(data, captureDate: captureDate)
+                try ImagePreparation.prepare(data)
             }.value
         }
     }
@@ -85,7 +82,7 @@ struct IntakeReviewView: View {
         .fullScreenCover(isPresented: $showsCamera) {
             IntakeCamera { data in
                 showsCamera = false
-                upload([.image(data, captureDate: API.string(.now))])
+                upload([.image(data)])
             } onCancel: {
                 showsCamera = false
             }
@@ -385,7 +382,7 @@ struct IntakeReviewView: View {
     private func openPhotoLibrary() {
         #if DEBUG
         if let fixtures = IntakeUITestHost.photoFixtures {
-            upload(fixtures.map { .image($0, captureDate: nil) })
+            upload(fixtures.map { .image($0) })
             return
         }
         #endif

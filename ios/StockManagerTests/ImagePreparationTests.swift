@@ -25,9 +25,10 @@ final class ImagePreparationTests: XCTestCase {
         let original = try XCTUnwrap(CGImageSourceCreateWithData(fixture, nil))
         let originalProperties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(original, 0, nil) as? [CFString: Any])
         XCTAssertNotNil(originalProperties[kCGImagePropertyGPSDictionary])
+        let originalExif = originalProperties[kCGImagePropertyExifDictionary] as? [CFString: Any]
+        XCTAssertEqual(originalExif?[kCGImagePropertyExifDateTimeOriginal] as? String, "2026:11:20 09:15:00")
 
         let result = try ImagePreparation.prepare(fixture as Data)
-        XCTAssertEqual(result.captureDate, "2026-11-20")
         XCTAssertLessThanOrEqual(result.jpeg.count, ImagePreparation.maximumBytes)
         let encoded = try XCTUnwrap(CGImageSourceCreateWithData(result.jpeg as CFData, nil))
         XCTAssertEqual(CGImageSourceGetType(encoded) as String?, UTType.jpeg.identifier)
