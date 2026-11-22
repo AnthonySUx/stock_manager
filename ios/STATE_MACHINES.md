@@ -36,6 +36,8 @@
 
 - Photo intake: The shared draft applies each successful photo batch in order. A failed batch remains at the front of the pending upload. Retry resumes there, and discarding remaining images keeps all changes from successful batches. Text parsing and confirmation can resume once the queue completes or is discarded.
 
+- Voice input: One cancellable action covers microphone permission, recording, and transcription. The recorder stops at 120 seconds and releases its audio session. Cancellation discards the recording, and completed uploads delete the temporary WAV on success or failure. A successful transcript only updates the active text field.
+
 ## 约束
 
 1. 不要同时添加 `isLoading`、`error` 和可选结果来描述同一请求；使用 `LoadState`。

@@ -30,6 +30,7 @@ final class StockManagerUITests: XCTestCase {
 
         let prompt = app.descendants(matching: .any)["explore.prompt"].firstMatch
         XCTAssertTrue(prompt.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["voice.record"].exists)
         prompt.tap()
         prompt.typeText("Dinner with eggs or tofu")
         let generate = app.buttons["explore.generate"]
@@ -317,6 +318,48 @@ final class StockManagerUITests: XCTestCase {
         XCTAssertTrue(confirm.isEnabled)
         confirm.tap()
         XCTAssertTrue(app.staticTexts["已入库 2 项"].waitForExistence(timeout: 10))
+    }
+
+    func testVoiceIntakeFillsDescriptionWithoutParsing() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing-reset", "-ui-testing-intake", "-ui-testing-asr", "-ui-testing-voice-fixture"]
+        app.launch()
+        let entry = app.buttons["inventory.aiIntake"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 10))
+        entry.tap()
+        let microphone = app.buttons["voice.record"]
+        XCTAssertTrue(microphone.waitForExistence(timeout: 10))
+        microphone.tap()
+
+        let input = app.descendants(matching: .any)["intake.input"].firstMatch
+        assertTranscript("两瓶牛奶", in: input)
+        XCTAssertTrue(app.buttons["intake.parse"].isEnabled)
+        XCTAssertEqual(app.buttons["intake.confirm"].label, "确认入库（0）")
+        capture("F7 voice intake transcript")
+    }
+
+    func testVoiceExploreFillsNaturalLanguagePromptWithoutGenerating() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing-reset", "-ui-testing-explore", "-ui-testing-asr", "-ui-testing-voice-fixture"]
+        app.launch()
+        openExplore(in: app)
+        let microphone = app.buttons["voice.record"]
+        XCTAssertTrue(microphone.waitForExistence(timeout: 10))
+        microphone.tap()
+
+        let prompt = app.descendants(matching: .any)["explore.prompt"].firstMatch
+        assertTranscript("找一道牛奶和鸡蛋的晚餐", in: prompt)
+        XCTAssertTrue(app.buttons["explore.generate"].isEnabled)
+        XCTAssertFalse(app.staticTexts["创意结果"].exists)
+        capture("F7 Explore voice transcript")
+
+        app.buttons["结构化条件"].tap()
+        XCTAssertFalse(microphone.exists)
+    }
+
+    private func assertTranscript(_ expected: String, in field: XCUIElement) {
+        let matches = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", expected), object: field)
+        XCTAssertEqual(XCTWaiter.wait(for: [matches], timeout: 10), .completed)
     }
 
     private func launchHouseholdSettings() -> XCUIApplication {

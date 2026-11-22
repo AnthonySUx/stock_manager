@@ -9,7 +9,10 @@ private enum ExploreInputMode: String, CaseIterable, Identifiable {
 
 struct ExploreView: View {
     @Environment(InventoryStore.self) private var inventory
+    private let client: any APIClientProtocol
+    private let capabilities: CapabilitiesStore
     @State private var store: ExploreStore
+    @State private var voice = VoiceInputStore()
     @State private var inputMode: ExploreInputMode = .naturalLanguage
     @State private var prompt = ""
     @FocusState private var promptFocused: Bool
@@ -21,6 +24,8 @@ struct ExploreView: View {
     @State private var operationTask: Task<Void, Never>?
 
     init(client: any APIClientProtocol, capabilities: CapabilitiesStore) {
+        self.client = client
+        self.capabilities = capabilities
         _store = State(initialValue: ExploreStore(client: client, capabilities: capabilities))
     }
 
@@ -29,7 +34,7 @@ struct ExploreView: View {
             Section {
                 Picker("输入方式", selection: $inputMode) {
                     ForEach(ExploreInputMode.allCases) { Text($0.title).tag($0) }
-                }.pickerStyle(.segmented)
+                }.pickerStyle(.segmented).disabled(voice.action.isRunning)
             }
             if inputMode == .naturalLanguage {
                 Section("告诉我想吃什么") {
@@ -37,6 +42,12 @@ struct ExploreView: View {
                         .lineLimit(3...6)
                         .focused($promptFocused)
                         .accessibilityIdentifier("explore.prompt")
+                        .disabled(voice.action.isRunning)
+                    VoiceInputControl(voice: voice, isAvailable: capabilities.value.ai.asr,
+                                      isDisabled: store.state.isLoading) {
+                        promptFocused = false
+                        voice.start(client: client, feature: .recipeExplore) { prompt.appendVoiceTranscript($0) }
+                    }
                 }
             } else {
                 preferencesSection
@@ -58,7 +69,7 @@ struct ExploreView: View {
                     } label: {
                         Label("生成创意", systemImage: "sparkles").frame(maxWidth: .infinity)
                     }
-                    .disabled(!store.isAvailable || store.state.isLoading || (inputMode == .naturalLanguage && prompt.trimmed.isEmpty))
+                    .disabled(!store.isAvailable || store.state.isLoading || voice.action.isRunning || (inputMode == .naturalLanguage && prompt.trimmed.isEmpty))
                     .accessibilityIdentifier("explore.generate")
                 }
                 if !store.isAvailable {
@@ -70,7 +81,7 @@ struct ExploreView: View {
                 Section {
                     Label(message, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
                     if let retry {
-                        Button("重试") { start(retry) }.disabled(!store.isAvailable)
+                        Button("重试") { start(retry) }.disabled(!store.isAvailable || voice.action.isRunning)
                     }
                 }
             }
@@ -93,7 +104,10 @@ struct ExploreView: View {
             }
         }
         .task { if inventory.items.isEmpty { await inventory.load() } }
-        .onDisappear { operationTask?.cancel() }
+        .onDisappear {
+            operationTask?.cancel()
+            voice.cancel()
+        }
         .refreshableWithCapabilities { await inventory.load() }
         .sheet(item: $expandedDraft) { draft in
             NavigationStack {
@@ -117,7 +131,7 @@ struct ExploreView: View {
             VStack(alignment: .leading, spacing: 8) {
                 ExploreIdeaSummary(idea: idea)
                 Button("展开为菜谱草稿") { start(.expand(idea)) }
-                    .disabled(store.state.isLoading || !store.isAvailable)
+                    .disabled(store.state.isLoading || !store.isAvailable || voice.action.isRunning)
             }
         case .none:
             ExploreIdeaSummary(idea: idea)
@@ -162,7 +176,7 @@ struct ExploreView: View {
     }
 
     private func start(_ operation: ExploreOperation) {
-        guard operationTask == nil else { return }
+        guard operationTask == nil, !voice.action.isRunning else { return }
         operationTask = Task {
             defer { operationTask = nil }
             if let response = await store.perform(operation), !Task.isCancelled {

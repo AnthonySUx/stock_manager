@@ -79,7 +79,10 @@ private final class IntakeUITestProtocol: URLProtocol {
             let arguments = ProcessInfo.processInfo.arguments
             let vision = arguments.contains("-ui-testing-intake-vision")
             let text = !vision && !arguments.contains("-ui-testing-intake-unavailable")
-            return (200, #"{"ai":{"text":\#(text),"vision":\#(vision),"asr":false}}"#)
+            let asr = arguments.contains("-ui-testing-asr")
+            return (200, #"{"ai":{"text":\#(text),"vision":\#(vision),"asr":\#(asr)}}"#)
+        case ("POST", "/api/speech/transcribe"):
+            return (200, #"{"transcript":"两瓶牛奶","duration_ms":3000}"#)
         case ("GET", "/api/items"):
             return (200, "[]")
         case ("GET", "/api/restock"):
