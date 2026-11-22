@@ -324,6 +324,18 @@ struct ConsumePreviewItem: Codable, Identifiable, Hashable {
 }
 struct ConsumePreview: Codable, Hashable {
     let recipeId: Int; let title: String; let suggestions: [ConsumePreviewItem]; let unmatchedIngredients: [String]
+
+    func consumption(selected: Set<Int>, amounts: [Int: String]) -> [CookConsumeItem]? {
+        var items: [CookConsumeItem] = []
+        var processed: Set<Int> = []
+        for suggestion in suggestions where selected.contains(suggestion.itemId) {
+            guard processed.insert(suggestion.itemId).inserted else { continue }
+            guard let amount = amounts[suggestion.itemId]?.quantityValue(),
+                  amount > 0, amount <= suggestion.availableQuantity else { return nil }
+            items.append(.init(itemId: suggestion.itemId, quantity: amount, ingredientName: suggestion.ingredientName))
+        }
+        return items.count == selected.count ? items : nil
+    }
 }
 struct CookConsumeItem: Encodable { let itemId: Int; let quantity: Double; let ingredientName: String }
 struct CookRequest: Encodable { let consumeItems: [CookConsumeItem]; let notes: String? }
@@ -342,20 +354,59 @@ struct ExploreIdea: Codable, Identifiable, Hashable {
     var flavors: [String]; var textures: [String]; var cuisineGroup: String?; var cuisine: String?
     var cookingMethod: String?; var estimatedTimeMinutes: Int?; var reason: String?; var canExpandToRecipe: Bool
     var id: String { ideaId.isEmpty ? title : ideaId }
+
+    var action: ExploreIdeaAction {
+        if sourceType == "existing_recipe", let recipeId { return .openRecipe(recipeId) }
+        return canExpandToRecipe ? .expand : .none
+    }
 }
-struct ExploreResponse: Codable, Hashable { let mode: String; let inputMode: String; let ideas: [ExploreIdea]; let warnings: [String] }
+
+enum ExploreIdeaAction: Equatable {
+    case openRecipe(Int)
+    case expand
+    case none
+}
+
+struct AIWarning: Decodable, Hashable {
+    let code: String
+    let params: [String: String]
+    let message: String?
+    let detail: String?
+
+    private enum CodingKeys: String, CodingKey { case code, params, message, detail }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        code = try values.decode(String.self, forKey: .code)
+        params = try values.decodeIfPresent([String: String].self, forKey: .params) ?? [:]
+        message = try? values.decodeIfPresent(String.self, forKey: .message)
+        detail = try? values.decodeIfPresent(String.self, forKey: .detail)
+    }
+}
+
+struct ExploreResponse: Decodable, Hashable {
+    let mode: String
+    let inputMode: String
+    let locale: String
+    let ideas: [ExploreIdea]
+    let warnings: [AIWarning]
+}
 struct ExpandRequest: Encodable { let idea: ExploreIdea }
-struct ExpandResponse: Decodable { let recipeDraft: RecipeDraft }
+struct ExpandResponse: Decodable {
+    let recipeDraft: RecipeDraft
+    let locale: String
+    let warnings: [AIWarning]
+}
 struct RecipeDraft: Codable, Hashable {
     var title: String; var category: RecipeCategory?; var description: String?; var difficulty: String?
     var servings: String?; var cookTimeMinutes: Int?; var rawMarkdown: String?
-    var ingredients: [Ingredient]; var steps: [RecipeStep]; var warnings: [String] = []
+    var ingredients: [Ingredient]; var steps: [RecipeStep]
 
-    enum CodingKeys: String, CodingKey { case title, category, description, difficulty, servings, cookTimeMinutes, rawMarkdown, ingredients, steps, warnings }
-    init(title: String, category: RecipeCategory?, description: String?, difficulty: String?, servings: String?, cookTimeMinutes: Int?, rawMarkdown: String?, ingredients: [Ingredient], steps: [RecipeStep], warnings: [String] = []) {
+    enum CodingKeys: String, CodingKey { case title, category, description, difficulty, servings, cookTimeMinutes, rawMarkdown, ingredients, steps }
+    init(title: String, category: RecipeCategory?, description: String?, difficulty: String?, servings: String?, cookTimeMinutes: Int?, rawMarkdown: String?, ingredients: [Ingredient], steps: [RecipeStep]) {
         self.title = title; self.category = category; self.description = description; self.difficulty = difficulty
         self.servings = servings; self.cookTimeMinutes = cookTimeMinutes; self.rawMarkdown = rawMarkdown
-        self.ingredients = ingredients; self.steps = steps; self.warnings = warnings
+        self.ingredients = ingredients; self.steps = steps
     }
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -368,7 +419,6 @@ struct RecipeDraft: Codable, Hashable {
         rawMarkdown = try values.decodeIfPresent(String.self, forKey: .rawMarkdown)
         ingredients = try values.decodeIfPresent([Ingredient].self, forKey: .ingredients) ?? []
         steps = try values.decodeIfPresent([RecipeStep].self, forKey: .steps) ?? []
-        warnings = try values.decodeIfPresent([String].self, forKey: .warnings) ?? []
         for index in steps.indices where steps[index].stepNumber <= 0 { steps[index].stepNumber = index + 1 }
     }
 }
