@@ -6,22 +6,37 @@ enum ExploreOperation {
     case expand(ExploreIdea)
 }
 
+struct ExploreResults: Equatable {
+    let ideas: [ExploreIdea]
+    var completion: ExploreStreamCompletion?
+    var warnings: [AIWarning] { completion?.warnings ?? [] }
+}
+
 enum ExploreState {
     case idle
-    case loading(previous: ExploreResponse?)
-    case loaded(ExploreResponse)
-    case failed(previous: ExploreResponse?, message: String, retry: ExploreOperation?)
+    case generating(previous: ExploreResults?, ideas: [ExploreIdea])
+    case expanding(ExploreResults?)
+    case loaded(ExploreResults)
+    case failed(previous: ExploreResults?, message: String, retry: ExploreOperation?)
 
-    var response: ExploreResponse? {
+    var results: ExploreResults? {
         switch self {
         case .idle: nil
-        case .loading(let previous), .failed(let previous, _, _): previous
-        case .loaded(let response): response
+        case .generating(let previous, let ideas): ideas.isEmpty ? previous : ExploreResults(ideas: ideas)
+        case .expanding(let previous), .failed(let previous, _, _): previous
+        case .loaded(let results): results
         }
     }
 
     var isLoading: Bool {
-        if case .loading = self { true } else { false }
+        switch self {
+        case .generating, .expanding: true
+        default: false
+        }
+    }
+
+    var isGenerating: Bool {
+        if case .generating = self { true } else { false }
     }
 }
 
@@ -39,24 +54,24 @@ final class ExploreStore {
     var isAvailable: Bool { capabilities.value.ai.text }
 
     func perform(_ operation: ExploreOperation) async -> ExpandResponse? {
-        guard isAvailable, !state.isLoading else { return nil }
-        let previous = state.response
-        let restored = previous.map(ExploreState.loaded) ?? .idle
-        state = .loading(previous: previous)
+        guard isAvailable, !state.isLoading, !Task.isCancelled else { return nil }
+        let previous = state.results
 
         do {
             switch operation {
             case .generate(let request):
-                let response = try await client.explore(request)
-                try Task.checkCancellation()
-                state = .loaded(response)
+                state = .generating(previous: previous, ideas: [])
+                try await generate(request, previous: previous)
             case .expand(let idea):
+                state = .expanding(previous)
                 let response = try await client.expand(idea)
                 try Task.checkCancellation()
-                state = restored
+                state = previous.map(ExploreState.loaded) ?? .idle
                 return response
             }
         } catch {
+            let retained = state.results
+            let restored = retained.map(ExploreState.loaded) ?? .idle
             if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled {
                 state = restored
             } else if case .server(503, "ai_unavailable", _, _) = error as? APIClientError {
@@ -66,12 +81,36 @@ final class ExploreStore {
                 let retry: ExploreOperation?
                 if case .server(502, "ai_upstream_error", _, _) = error as? APIClientError {
                     retry = operation
+                } else if case .generate = operation, error is URLError || (error as? APIClientError) == .incompleteStream {
+                    retry = operation
                 } else {
                     retry = nil
                 }
-                state = .failed(previous: previous, message: error.localizedDescription, retry: retry)
+                state = .failed(previous: retained, message: error.localizedDescription, retry: retry)
             }
         }
         return nil
+    }
+
+    private func generate(_ request: ExploreRequest, previous: ExploreResults?) async throws {
+        var ideas: [ExploreIdea] = []
+        for try await event in client.exploreStream(request) {
+            try Task.checkCancellation()
+            switch event {
+            case .idea(let idea):
+                ideas.append(idea)
+                state = .generating(previous: previous, ideas: ideas)
+            case .done(let completion):
+                state = .loaded(ExploreResults(ideas: ideas, completion: completion))
+                return
+            case .error(let code):
+                state = .failed(previous: state.results,
+                                message: DisplayText.error(code) ?? "创意生成失败，请重试",
+                                retry: .generate(request))
+                return
+            }
+        }
+        try Task.checkCancellation()
+        throw APIClientError.incompleteStream
     }
 }

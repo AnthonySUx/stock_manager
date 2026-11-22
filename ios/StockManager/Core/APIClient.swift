@@ -3,6 +3,7 @@ import Foundation
 enum APIClientError: LocalizedError, Equatable {
     case invalidURL
     case invalidResponse
+    case incompleteStream
     case unauthorized
     case server(status: Int, code: String?, params: [String: JSONValue], fallback: String)
     case invalidMultipart
@@ -12,6 +13,7 @@ enum APIClientError: LocalizedError, Equatable {
         switch self {
         case .invalidURL: "服务器地址无效"
         case .invalidResponse: "服务器返回了无效响应"
+        case .incompleteStream: "创意接收中断，请重试"
         case .unauthorized: "API 令牌无效或缺失"
         case .server(_, let code, let params, let fallback): code.flatMap { DisplayText.error($0, params: params) } ?? fallback
         case .invalidMultipart: "上传文件的表单名称、文件名或类型无效"
@@ -72,6 +74,7 @@ protocol APIClientProtocol: Sendable {
     func consumePreview(recipeId: Int) async throws -> ConsumePreview
     func cook(recipeId: Int, _ body: CookRequest) async throws -> CookResponse
     func explore(_ body: ExploreRequest) async throws -> ExploreResponse
+    func exploreStream(_ body: ExploreRequest) -> AsyncThrowingStream<ExploreStreamEvent, Error>
     func expand(_ idea: ExploreIdea) async throws -> ExpandResponse
 }
 
@@ -147,6 +150,57 @@ struct APIClient: APIClientProtocol {
     func explore(_ body: ExploreRequest) async throws -> ExploreResponse {
         try await send("recipes/explore", method: "POST", body: body, timeout: 120)
     }
+    func exploreStream(_ body: ExploreRequest) -> AsyncThrowingStream<ExploreStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            let producer = Task {
+                do {
+                    try await readExploreStream(body, into: continuation)
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in producer.cancel() }
+        }
+    }
+
+    private func readExploreStream(
+        _ body: ExploreRequest,
+        into continuation: AsyncThrowingStream<ExploreStreamEvent, Error>.Continuation
+    ) async throws {
+        let path = "recipes/explore/stream"
+        let method = "POST"
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        let request = try makeRequest(path, method: method, query: [], authenticated: true,
+                                      bodyData: encoder.encode(body), contentType: "application/json",
+                                      accept: "text/event-stream", timeout: 120)
+        let (bytes, response) = try await session.bytes(for: request)
+        defer { bytes.task.cancel() }
+        guard let http = response as? HTTPURLResponse else { throw APIClientError.invalidResponse }
+        if http.statusCode == 401 { throw APIClientError.unauthorized }
+        guard 200..<300 ~= http.statusCode else {
+            var data = Data()
+            for try await byte in bytes { data.append(byte) }
+            throw Self.serverError(data, status: http.statusCode, method: method, path: path)
+        }
+        guard http.mimeType == "text/event-stream" else { throw APIClientError.invalidResponse }
+
+        var parser = ExploreStreamParser()
+        for try await byte in bytes {
+            if let event = try parser.receive(byte) {
+                try Task.checkCancellation()
+                if case .terminated = continuation.yield(event) { return }
+                if event.isTerminal { return }
+            }
+        }
+        try Task.checkCancellation()
+        if let event = try parser.finish() {
+            if case .terminated = continuation.yield(event) { return }
+            if event.isTerminal { return }
+        }
+        throw APIClientError.incompleteStream
+    }
     func expand(_ idea: ExploreIdea) async throws -> ExpandResponse {
         try await send("recipes/explore/expand", method: "POST", body: ExpandRequest(idea: idea), timeout: 120)
     }
@@ -198,14 +252,8 @@ struct APIClient: APIClientProtocol {
     }
 
     private func send<Response: Decodable>(_ path: String, method: String, query: [URLQueryItem], authenticated: Bool = true, bodyData: Data?, contentType: String = "application/json", timeout: TimeInterval = 15) async throws -> Response {
-        var components = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)
-        if !query.isEmpty { components?.queryItems = query }
-        guard let url = components?.url else { throw APIClientError.invalidURL }
-        var request = URLRequest(url: url); request.httpMethod = method; request.timeoutInterval = timeout
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        if bodyData != nil { request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
-        if authenticated { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
-        request.httpBody = bodyData
+        let request = try makeRequest(path, method: method, query: query, authenticated: authenticated,
+                                      bodyData: bodyData, contentType: contentType, accept: "application/json", timeout: timeout)
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw APIClientError.invalidResponse }
         if http.statusCode == 401 { throw APIClientError.unauthorized }
@@ -218,6 +266,19 @@ struct APIClient: APIClientProtocol {
         } catch {
             throw APIClientError.decoding(error.localizedDescription)
         }
+    }
+
+    private func makeRequest(_ path: String, method: String, query: [URLQueryItem], authenticated: Bool,
+                             bodyData: Data?, contentType: String, accept: String, timeout: TimeInterval) throws -> URLRequest {
+        var components = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)
+        if !query.isEmpty { components?.queryItems = query }
+        guard let url = components?.url else { throw APIClientError.invalidURL }
+        var request = URLRequest(url: url); request.httpMethod = method; request.timeoutInterval = timeout
+        request.setValue(accept, forHTTPHeaderField: "Accept")
+        if bodyData != nil { request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
+        if authenticated { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        request.httpBody = bodyData
+        return request
     }
 
     static func serverError(_ data: Data, status: Int, method: String, path: String) -> APIClientError {

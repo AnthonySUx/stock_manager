@@ -18,6 +18,7 @@ struct ExploreView: View {
     @State private var methods = ""
     @State private var maxMinutes: Int?
     @State private var expandedDraft: IdentifiedDraft?
+    @State private var operationTask: Task<Void, Never>?
 
     init(client: any APIClientProtocol, capabilities: CapabilitiesStore) {
         _store = State(initialValue: ExploreStore(client: client, capabilities: capabilities))
@@ -42,20 +43,24 @@ struct ExploreView: View {
                 inventorySection
             }
             Section {
-                Button {
-                    let request = self.request
-                    promptFocused = false
-                    Task { await perform(.generate(request)) }
-                } label: {
+                if store.state.isGenerating {
                     HStack {
+                        ProgressView()
+                        Text("正在生成创意")
                         Spacer()
-                        if store.state.isLoading { ProgressView() }
-                        else { Label("生成创意", systemImage: "sparkles") }
-                        Spacer()
+                        Button("停止") { operationTask?.cancel() }
+                            .accessibilityIdentifier("explore.stop")
                     }
+                } else {
+                    Button {
+                        promptFocused = false
+                        start(.generate(request))
+                    } label: {
+                        Label("生成创意", systemImage: "sparkles").frame(maxWidth: .infinity)
+                    }
+                    .disabled(!store.isAvailable || store.state.isLoading || (inputMode == .naturalLanguage && prompt.trimmed.isEmpty))
+                    .accessibilityIdentifier("explore.generate")
                 }
-                .disabled(!store.isAvailable || store.state.isLoading || (inputMode == .naturalLanguage && prompt.trimmed.isEmpty))
-                .accessibilityIdentifier("explore.generate")
                 if !store.isAvailable {
                     Label(DisplayText.aiUnavailable, systemImage: "sparkles")
                         .foregroundStyle(.secondary)
@@ -65,21 +70,21 @@ struct ExploreView: View {
                 Section {
                     Label(message, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
                     if let retry {
-                        Button("重试") { Task { await perform(retry) } }.disabled(!store.isAvailable)
+                        Button("重试") { start(retry) }.disabled(!store.isAvailable)
                     }
                 }
             }
-            if let response = store.state.response {
-                if !response.warnings.isEmpty {
-                    Section { ExploreWarnings(warnings: response.warnings) }
+            if let results = store.state.results {
+                if !store.state.isGenerating, !results.warnings.isEmpty {
+                    Section { ExploreWarnings(warnings: results.warnings) }
                 }
-                if !response.ideas.isEmpty {
+                if !results.ideas.isEmpty {
                     Section("创意结果") {
-                        ForEach(response.ideas) { idea in
+                        ForEach(results.ideas) { idea in
                             ideaRow(idea)
                         }
                     }
-                } else if case .loaded = store.state, response.warnings.isEmpty {
+                } else if case .loaded = store.state, results.warnings.isEmpty {
                     Section {
                         ContentUnavailableView("没有生成创意", systemImage: "sparkles",
                                                description: Text("请换一种描述后重试。"))
@@ -88,6 +93,7 @@ struct ExploreView: View {
             }
         }
         .task { if inventory.items.isEmpty { await inventory.load() } }
+        .onDisappear { operationTask?.cancel() }
         .refreshableWithCapabilities { await inventory.load() }
         .sheet(item: $expandedDraft) { draft in
             NavigationStack {
@@ -110,7 +116,7 @@ struct ExploreView: View {
         case .expand:
             VStack(alignment: .leading, spacing: 8) {
                 ExploreIdeaSummary(idea: idea)
-                Button("展开为菜谱草稿") { Task { await perform(.expand(idea)) } }
+                Button("展开为菜谱草稿") { start(.expand(idea)) }
                     .disabled(store.state.isLoading || !store.isAvailable)
             }
         case .none:
@@ -155,9 +161,13 @@ struct ExploreView: View {
         text.split(separator: ",").map { String($0).trimmed }.filter { !$0.isEmpty }
     }
 
-    private func perform(_ operation: ExploreOperation) async {
-        if let response = await store.perform(operation) {
-            expandedDraft = IdentifiedDraft(response: response)
+    private func start(_ operation: ExploreOperation) {
+        guard operationTask == nil else { return }
+        operationTask = Task {
+            defer { operationTask = nil }
+            if let response = await store.perform(operation), !Task.isCancelled {
+                expandedDraft = IdentifiedDraft(response: response)
+            }
         }
     }
 }

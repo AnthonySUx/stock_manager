@@ -73,14 +73,23 @@ private final class ExploreUITestProtocol: URLProtocol {
             return
         }
         let (status, body): (Int, String)
+        var isStream = false
+        var holdOpen = false
         switch (request.httpMethod, url.path) {
         case ("GET", "/api/capabilities"):
             let enabled = !ProcessInfo.processInfo.arguments.contains("-ui-testing-explore-unavailable")
             (status, body) = (200, #"{"ai":{"text":\#(enabled),"vision":false,"asr":false}}"#)
         case ("GET", "/api/items"), ("GET", "/api/recipes"):
             (status, body) = (200, "[]")
-        case ("POST", "/api/recipes/explore"):
-            (status, body) = (200, ExploreTestFixtures.explore)
+        case ("POST", "/api/recipes/explore/stream"):
+            isStream = true
+            holdOpen = ProcessInfo.processInfo.arguments.contains("-ui-testing-explore-stream-progress")
+            do {
+                (status, body) = (200, try Self.streamBody(holdOpen: holdOpen))
+            } catch {
+                client?.urlProtocol(self, didFailWithError: error)
+                return
+            }
         case ("POST", "/api/recipes/explore/expand"):
             (status, body) = (200, ExploreTestFixtures.expand
                 .replacingOccurrences(of: "番茄炒蛋", with: "红烧豆腐")
@@ -92,17 +101,34 @@ private final class ExploreUITestProtocol: URLProtocol {
         default:
             (status, body) = (404, #"{"detail":"Unexpected UI test request"}"#)
         }
+        let mimeType = isStream ? "text/event-stream" : "application/json"
         guard let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: nil,
-                                             headerFields: ["Content-Type": "application/json"]) else {
+                                             headerFields: ["Content-Type": mimeType]) else {
             client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
             return
         }
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(body.utf8))
-        client?.urlProtocolDidFinishLoading(self)
+        if !holdOpen { client?.urlProtocolDidFinishLoading(self) }
     }
 
     override func stopLoading() {}
+
+    private static func streamBody(holdOpen: Bool) throws -> String {
+        guard var summary = try JSONSerialization.jsonObject(with: Data(ExploreTestFixtures.explore.utf8)) as? [String: Any],
+              let ideas = summary.removeValue(forKey: "ideas") as? [[String: Any]] else {
+            throw URLError(.cannotDecodeContentData)
+        }
+        let events = try (holdOpen ? ideas.prefix(1) : ideas[...]).map { try event("idea", value: $0) }.joined()
+        if holdOpen { return events }
+        summary["count"] = ideas.count
+        return events + (try event("done", value: summary))
+    }
+
+    private static func event(_ name: String, value: [String: Any]) throws -> String {
+        let json = try JSONSerialization.data(withJSONObject: value)
+        return "event: \(name)\ndata: \(String(decoding: json, as: UTF8.self))\n\n"
+    }
 
     private static func recipe(id: Int, title: String, source: String) -> String {
         """
