@@ -24,7 +24,7 @@ final class InventoryStore {
 
     func save(_ draft: ItemDraft, editing id: Int?) async throws {
         guard let categoryId = draft.categoryId, let quantity = Double(draft.quantity), quantity > 0 else {
-            throw APIClientError.server(status: 422, message: "请选择分类并输入有效数量")
+            throw APIClientError.server(status: 422, code: nil, params: [:], fallback: "请选择分类并输入有效数量")
         }
         let expiration = draft.unopenedExpiration.apiValue
         let openedDate: String?

@@ -102,10 +102,143 @@ final class APIContractTests: XCTestCase {
     }
 
     func testPydanticValidationErrorBecomesReadableMessage() throws {
-        let data = #"{"detail":[{"type":"greater_than","loc":["body","quantity"],"msg":"Input should be greater than 0"}]}"#.data(using: .utf8)!
-        let message = APIClient.errorMessage(data, status: 422)
-        XCTAssertTrue(message.contains("body.quantity"))
-        XCTAssertTrue(message.contains("greater than 0"))
+        let data = Data(#"{"detail":[{"loc":["body","items",0,"quantity"],"msg":"Input should be greater than 0"},{"loc":["body","owner"],"msg":"Field required"}]}"#.utf8)
+        let error = APIClient.serverError(data, status: 422, method: "POST", path: "intake/confirm")
+        XCTAssertEqual(error.localizedDescription, "body.items.0.quantity：Input should be greater than 0\nbody.owner：Field required")
+    }
+
+    func testCodeOnlyAIErrorUsesChineseMessage() async throws {
+        let error = try await stubbedServerError(status: 502, body: #"{"code":"ai_upstream_error"}"#)
+        XCTAssertEqual(error, .server(status: 502, code: "ai_upstream_error", params: [:], fallback: "请求失败（502）"))
+        XCTAssertEqual(error.localizedDescription, "AI 服务暂时不可用，请重试")
+    }
+
+    func testIntakeErrorPreservesParamsAndPrefersCode() async throws {
+        let error = try await stubbedServerError(status: 422, body: #"{"code":"intake_item_invalid","params":{"index":1,"temporary_id":"cand_abcd1234","field":"quantity_value"},"detail":"Invalid intake item"}"#)
+        XCTAssertEqual(error, .server(status: 422, code: "intake_item_invalid", params: [
+            "index": .integer(1), "temporary_id": .string("cand_abcd1234"), "field": .string("quantity_value")
+        ], fallback: "Invalid intake item"))
+        XCTAssertEqual(error.localizedDescription, "第 2 个条目的入库信息无效，请检查后重试")
+    }
+
+    func testLegacyErrorFallbacksKeepDetailAndOnlySpecialCaseRestockCompletion() {
+        let data = Data(#"{"detail":"Recipe not found"}"#.utf8)
+        XCTAssertEqual(APIClient.serverError(data, status: 404, method: "GET", path: "recipes/1").localizedDescription, "Recipe not found")
+
+        let conflict = Data(#"{"detail":"Already done"}"#.utf8)
+        XCTAssertEqual(APIClient.serverError(conflict, status: 409, method: "POST", path: "restock/1/done").localizedDescription, "这条补货之前已经入库，无需重复操作")
+        XCTAssertEqual(APIClient.serverError(conflict, status: 409, method: "PATCH", path: "restock/1").localizedDescription, "Already done")
+        XCTAssertEqual(APIClient.serverError(Data(), status: 500, method: "GET", path: "settings").localizedDescription, "请求失败（500）")
+
+        let future = Data(#"{"code":"future_error","detail":"Unrecognized error"}"#.utf8)
+        XCTAssertEqual(APIClient.serverError(future, status: 400, method: "GET", path: "settings").localizedDescription, "Unrecognized error")
+
+        let futureWithoutDetail = Data(#"{"code":"future_error"}"#.utf8)
+        XCTAssertEqual(APIClient.serverError(futureWithoutDetail, status: 400, method: "GET", path: "settings").localizedDescription, "请求失败（400）")
+    }
+
+    @MainActor func testCapabilitiesUsesBearerAndFallsBackAfterFailedRefresh() async {
+        let store = CapabilitiesStore()
+        let client = stubbedClient { request in
+            XCTAssertEqual(request.url?.path, "/api/capabilities")
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-token")
+            return (200, #"{"ai":{"text":true,"vision":false,"asr":false}}"#)
+        }
+        XCTAssertEqual(store.phase, .idle)
+        XCTAssertEqual(store.value, .unavailable)
+
+        await store.refresh(using: client)
+
+        XCTAssertEqual(store.phase, .loaded)
+        XCTAssertEqual(store.value.ai, .init(text: true, vision: false, asr: false))
+        let failing = stubbedClient { _ in (503, #"{"code":"ai_unavailable"}"#) }
+        await store.refresh(using: failing)
+
+        XCTAssertEqual(store.phase, .failed("AI 功能未开启"))
+        XCTAssertEqual(store.value, .unavailable)
+
+        let recovered = stubbedClient { _ in (200, #"{"ai":{"text":false,"vision":true,"asr":true}}"#) }
+        await store.refresh(using: recovered)
+        XCTAssertEqual(store.phase, .loaded)
+        XCTAssertEqual(store.value.ai, .init(text: false, vision: true, asr: true))
+
+        store.reset()
+        XCTAssertEqual(store.phase, .idle)
+        XCTAssertEqual(store.value, .unavailable)
+    }
+
+    func testSettingsDecodesHouseholdLocaleAndTimezoneWhenPresent() throws {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let current = Data(#"{"expiration_reminder_days":"3","default_locale":"zh-CN","default_timezone":"Asia/Tokyo"}"#.utf8)
+        let settings = try decoder.decode(AppSettings.self, from: current)
+        XCTAssertEqual(settings.defaultLocale, "zh-CN")
+        XCTAssertEqual(settings.defaultTimezone, "Asia/Tokyo")
+
+        let legacy = Data(#"{"expiration_reminder_days":"3"}"#.utf8)
+        let legacySettings = try decoder.decode(AppSettings.self, from: legacy)
+        XCTAssertNil(legacySettings.defaultLocale)
+        XCTAssertNil(legacySettings.defaultTimezone)
+    }
+
+    func testCategoryDecodesShelfLifeAndToleratesUnknownRecipeUsage() throws {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let current = Data(#"{"id":1,"name":"鸡蛋","slug":"eggs","recipe_usage":"future_usage","is_system":true,"sort_order":0,"default_shelf_life_days":30}"#.utf8)
+        let category = try decoder.decode(Category.self, from: current)
+        XCTAssertEqual(category.defaultShelfLifeDays, 30)
+        XCTAssertEqual(category.recipeUsage.title, "future_usage")
+
+        let legacy = Data(#"{"id":1,"name":"鸡蛋","slug":"eggs","recipe_usage":"always","is_system":true,"sort_order":0}"#.utf8)
+        XCTAssertNil(try decoder.decode(Category.self, from: legacy).defaultShelfLifeDays)
+    }
+
+    func testCategoryWritesEncodeShelfLifeAndPreservePatchTriState() throws {
+        let create = CategoryCreate(name: "鸡蛋", parentId: nil, recipeUsage: nil, sortOrder: 0, defaultShelfLifeDays: 30)
+        let omitted = CategoryUpdate(name: nil, parentId: nil, includeParentId: false, recipeUsage: nil, sortOrder: nil)
+        var clear = omitted
+        clear.includeDefaultShelfLifeDays = true
+        var set = clear
+        set.defaultShelfLifeDays = 7
+
+        let key = "default_shelf_life_days"
+        XCTAssertEqual(try encodedObject(create)[key] as? Int, 30)
+        XCTAssertNil(try encodedObject(omitted)[key])
+        XCTAssertTrue(try encodedObject(clear)[key] is NSNull)
+        XCTAssertEqual(try encodedObject(set)[key] as? Int, 7)
+    }
+
+    func testMultipartRequestEncodesOrderedFilesAndTextField() async throws {
+        let payload = #"{"draft":{"items":[]},"context":{"locale":"en"}}"#
+        let first = Data([0xff, 0xd8, 0x00])
+        let second = Data([0xff, 0xd8, 0x01])
+        let client = stubbedClient { request in
+            XCTAssertEqual(request.url?.path, "/api/intake/parse")
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.timeoutInterval, 120)
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-token")
+            let contentType = try XCTUnwrap(request.value(forHTTPHeaderField: "Content-Type"))
+            let prefix = "multipart/form-data; boundary="
+            XCTAssertTrue(contentType.hasPrefix(prefix))
+            let boundary = String(contentType.dropFirst(prefix.count))
+            XCTAssertNotNil(UUID(uuidString: boundary))
+
+            var expected = Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"payload\"\r\n\r\n\(payload)\r\n".utf8)
+            for (name, bytes) in [("receipt-a.jpg", first), ("receipt-b.jpg", second)] {
+                expected.append(contentsOf: "--\(boundary)\r\nContent-Disposition: form-data; name=\"images\"; filename=\"\(name)\"\r\nContent-Type: image/jpeg\r\n\r\n".utf8)
+                expected.append(bytes)
+                expected.append(contentsOf: "\r\n".utf8)
+            }
+            expected.append(contentsOf: "--\(boundary)--\r\n".utf8)
+            XCTAssertEqual(try XCTUnwrap(request.httpBody ?? request.httpBodyStream.map(Self.readBody)), expected)
+            return (200, #"{"message":"ok"}"#)
+        }
+        let response: MessageResponse = try await client.sendMultipart(path: "intake/parse", fields: ["payload": payload], files: [
+            .init(field: "images", filename: "receipt-a.jpg", contentType: "image/jpeg", data: first),
+            .init(field: "images", filename: "receipt-b.jpg", contentType: "image/jpeg", data: second)
+        ], timeout: 120)
+        XCTAssertEqual(response.message, "ok")
     }
 
     @MainActor func testConnectionURLAddsAPIRoot() {
@@ -130,6 +263,42 @@ final class APIContractTests: XCTestCase {
         let settings = try await client.settings()
         XCTAssertEqual(health.status, "ok")
         XCTAssertEqual(settings.expirationReminderDays, "2")
+    }
+
+    private func stubbedServerError(status: Int, body: String) async throws -> APIClientError {
+        let client = stubbedClient { _ in (status, body) }
+        do {
+            _ = try await client.settings()
+        } catch let error as APIClientError {
+            return error
+        }
+        throw URLError(.badServerResponse)
+    }
+
+    private func stubbedClient(_ handler: @escaping (URLRequest) throws -> (Int, String)) -> APIClient {
+        URLProtocolStub.handler = handler
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [URLProtocolStub.self]
+        return APIClient(baseURL: URL(string: "https://example.test/api")!, token: "test-token", session: URLSession(configuration: configuration))
+    }
+
+    private func encodedObject(_ value: some Encodable) throws -> [String: Any] {
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        return try XCTUnwrap(JSONSerialization.jsonObject(with: encoder.encode(value)) as? [String: Any])
+    }
+
+    private static func readBody(_ stream: InputStream) throws -> Data {
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 1024)
+        while true {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            if count == 0 { return data }
+            if count < 0 { throw stream.streamError ?? URLError(.cannotDecodeRawData) }
+            data.append(contentsOf: buffer.prefix(count))
+        }
     }
 }
 

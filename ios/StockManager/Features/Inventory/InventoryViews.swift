@@ -32,7 +32,7 @@ struct InventoryListView: View {
         .searchable(text: $store.query, prompt: "搜索名称、分类、所有者或位置")
         .task(id: store.query) { try? await Task.sleep(for: .milliseconds(300)); guard !Task.isCancelled else { return }; await store.load() }
         .task { async let a: Void = inventory.load(); async let b: Void = categories.load(); _ = await (a, b) }
-        .refreshable { await inventory.load() }
+        .refreshableWithCapabilities { await inventory.load() }
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button { presentation = .filters } label: { Image(systemName: activeFilters ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle") }
@@ -280,7 +280,7 @@ struct ReminderView: View {
     @State private var state: LoadState<[StockItem]> = .idle
     var body: some View {
         Group { switch state { case .idle, .loading: LoadingView(); case .failed(let message): FailureView(message: message) { Task { await load() } }; case .loaded(let items): if items.isEmpty { EmptyStateView(title: "没有过期提醒", message: "当前库存都在安全期限内。", icon: "checkmark.circle") } else { List { reminderSection("即将过期", items: items.filter { $0.status == .expiringSoon }); reminderSection("已经过期", items: items.filter { $0.status == .expired }) } } } }
-            .navigationTitle("过期提醒").task { await load() }.refreshable { await load() }
+            .navigationTitle("过期提醒").task { await load() }.refreshableWithCapabilities { await load() }
     }
     @ViewBuilder private func reminderSection(_ title: String, items: [StockItem]) -> some View { if !items.isEmpty { Section(title) { ForEach(items) { item in NavigationLink { ItemDetailView(itemID: item.id) } label: { ItemRow(item: item) } } } } }
     private func load() async { state = .loading; do { state = .loaded(try await inventory.client.reminders()) } catch { state = .failed(error.localizedDescription) } }

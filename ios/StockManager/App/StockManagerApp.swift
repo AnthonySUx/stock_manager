@@ -25,7 +25,18 @@ struct StockManagerApp: App {
 
 private struct RootView: View {
     @Environment(AppSession.self) private var session
+    @Environment(\.scenePhase) private var scenePhase
+
     var body: some View {
+        content
+            .task(id: session.connectionID) { await session.refreshCapabilities() }
+            .onChange(of: scenePhase) { _, phase in
+                guard phase == .active else { return }
+                Task { await session.refreshCapabilities() }
+            }
+    }
+
+    @ViewBuilder private var content: some View {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-ui-testing-consume") {
             ConsumeItemTestHost()

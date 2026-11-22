@@ -111,7 +111,7 @@ struct CategoryManagementView: View {
         .navigationTitle("分类管理")
         .toolbar { Button { presentation = .add(parent: nil) } label: { Image(systemName: "plus") } }
         .task { await categories.load() }
-        .refreshable { await categories.load() }
+        .refreshableWithCapabilities { await categories.load() }
             .sheet(item: sheetPresentation) { value in NavigationStack { switch value { case .add(let parent): CategoryEditorView(category: nil, initialParent: parent); case .edit(let category): CategoryEditorView(category: category, initialParent: category.parentId); case .confirmDelete: EmptyView() } } }
             .confirmationDialog("删除分类“\(deletingCategory?.name ?? "")”？", isPresented: deleteConfirmation) {
                 Button("永久删除", role: .destructive) { if let value = deletingCategory { Task { await delete(value) } } }

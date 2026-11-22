@@ -55,3 +55,22 @@ struct LabeledValue: View {
     let label: String; let value: String
     var body: some View { LabeledContent(label) { Text(value).foregroundStyle(.secondary) } }
 }
+
+private struct RefreshableWithCapabilities: ViewModifier {
+    @Environment(AppSession.self) private var session: AppSession?
+    let action: @Sendable () async -> Void
+
+    func body(content: Content) -> some View {
+        content.refreshable {
+            async let refresh: Void? = session?.refreshCapabilities()
+            await action()
+            _ = await refresh
+        }
+    }
+}
+
+extension View {
+    func refreshableWithCapabilities(_ action: @escaping @Sendable () async -> Void) -> some View {
+        modifier(RefreshableWithCapabilities(action: action))
+    }
+}
