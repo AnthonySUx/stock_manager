@@ -3,7 +3,9 @@ import Observation
 
 @MainActor @Observable
 final class VoiceRecorder: NSObject, AVAudioRecorderDelegate {
-    static let durationLimit: TimeInterval = 120
+    /// The backend rejects audio longer than 120 seconds. AVAudioRecorder can write one
+    /// extra buffer when it stops, so recording ends one second early.
+    static let durationLimit: TimeInterval = 119
     static let sampleRate = 16_000
     static let settings: [String: Any] = [
         AVFormatIDKey: kAudioFormatLinearPCM,

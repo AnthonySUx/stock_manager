@@ -11,7 +11,7 @@ final class SpeechContractTests: XCTestCase {
         XCTAssertEqual(settings[AVLinearPCMBitDepthKey] as? Int, 16)
         XCTAssertEqual(settings[AVLinearPCMIsBigEndianKey] as? Bool, false)
         XCTAssertEqual(settings[AVLinearPCMIsFloatKey] as? Bool, false)
-        XCTAssertEqual(VoiceRecorder.durationLimit, 120)
+        XCTAssertLessThan(VoiceRecorder.durationLimit, 120)
 
         let url = try VoiceRecordingFixture.make()
         defer { try? FileManager.default.removeItem(at: url) }
