@@ -334,7 +334,7 @@ private struct CategoryEditorView: View {
         .savingOverlay(action.isRunning).actionErrorAlert($action)
     }
 
-    private var shelfLifeDays: Int? { Int(shelfLife.trimmed) }
+    private var shelfLifeDays: Int? { shelfLife.shelfLifeDays }
     private var validShelfLife: Bool {
         shelfLife.trimmed.isEmpty || shelfLifeDays.map { (1...3650).contains($0) } == true
     }

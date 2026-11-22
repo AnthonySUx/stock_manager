@@ -229,6 +229,10 @@ extension String {
     var trimmed: String { trimmingCharacters(in: .whitespacesAndNewlines) }
     var nilIfBlank: String? { trimmed.isEmpty ? nil : trimmed }
 
+    var shelfLifeDays: Int? {
+        Int((applyingTransform(.fullwidthToHalfwidth, reverse: false) ?? self).trimmed)
+    }
+
     /// Parses quantities typed with localized/full-width decimal characters.
     /// The backend still receives a normal `Double` regardless of keyboard locale.
     func quantityValue(locale: Locale = .current) -> Double? {

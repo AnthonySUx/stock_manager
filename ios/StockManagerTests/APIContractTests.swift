@@ -593,6 +593,23 @@ final class APIContractTests: XCTestCase {
                                                        usage: .always, order: 0, shelfLife: nil)
     }
 
+    @MainActor func testFullWidthShelfLifeInputSavesIntegerDays() async throws {
+        let category = Category(id: 7, name: "蔬菜", slug: "vegetables", recipeUsage: .always,
+                                isSystem: true, sortOrder: 0, defaultShelfLifeDays: 7)
+        let client = stubbedClient { request in
+            if request.httpMethod == "GET" { return (200, "[]") }
+            XCTAssertEqual(request.url?.path, "/api/categories/7")
+            XCTAssertEqual(request.httpMethod, "PATCH")
+            let data = try XCTUnwrap(request.httpBody ?? request.httpBodyStream.map(Self.readBody))
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            XCTAssertEqual(json["default_shelf_life_days"] as? Int, 30)
+            return (200, #"{"id":7,"name":"蔬菜","slug":"vegetables","recipe_usage":"always","is_system":true,"sort_order":0,"default_shelf_life_days":30}"#)
+        }
+        let days = try XCTUnwrap("３０".shelfLifeDays)
+        try await CategoryStore(client: client).update(category, name: category.name, parent: nil,
+                                                       usage: .always, order: 0, shelfLife: days)
+    }
+
     func testSettingsDecodesHouseholdLocaleAndTimezoneWhenPresent() throws {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
@@ -713,7 +730,7 @@ final class APIContractTests: XCTestCase {
         return try XCTUnwrap(JSONSerialization.jsonObject(with: encoder.encode(value)) as? [String: Any])
     }
 
-    private static func readBody(_ stream: InputStream) throws -> Data {
+    static func readBody(_ stream: InputStream) throws -> Data {
         stream.open()
         defer { stream.close() }
         var data = Data()
@@ -727,7 +744,7 @@ final class APIContractTests: XCTestCase {
     }
 }
 
-private final class URLProtocolStub: URLProtocol {
+final class URLProtocolStub: URLProtocol {
     static var handler: ((URLRequest) throws -> (Int, String))?
     static var holdOpen = false
     static var onStop: (() -> Void)?

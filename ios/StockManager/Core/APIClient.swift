@@ -45,6 +45,8 @@ protocol APIClientProtocol: Sendable {
     func item(id: Int) async throws -> StockItem
     func reminders() async throws -> [StockItem]
     func createItem(_ body: ItemCreate) async throws -> StockItem
+    func parseIntake(_ body: IntakeParseRequest) async throws -> IntakeParseResponse
+    func confirmIntake(_ body: IntakeConfirmRequest) async throws -> IntakeConfirmResponse
     func updateItem(id: Int, _ body: ItemUpdate) async throws -> StockItem
     func consumeItem(id: Int, _ body: ConsumeRequest) async throws -> StockItem
     func deleteItem(id: Int) async throws
@@ -99,6 +101,12 @@ struct APIClient: APIClientProtocol {
     func item(id: Int) async throws -> StockItem { try await send("items/\(id)") }
     func reminders() async throws -> [StockItem] { try await send("items/reminders") }
     func createItem(_ body: ItemCreate) async throws -> StockItem { try await send("items", method: "POST", body: body) }
+    func parseIntake(_ body: IntakeParseRequest) async throws -> IntakeParseResponse {
+        try await send("intake/parse", method: "POST", body: body, timeout: 120)
+    }
+    func confirmIntake(_ body: IntakeConfirmRequest) async throws -> IntakeConfirmResponse {
+        try await send("intake/confirm", method: "POST", body: body)
+    }
     func updateItem(id: Int, _ body: ItemUpdate) async throws -> StockItem { try await send("items/\(id)", method: "PATCH", body: body) }
     func consumeItem(id: Int, _ body: ConsumeRequest) async throws -> StockItem { try await send("items/\(id)/consume", method: "POST", body: body) }
     func deleteItem(id: Int) async throws { let _: MessageResponse = try await send("items/\(id)", method: "DELETE") }
