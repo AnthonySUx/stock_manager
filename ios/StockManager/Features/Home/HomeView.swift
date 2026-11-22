@@ -45,7 +45,7 @@ struct HomeView: View {
         }
         .navigationTitle("首页").navigationBarTitleDisplayMode(.inline)
         .toolbar { Button { Task { await reload() } } label: { Image(systemName: "arrow.clockwise") } }
-        .task { await reload() }.refreshable { await reload() }
+        .task { await reload() }.refreshableWithCapabilities { await reload() }
     }
 
     private func metric(_ title: String, count: Int, icon: String, color: Color, action: @escaping () -> Void) -> some View {

@@ -4,7 +4,8 @@ enum APIClientError: LocalizedError, Equatable {
     case invalidURL
     case invalidResponse
     case unauthorized
-    case server(status: Int, message: String)
+    case server(status: Int, code: String?, params: [String: JSONValue], fallback: String)
+    case invalidMultipart
     case decoding(String)
 
     var errorDescription: String? {
@@ -12,7 +13,8 @@ enum APIClientError: LocalizedError, Equatable {
         case .invalidURL: "服务器地址无效"
         case .invalidResponse: "服务器返回了无效响应"
         case .unauthorized: "API 令牌无效或缺失"
-        case .server(_, let message): message
+        case .server(_, let code, let params, let fallback): code.map { DisplayText.error($0, params: params) } ?? fallback
+        case .invalidMultipart: "上传文件的表单名称、文件名或类型无效"
         case .decoding(let message): "无法解析服务器数据：\(message)"
         }
     }
@@ -22,10 +24,19 @@ struct ItemFilters: Equatable {
     var categoryId: Int?; var owner: String?; var location: String?; var status: ItemStatus?
 }
 
+struct MultipartFile: Sendable {
+    let field: String
+    let filename: String
+    let contentType: String
+    let data: Data
+}
+
 protocol APIClientProtocol: Sendable {
     func health() async throws -> HealthResponse
+    func capabilities() async throws -> Capabilities
     func settings() async throws -> AppSettings
     func updateSettings(days: Int) async throws -> AppSettings
+    func sendMultipart<Response: Decodable>(path: String, fields: [String: String], files: [MultipartFile], timeout: TimeInterval) async throws -> Response
 
     func items(filters: ItemFilters) async throws -> [StockItem]
     func searchItems(_ keyword: String, filters: ItemFilters) async throws -> [StockItem]
@@ -70,6 +81,7 @@ struct APIClient: APIClientProtocol {
     var session: URLSession = .shared
 
     func health() async throws -> HealthResponse { try await send("health", authenticated: false) }
+    func capabilities() async throws -> Capabilities { try await send("capabilities") }
     func settings() async throws -> AppSettings { try await send("settings") }
     func updateSettings(days: Int) async throws -> AppSettings {
         try await send("settings", method: "PATCH", body: SettingsUpdate(expirationReminderDays: String(days)))
@@ -154,20 +166,50 @@ struct APIClient: APIClientProtocol {
         let encoder = JSONEncoder(); encoder.keyEncodingStrategy = .convertToSnakeCase
         return try await send(path, method: method, query: query, authenticated: authenticated, bodyData: encoder.encode(body), timeout: timeout)
     }
-    private func send<Response: Decodable>(_ path: String, method: String, query: [URLQueryItem], authenticated: Bool = true, bodyData: Data?, timeout: TimeInterval = 15) async throws -> Response {
+    func sendMultipart<Response: Decodable>(path: String, fields: [String: String], files: [MultipartFile], timeout: TimeInterval) async throws -> Response {
+        let boundary = UUID().uuidString
+        var body = Data()
+
+        for (field, value) in fields.sorted(by: { $0.key < $1.key }) {
+            let name = try Self.multipartParameter(field)
+            body.append(contentsOf: "--\(boundary)\r\nContent-Disposition: form-data; name=\"\(name)\"\r\n\r\n\(value)\r\n".utf8)
+        }
+        for file in files {
+            let name = try Self.multipartParameter(file.field)
+            let filename = try Self.multipartParameter(file.filename)
+            guard !file.contentType.isEmpty, !file.contentType.contains(where: \.isNewline) else {
+                throw APIClientError.invalidMultipart
+            }
+            body.append(contentsOf: "--\(boundary)\r\nContent-Disposition: form-data; name=\"\(name)\"; filename=\"\(filename)\"\r\n".utf8)
+            body.append(contentsOf: "Content-Type: \(file.contentType)\r\n\r\n".utf8)
+            body.append(file.data)
+            body.append(contentsOf: "\r\n".utf8)
+        }
+        body.append(contentsOf: "--\(boundary)--\r\n".utf8)
+
+        return try await send(path, method: "POST", query: [], bodyData: body,
+                              contentType: "multipart/form-data; boundary=\(boundary)", timeout: timeout)
+    }
+
+    private static func multipartParameter(_ value: String) throws -> String {
+        guard !value.isEmpty, !value.contains(where: \.isNewline) else { throw APIClientError.invalidMultipart }
+        return value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+    }
+
+    private func send<Response: Decodable>(_ path: String, method: String, query: [URLQueryItem], authenticated: Bool = true, bodyData: Data?, contentType: String = "application/json", timeout: TimeInterval = 15) async throws -> Response {
         var components = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)
         if !query.isEmpty { components?.queryItems = query }
         guard let url = components?.url else { throw APIClientError.invalidURL }
         var request = URLRequest(url: url); request.httpMethod = method; request.timeoutInterval = timeout
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        if bodyData != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+        if bodyData != nil { request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
         if authenticated { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         request.httpBody = bodyData
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw APIClientError.invalidResponse }
         if http.statusCode == 401 { throw APIClientError.unauthorized }
         guard 200..<300 ~= http.statusCode else {
-            throw APIClientError.server(status: http.statusCode, message: Self.errorMessage(data, status: http.statusCode))
+            throw Self.serverError(data, status: http.statusCode, method: method, path: path)
         }
         do {
             let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
@@ -177,19 +219,17 @@ struct APIClient: APIClientProtocol {
         }
     }
 
-    static func errorMessage(_ data: Data, status: Int) -> String {
-        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let detail = object["detail"] else {
-            return "请求失败（\(status)）"
+    static func serverError(_ data: Data, status: Int, method: String, path: String) -> APIClientError {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let body = try? decoder.decode(APIErrorBody.self, from: data)
+        let isRestockDone = method == "POST" && path.hasPrefix("restock/") && path.hasSuffix("/done")
+        let fallback = if status == 409 && body?.code == nil && isRestockDone {
+            DisplayText.restockAlreadyDone
+        } else {
+            body?.detail?.message ?? "请求失败（\(status)）"
         }
-        if let text = detail as? String { return text }
-        if let list = detail as? [[String: Any]] {
-            return list.compactMap { item in
-                let location = (item["loc"] as? [Any])?.map(String.init(describing:)).joined(separator: ".")
-                let message = item["msg"] as? String
-                return [location, message].compactMap { $0 }.joined(separator: "：")
-            }.joined(separator: "\n")
-        }
-        return "请求失败（\(status)）"
+        return .server(status: status, code: body?.code, params: body?.params ?? [:], fallback: fallback)
     }
 }
 

@@ -29,22 +29,52 @@ enum RestockStatus: String, Codable, CaseIterable, Identifiable {
     var title: String { self == .pending ? "待购买" : "已完成" }
 }
 
-enum RecipeUsage: String, Codable, CaseIterable, Identifiable {
-    case always, conditional, never
+enum RecipeUsage: Codable, CaseIterable, Hashable, Identifiable {
+    case always, conditional, never, unknown(String)
+
+    static let allCases: [Self] = [.always, .conditional, .never]
     var id: String { rawValue }
-    var title: String {
+    var title: String { DisplayText.recipeUsage(rawValue) }
+
+    var rawValue: String {
         switch self {
-        case .always: "始终用于菜谱"
-        case .conditional: "按条件用于菜谱"
-        case .never: "不用于菜谱"
+        case .always: "always"
+        case .conditional: "conditional"
+        case .never: "never"
+        case .unknown(let value): value
         }
+    }
+
+    init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer().decode(String.self)
+        self = Self.allCases.first { $0.rawValue == value } ?? .unknown(value)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var value = encoder.singleValueContainer()
+        try value.encode(rawValue)
     }
 }
 
 struct HealthResponse: Codable, Hashable { let status: String; let version: String }
 struct MessageResponse: Codable, Hashable { let message: String }
-struct AppSettings: Codable, Hashable { let expirationReminderDays: String }
+struct AppSettings: Codable, Hashable {
+    let expirationReminderDays: String
+    var defaultLocale: String? = nil
+    var defaultTimezone: String? = nil
+}
 struct SettingsUpdate: Encodable { let expirationReminderDays: String }
+
+struct Capabilities: Decodable, Equatable, Sendable {
+    struct AI: Decodable, Equatable, Sendable {
+        let text: Bool
+        let vision: Bool
+        let asr: Bool
+    }
+
+    let ai: AI
+    static let unavailable = Self(ai: AI(text: false, vision: false, asr: false))
+}
 
 struct Category: Codable, Identifiable, Hashable {
     let id: Int
@@ -55,6 +85,7 @@ struct Category: Codable, Identifiable, Hashable {
     var isSystem: Bool
     var sortOrder: Int
     var children: [Category]?
+    var defaultShelfLifeDays: Int? = nil
 }
 
 struct CategoryCreate: Encodable {
@@ -62,6 +93,7 @@ struct CategoryCreate: Encodable {
     let parentId: Int?
     let recipeUsage: RecipeUsage?
     let sortOrder: Int
+    var defaultShelfLifeDays: Int? = nil
 }
 
 struct CategoryUpdate: Encodable {
@@ -70,14 +102,19 @@ struct CategoryUpdate: Encodable {
     let includeParentId: Bool
     let recipeUsage: RecipeUsage?
     let sortOrder: Int?
+    var defaultShelfLifeDays: Int? = nil
+    var includeDefaultShelfLifeDays = false
 
-    enum CodingKeys: String, CodingKey { case name, parentId, recipeUsage, sortOrder }
+    enum CodingKeys: String, CodingKey { case name, parentId, recipeUsage, sortOrder, defaultShelfLifeDays }
     func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
         try values.encodeIfPresent(name, forKey: .name)
         if includeParentId { if let parentId { try values.encode(parentId, forKey: .parentId) } else { try values.encodeNil(forKey: .parentId) } }
         try values.encodeIfPresent(recipeUsage, forKey: .recipeUsage)
         try values.encodeIfPresent(sortOrder, forKey: .sortOrder)
+        if includeDefaultShelfLifeDays {
+            try values.encode(defaultShelfLifeDays, forKey: .defaultShelfLifeDays)
+        }
     }
 }
 

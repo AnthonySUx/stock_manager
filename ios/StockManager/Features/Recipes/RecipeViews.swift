@@ -35,7 +35,7 @@ struct RecipeLibraryView: View {
         }
         .searchable(text: $store.query, prompt: "搜索菜谱")
         .task(id: store.query) { try? await Task.sleep(for: .milliseconds(300)); guard !Task.isCancelled else { return }; await store.load() }
-        .refreshable { await store.load() }
+        .refreshableWithCapabilities { await store.load() }
         .safeAreaInset(edge: .bottom) { RecipeFilterBar() }
     }
 }
@@ -79,7 +79,7 @@ private struct RecommendationView: View {
                 if snapshot.recommendations.isEmpty { EmptyStateView(title: "暂无推荐", message: snapshot.emptyMessage, icon: "sparkles") }
                 else { List(snapshot.recommendations) { item in NavigationLink { RecipeDetailView(recipeID: item.recipeId) } label: { VStack(alignment: .leading, spacing: 7) { Text(item.title).font(.headline); if let reason = item.reason { Text(reason).font(.subheadline).foregroundStyle(.secondary) }; HStack { Label("匹配 \(item.matchedInventoryItems.count)", systemImage: "checkmark.circle"); if !item.expiringInventoryItems.isEmpty { Label("优先消耗", systemImage: "clock").foregroundStyle(.orange) }; Spacer(); Text(item.score.formatted()) }.font(.caption) } } } }
             }
-        }.task(id: scene) { await load() }.refreshable { await load() }
+        }.task(id: scene) { await load() }.refreshableWithCapabilities { await load() }
     }
     private func load() async { state = .loading; do { state = .loaded(try await store.recommendations(scene: scene)) } catch is CancellationError { return } catch { state = .failed(error.localizedDescription) } }
 }

@@ -61,13 +61,14 @@ final class AppSession {
     private let defaults: UserDefaults
     private let tokenStore: SecureTokenStoring
     private(set) var state: AppSessionState = .disconnected(lastError: nil)
+    let capabilities = CapabilitiesStore()
 
-    var client: (any APIClientProtocol)? {
-        switch state { case .connected(let connection): connection.client; case .connecting(let previous): previous?.client; default: nil }
+    private var connection: SessionConnection? {
+        switch state { case .connected(let connection): connection; case .connecting(let previous): previous; default: nil }
     }
-    var health: HealthResponse? {
-        switch state { case .connected(let connection): connection.health; case .connecting(let previous): previous?.health; default: nil }
-    }
+    var client: (any APIClientProtocol)? { connection?.client }
+    var health: HealthResponse? { connection?.health }
+    var connectionID: UUID? { connection?.id }
     var connectionError: String? { if case .disconnected(let error) = state { error } else { nil } }
     var isConnected: Bool { client != nil }
     var configuredURL: String { defaults.string(forKey: Keys.url) ?? "http://localhost:8000/api" }
@@ -82,7 +83,11 @@ final class AppSession {
 
     func restoreAndValidate() async {
         guard case .restoring(let client) = state else { return }
-        do { let health = try await client.health(); _ = try await client.settings(); state = .connected(.init(client: client, health: health)) }
+        do {
+            let health = try await client.health()
+            _ = try await client.settings()
+            didConnect(client, health: health)
+        }
         catch { state = .disconnected(lastError: error.localizedDescription) }
     }
 
@@ -98,7 +103,7 @@ final class AppSession {
             _ = try await candidate.settings()
             try tokenStore.save(trimmed)
             defaults.set(url.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")), forKey: Keys.url)
-            state = .connected(.init(client: candidate, health: status))
+            didConnect(candidate, health: status)
         } catch {
             state = previous.map(AppSessionState.connected) ?? .disconnected(lastError: error.localizedDescription)
             throw error
@@ -106,7 +111,19 @@ final class AppSession {
     }
 
     func disconnect() throws {
-        try tokenStore.remove(); state = .disconnected(lastError: nil)
+        try tokenStore.remove()
+        capabilities.reset()
+        state = .disconnected(lastError: nil)
+    }
+
+    func refreshCapabilities() async {
+        guard case .connected(let connection) = state else { return }
+        await capabilities.refresh(using: connection.client)
+    }
+
+    private func didConnect(_ client: any APIClientProtocol, health: HealthResponse) {
+        capabilities.reset()
+        state = .connected(.init(client: client, health: health))
     }
 
     static func normalizedURL(_ text: String) -> URL? {
@@ -127,6 +144,7 @@ enum AppSessionState {
 }
 
 struct SessionConnection {
+    let id = UUID()
     let client: any APIClientProtocol
     let health: HealthResponse
 }

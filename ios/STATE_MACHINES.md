@@ -16,6 +16,7 @@
 ## 功能状态机
 
 - App 壳层：`AppSessionState` 决定显示欢迎页、连接进度或主界面。`client` 和 `health` 都由该状态派生，不再分别保存。
+- AI 能力：连接成功、回到前台或下拉时刷新 `CapabilitiesStore`。`LoadPhase` 跟踪请求，刷新期间保留当前值，失败或切换服务器时将能力归为不可用，旧连接的响应无法覆盖新连接。
 - 首页：今日推荐使用 `LoadState<[RecipeRecommendation]>`；库存与补货卡片读取各自 Store 的 `LoadPhase` 和唯一数据源。
 - 库存列表：`InventoryPresentation` 独占新增、筛选和批量清理展示；列表加载使用 `LoadPhase`。
 - 库存详情：`LoadState<StockItem>` 管理详情；`ItemDetailPresentation` 独占编辑、消耗和删除确认。

@@ -28,7 +28,7 @@ struct RestockListView: View {
         }
         .navigationTitle("补货")
         .task { async let a: Void = restock.load(); async let b: Void = categories.load(); _ = await (a, b) }
-        .task(id: store.selection) { await restock.load() }.refreshable { await restock.load() }
+        .task(id: store.selection) { await restock.load() }.refreshableWithCapabilities { await restock.load() }
         .toolbar { Menu { Button("新增补货", systemImage: "plus") { presentation = .add }; if store.selection != .pending { Button("清理已完成项", systemImage: "trash", role: .destructive) { presentation = .confirmClean } } } label: { Image(systemName: "plus.circle") } }
         .sheet(item: sheetBinding) { value in NavigationStack { switch value { case .add: RestockEditorView(item: nil); case .edit(let item): RestockEditorView(item: item); case .complete(let item): CompleteRestockView(item: item); case .confirmDelete, .confirmClean: EmptyView() } } }
         .confirmationDialog("删除补货项目？", isPresented: deleteConfirmation) {
