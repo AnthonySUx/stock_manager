@@ -75,6 +75,30 @@ final class StockManagerUITests: XCTestCase {
         XCTAssertFalse(app.buttons["explore.generate"].isEnabled)
     }
 
+    func testExploreShowsFirstIdeaBeforeCompletionAndCanStop() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing-reset", "-ui-testing-explore", "-ui-testing-explore-stream-progress"]
+        app.launch()
+        openExplore(in: app)
+        let prompt = app.descendants(matching: .any)["explore.prompt"].firstMatch
+        XCTAssertTrue(prompt.waitForExistence(timeout: 5))
+        prompt.tap()
+        prompt.typeText("Dinner")
+        app.buttons["explore.generate"].tap()
+
+        let idea = app.staticTexts["菜谱库已有"]
+        let stop = app.buttons["explore.stop"]
+        XCTAssertTrue(idea.waitForExistence(timeout: 5))
+        XCTAssertTrue(stop.exists)
+        XCTAssertFalse(app.staticTexts["红烧豆腐"].exists)
+        capture("F3 first idea while stream is open")
+
+        stop.tap()
+        XCTAssertTrue(app.buttons["explore.generate"].waitForExistence(timeout: 5))
+        XCTAssertTrue(idea.exists)
+        XCTAssertFalse(stop.exists)
+    }
+
     private func openExplore(in app: XCUIApplication) {
         let explore = app.buttons["探索"]
         XCTAssertTrue(explore.waitForExistence(timeout: 5))

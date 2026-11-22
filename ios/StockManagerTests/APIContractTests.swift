@@ -138,6 +138,13 @@ final class APIContractTests: XCTestCase {
         ])
     }
 
+    func testExploreDecodesWarningWithNumericParams() throws {
+        let fixture = #"{"mode":"ai","input_mode":"natural_language","locale":"zh-CN","ideas":[],"warnings":[{"code":"ingredient_dropped_malformed","params":{"index":2}}]}"#
+        let response = try exploreDecoder.decode(ExploreResponse.self, from: Data(fixture.utf8))
+        XCTAssertEqual(response.warnings.first?.code, "ingredient_dropped_malformed")
+        XCTAssertEqual(response.warnings.first?.params, [:])
+    }
+
     func testDifficultyLabelsKeepLegacyFreeText() {
         XCTAssertEqual(["easy", "medium", "hard", "适合新手"].map(DisplayText.difficulty),
                        ["简单", "中等", "困难", "适合新手"])
@@ -180,13 +187,13 @@ final class APIContractTests: XCTestCase {
         let client = stubbedClient { req in
             req.url?.path == "/api/capabilities"
                 ? (200, #"{"ai":{"text":true,"vision":false,"asr":false}}"#)
-                : (200, Self.exploreFixture)
+                : (200, try Self.streamFixture())
         }
         let capabilities = CapabilitiesStore()
         let store = ExploreStore(client: client, capabilities: capabilities)
         await capabilities.refresh(using: client)
         _ = await store.perform(.generate(request))
-        let previous = try XCTUnwrap(store.state.response)
+        let previous = try XCTUnwrap(store.state.results)
 
         URLProtocolStub.handler = { _ in (502, #"{"code":"ai_upstream_error"}"#) }
         _ = await store.perform(.generate(request))
@@ -197,7 +204,7 @@ final class APIContractTests: XCTestCase {
         XCTAssertEqual(message, "AI 服务暂时不可用，请重试")
         XCTAssertEqual(retry.naturalLanguage, request.naturalLanguage)
 
-        URLProtocolStub.handler = { _ in (200, Self.exploreFixture) }
+        URLProtocolStub.handler = { _ in (200, try Self.streamFixture()) }
         _ = await store.perform(.generate(retry))
         guard case .loaded = store.state else { return XCTFail("Retry should restore a loaded response") }
     }
@@ -210,11 +217,11 @@ final class APIContractTests: XCTestCase {
         await capabilities.refresh(using: client)
 
         URLProtocolStub.handler = { req in
-            XCTAssertEqual(req.url?.path, "/api/recipes/explore")
-            return (200, Self.exploreFixture)
+            XCTAssertEqual(req.url?.path, "/api/recipes/explore/stream")
+            return (200, try Self.streamFixture())
         }
         _ = await store.perform(.generate(request))
-        let previous = try XCTUnwrap(store.state.response)
+        let previous = try XCTUnwrap(store.state.results)
         let refreshed = expectation(description: "Capabilities refreshed after 503")
         URLProtocolStub.handler = { req in
             if req.url?.path == "/api/capabilities" {
@@ -227,13 +234,147 @@ final class APIContractTests: XCTestCase {
         await fulfillment(of: [refreshed], timeout: 1)
         XCTAssertFalse(store.isAvailable)
         XCTAssertTrue(capabilities.value.ai.vision)
-        XCTAssertEqual(store.state.response, previous)
+        XCTAssertEqual(store.state.results, previous)
 
         URLProtocolStub.handler = { _ in
             XCTFail("A disabled Explore operation must not call the API")
             return (500, "{}")
         }
         _ = await store.perform(.generate(request))
+    }
+
+    func testExploreStreamParserPreservesBoundariesAndFlushesFinalEvent() throws {
+        let wire = try Self.ideaEvent() + ": ping\r\n\r\n"
+            + "event: error\r\ndata: {\r\ndata:\"code\":\"internal_error\"}"
+        var parser = ExploreStreamParser()
+        var events: [ExploreStreamEvent] = []
+        for byte in wire.utf8 {
+            if let event = try parser.receive(byte) { events.append(event) }
+        }
+        XCTAssertEqual(events.count, 1)
+        guard case .idea(let idea) = try XCTUnwrap(events.first) else { return XCTFail("Expected an idea") }
+        XCTAssertEqual(idea.title, "番茄炒蛋")
+        XCTAssertEqual(try parser.finish(), .error(code: "internal_error"))
+    }
+
+    func testExploreStreamEncodesPostAndDecodesFinalWarnings() async throws {
+        let client = stubbedClient { request in
+            XCTAssertEqual(request.url?.path, "/api/recipes/explore/stream")
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "text/event-stream")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-token")
+            let data = try XCTUnwrap(request.httpBody ?? request.httpBodyStream.map(Self.readBody))
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            XCTAssertEqual(json["mode"] as? String, "structured")
+            let preferences = try XCTUnwrap(json["structured"] as? [String: Any])
+            XCTAssertEqual(preferences["inventory_item_ids"] as? [Int], [12, 15])
+            XCTAssertEqual(preferences["flavors"] as? [String], ["spicy"])
+            XCTAssertNil(json["natural_language"])
+            return (200, try Self.streamFixture())
+        }
+        let request = ExploreRequest(mode: "structured", structured: .init(inventoryItemIds: [12, 15], flavors: ["spicy"]),
+                                     naturalLanguage: nil)
+        var events: [ExploreStreamEvent] = []
+        for try await event in client.exploreStream(request) { events.append(event) }
+
+        XCTAssertEqual(events.count, 2)
+        guard case .idea(let idea) = events.first, case .done(let completion) = events.last else {
+            return XCTFail("Expected an idea followed by done")
+        }
+        XCTAssertEqual(idea.recipeId, 42)
+        XCTAssertEqual(completion.mode, "ai")
+        XCTAssertEqual(completion.inputMode, "natural_language")
+        XCTAssertEqual(completion.locale, "zh-CN")
+        XCTAssertEqual(completion.count, 1)
+        XCTAssertEqual(completion.warnings.first?.params["title"], "Tomato soup")
+    }
+
+    func testExploreStreamDecodesHTTPValidationError() async throws {
+        let client = stubbedClient { _ in
+            (422, #"{"detail":[{"loc":["body","natural_language"],"msg":"Field required"}]}"#)
+        }
+        let request = ExploreRequest(mode: "natural_language", structured: nil, naturalLanguage: nil)
+        do {
+            for try await _ in client.exploreStream(request) { XCTFail("Unexpected event") }
+            XCTFail("Expected an HTTP error")
+        } catch let error as APIClientError {
+            XCTAssertEqual(error, .server(status: 422, code: nil, params: [:], fallback: "body.natural_language：Field required"))
+        }
+    }
+
+    @MainActor func testExploreStreamErrorKeepsPartialIdeasAndOffersRetry() async throws {
+        let client = stubbedClient { request in
+            if request.url?.path == "/api/capabilities" {
+                return (200, #"{"ai":{"text":true,"vision":false,"asr":false}}"#)
+            }
+            return (200, try Self.ideaEvent() + "event: error\ndata: {\"code\":\"internal_error\"}\n\n")
+        }
+        let capabilities = CapabilitiesStore()
+        let store = ExploreStore(client: client, capabilities: capabilities)
+        await capabilities.refresh(using: client)
+        let request = ExploreRequest(mode: "natural_language", structured: nil, naturalLanguage: "Dinner")
+        _ = await store.perform(.generate(request))
+
+        guard case .failed(let partial, let message, .generate(let retry)?) = store.state else {
+            return XCTFail("Expected a retryable stream error")
+        }
+        XCTAssertEqual(partial?.ideas.map(\.title), ["番茄炒蛋"])
+        XCTAssertNil(partial?.completion)
+        XCTAssertEqual(message, "服务器内部错误，请重试")
+        XCTAssertEqual(retry.naturalLanguage, "Dinner")
+    }
+
+    @MainActor func testCancellingExploreStreamStopsNetworkAndKeepsOnlyReceivedIdeas() async throws {
+        let stopped = expectation(description: "URLProtocol stream was stopped")
+        let ideaEvent = try Self.ideaEvent()
+        URLProtocolStub.holdOpen = true
+        URLProtocolStub.onStop = { stopped.fulfill() }
+        defer {
+            URLProtocolStub.holdOpen = false
+            URLProtocolStub.onStop = nil
+        }
+        let client = stubbedClient { request in
+            request.url?.path == "/api/capabilities"
+                ? (200, #"{"ai":{"text":true,"vision":false,"asr":false}}"#) : (200, ideaEvent)
+        }
+        let capabilities = CapabilitiesStore()
+        let store = ExploreStore(client: client, capabilities: capabilities)
+        await capabilities.refresh(using: client)
+        let request = ExploreRequest(mode: "natural_language", structured: nil, naturalLanguage: "Dinner")
+        let task = Task { await store.perform(.generate(request)) }
+        defer { task.cancel() }
+
+        for _ in 0..<100 where store.state.results?.ideas.isEmpty != false {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(store.state.isGenerating)
+        XCTAssertEqual(store.state.results?.ideas.map(\.title), ["番茄炒蛋"])
+        task.cancel()
+        _ = await task.value
+        await fulfillment(of: [stopped], timeout: 2)
+        XCTAssertFalse(store.state.isLoading)
+        XCTAssertEqual(store.state.results?.ideas.map(\.title), ["番茄炒蛋"])
+        XCTAssertNil(store.state.results?.completion)
+    }
+
+    private static func ideaEvent() throws -> String {
+        let response = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(exploreFixture.utf8)) as? [String: Any])
+        let idea = try XCTUnwrap((response["ideas"] as? [[String: Any]])?.first)
+        let json = try JSONSerialization.data(withJSONObject: idea)
+        return "event: idea\ndata: \(String(decoding: json, as: UTF8.self))\n\n"
+    }
+
+    private static func streamFixture() throws -> String {
+        try ideaEvent() + """
+        : ping
+
+        event: done
+        data: {"mode":"ai","input_mode":"natural_language","locale":"zh-CN",
+        data: "warnings":[{"code":"idea_dropped_wrong_language","params":{"title":"Tomato soup"}}],"count":1}
+
+
+        """
     }
 
     func testCookConsumptionUsesLocalizedAmountsForValidationAndEncoding() throws {
@@ -488,16 +629,22 @@ final class APIContractTests: XCTestCase {
 
 private final class URLProtocolStub: URLProtocol {
     static var handler: ((URLRequest) throws -> (Int, String))?
+    static var holdOpen = false
+    static var onStop: (() -> Void)?
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         do {
             let (status, body) = try XCTUnwrap(Self.handler)(request)
-            let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
+            let isStream = request.url?.path == "/api/recipes/explore/stream" && status == 200
+            let mimeType = isStream ? "text/event-stream" : "application/json"
+            let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": mimeType])!
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: Data(body.utf8))
-            client?.urlProtocolDidFinishLoading(self)
+            if !isStream || !Self.holdOpen { client?.urlProtocolDidFinishLoading(self) }
         } catch { client?.urlProtocol(self, didFailWithError: error) }
     }
-    override func stopLoading() {}
+    override func stopLoading() {
+        if request.url?.path == "/api/recipes/explore/stream" { Self.onStop?() }
+    }
 }
