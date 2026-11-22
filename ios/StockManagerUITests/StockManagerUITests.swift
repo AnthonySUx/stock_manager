@@ -151,6 +151,70 @@ final class StockManagerUITests: XCTestCase {
         XCTAssertFalse(app.buttons["保存"].isEnabled)
     }
 
+    func testTextIntakeMarksFieldsClearsDateAndConfirmsDraft() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing-reset", "-ui-testing-intake"]
+        app.launch()
+
+        let entry = app.buttons["inventory.aiIntake"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 10))
+        entry.tap()
+
+        let input = app.descendants(matching: .any)["intake.input"].firstMatch
+        let parse = app.buttons["intake.parse"]
+        guard input.waitForExistence(timeout: 10) else {
+            XCTFail(app.debugDescription)
+            return
+        }
+        input.tap()
+        input.typeText("Two pounds of pork belly, a carton of eggs, and two bottles of milk")
+        parse.tap()
+
+        let milk = app.buttons["intake.candidate.cand_1a2b3c4d"]
+        let confirm = app.buttons["intake.confirm"]
+        XCTAssertTrue(milk.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["intake.issues.cand_1a2b3c4d"].firstMatch.exists)
+        XCTAssertFalse(confirm.isEnabled)
+        capture("F5b intake review")
+
+        milk.tap()
+        let clearPurchaseDate = app.buttons["intake.clear.purchase_date"]
+        XCTAssertTrue(clearPurchaseDate.waitForExistence(timeout: 10))
+        capture("F5b intake editor")
+        clearPurchaseDate.tap()
+        XCTAssertFalse(clearPurchaseDate.exists)
+        let expirationIssue = app.descendants(matching: .any)["intake.editor.issue.unopened_expiration_date"].firstMatch
+        if !expirationIssue.isHittable { app.swipeUp() }
+        XCTAssertTrue(expirationIssue.exists)
+        app.buttons["保存草稿"].tap()
+
+        input.tap()
+        input.typeText("Review the draft again")
+        parse.tap()
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(
+            format: "label CONTAINS %@", "已用清空购买日期的草稿重新解析"
+        )).firstMatch.waitForExistence(timeout: 10))
+        let adopt = app.buttons["intake.adopt.cand_1a2b3c4d"]
+        if !adopt.isHittable { app.swipeUp() }
+        adopt.tap()
+        XCTAssertTrue(confirm.isEnabled)
+        confirm.tap()
+
+        XCTAssertTrue(app.staticTexts["物品已入库，补货条目之前已完成"].waitForExistence(timeout: 10))
+        XCTAssertEqual(confirm.label, "确认入库（0）")
+        XCTAssertFalse(confirm.isEnabled)
+        XCTAssertFalse(milk.exists)
+    }
+
+    func testTextIntakeEntryIsHiddenWhenUnsupported() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing-reset", "-ui-testing-intake", "-ui-testing-intake-unavailable"]
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["没有库存"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["inventory.aiIntake"].exists)
+    }
+
     private func launchHouseholdSettings() -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-ui-testing-reset", "-ui-testing-household-settings"]

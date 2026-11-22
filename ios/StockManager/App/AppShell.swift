@@ -14,11 +14,15 @@ struct ConnectedAppView: View {
     @State private var categories: CategoryStore
     @State private var restock: RestockStore
     @State private var recipes: RecipeStore
+    @State private var intake: IntakeStore
 
     init(client: any APIClientProtocol) {
-        _inventory = State(initialValue: InventoryStore(client: client))
+        let inventory = InventoryStore(client: client)
+        let restock = RestockStore(client: client)
+        _inventory = State(initialValue: inventory)
         _categories = State(initialValue: CategoryStore(client: client))
-        _restock = State(initialValue: RestockStore(client: client))
+        _restock = State(initialValue: restock)
+        _intake = State(initialValue: IntakeStore(client: client, inventory: inventory, restock: restock))
         _recipes = State(initialValue: RecipeStore(client: client))
     }
 
@@ -44,6 +48,7 @@ struct ConnectedAppView: View {
             }
         }
         .environment(inventory).environment(categories).environment(restock).environment(recipes)
+        .environment(intake)
     }
 
     @ViewBuilder private func tabContent(_ tab: AppTab) -> some View {

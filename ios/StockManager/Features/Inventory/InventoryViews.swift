@@ -9,7 +9,10 @@ private enum InventoryPresentation: Identifiable {
 struct InventoryListView: View {
     @Environment(InventoryStore.self) private var inventory
     @Environment(CategoryStore.self) private var categories
+    @Environment(IntakeStore.self) private var intake
+    @Environment(CapabilitiesStore.self) private var capabilities
     @State private var presentation: InventoryPresentation?
+    @State private var showsIntake = false
     @State private var action: ActionState = .idle
 
     var body: some View {
@@ -35,12 +38,19 @@ struct InventoryListView: View {
         .refreshableWithCapabilities { await inventory.load() }
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
+                if capabilities.value.ai.text {
+                    Button("AI 入库", systemImage: "sparkles") { showsIntake = true }
+                        .accessibilityIdentifier("inventory.aiIntake")
+                }
                 Button { presentation = .filters } label: { Image(systemName: activeFilters ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle") }
                 Menu {
                     Button("新增库存", systemImage: "plus") { presentation = .add }
                     Divider(); Button("清理已消耗/过期项", systemImage: "trash", role: .destructive) { presentation = .confirmClean }
                 } label: { Image(systemName: "ellipsis.circle") }
             }
+        }
+        .fullScreenCover(isPresented: $showsIntake) {
+            NavigationStack { IntakeReviewView(store: intake) }
         }
         .sheet(item: sheetBinding) { value in
             NavigationStack {
@@ -161,12 +171,16 @@ struct ItemEditorView: View {
     var body: some View {
         Form {
             Section("基本信息") {
-                TextField("名称", text: $draft.name)
-                Picker("分类", selection: $draft.categoryId) { Text("请选择").tag(Int?.none); ForEach(categories.flat) { Text($0.name).tag(Optional($0.id)) } }
-                TextField("所有者", text: $draft.owner); TextField("位置", text: $draft.location)
+                InventoryTextField(.name, text: $draft.name)
+                InventoryCategoryPicker(categories: categories.flat, selection: $draft.categoryId)
+                InventoryTextField(.owner, text: $draft.owner)
+                InventoryTextField(.location, text: $draft.location)
                 DatePicker("购买日期", selection: purchaseDateBinding, displayedComponents: .date)
             }
-            Section("数量") { TextField("数量", text: $draft.quantity).keyboardType(.decimalPad); TextField("单位", text: $draft.unit) }
+            Section("数量") {
+                InventoryTextField(.quantity, text: $draft.quantity)
+                InventoryTextField(.unit, text: $draft.unit)
+            }
             Section("有效期") {
                 Toggle("永久有效", isOn: unopenedInfiniteBinding)
                 if case .dated = draft.unopenedExpiration { DatePicker("未开封到期", selection: unopenedDateBinding, displayedComponents: .date) }
