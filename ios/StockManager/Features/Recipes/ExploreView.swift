@@ -46,7 +46,7 @@ struct ExploreView: View {
                     VoiceInputControl(voice: voice, isAvailable: capabilities.value.ai.asr,
                                       isDisabled: store.state.isLoading) {
                         promptFocused = false
-                        voice.start(client: client, feature: .recipeExplore) { prompt.appendVoiceTranscript($0) }
+                        voice.start(client: client, capabilities: capabilities, feature: .recipeExplore) { prompt.appendVoiceTranscript($0) }
                     }
                 }
             } else {

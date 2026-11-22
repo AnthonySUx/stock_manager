@@ -111,7 +111,7 @@ struct IntakeReviewView: View {
                 .disabled(isBusy)
             VoiceInputControl(voice: voice, isAvailable: capabilities.value.ai.asr, isDisabled: isBusy) {
                 inputFocused = false
-                voice.start(client: inventory.client, feature: .stockIntake) { text.appendVoiceTranscript($0) }
+                voice.start(client: inventory.client, capabilities: capabilities, feature: .stockIntake) { text.appendVoiceTranscript($0) }
             }
             Button("解析文字", systemImage: "sparkles") { parse() }
                 .disabled(isBusy || store.photoUpload != nil || text.nilIfBlank == nil || !capabilities.value.ai.text)

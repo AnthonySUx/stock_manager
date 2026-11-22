@@ -74,6 +74,36 @@ final class SpeechContractTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
     }
 
+    @MainActor func testSpeechUnavailableRefreshesCapabilitiesAndHidesMicrophone() async throws {
+        let url = try VoiceRecordingFixture.make()
+        defer { try? FileManager.default.removeItem(at: url) }
+        var capabilityRequests = 0
+        let client = stubbedClient { request in
+            if request.url?.path == "/api/capabilities" {
+                capabilityRequests += 1
+                let asr = capabilityRequests == 1
+                return (200, #"{"ai":{"text":true,"vision":false,"asr":\#(asr)}}"#)
+            }
+            return (503, #"{"code":"asr_unavailable","detail":"Unavailable"}"#)
+        }
+        let capabilities = CapabilitiesStore()
+        await capabilities.refresh(using: client)
+        XCTAssertTrue(capabilities.value.ai.asr)
+
+        let voice = VoiceInputStore()
+        var transcripts: [String] = []
+        await voice.transcribe(url, client: client, capabilities: capabilities, feature: .stockIntake) {
+            transcripts.append($0)
+        }
+
+        XCTAssertEqual(voice.action.errorMessage, DisplayText.error("asr_unavailable"))
+        XCTAssertFalse(capabilities.value.ai.asr)
+        XCTAssertTrue(capabilities.value.ai.text)
+        XCTAssertEqual(capabilityRequests, 2)
+        XCTAssertTrue(transcripts.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+    }
+
     private func stubbedClient(_ handler: @escaping (URLRequest) throws -> (Int, String)) -> APIClient {
         URLProtocolStub.handler = handler
         let configuration = URLSessionConfiguration.ephemeral
