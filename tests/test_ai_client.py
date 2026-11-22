@@ -209,6 +209,18 @@ class TestChatJson:
         assert "secret label text" not in caplog.text
         assert base64.b64encode(b"PRIVATE-IMAGE").decode() not in caplog.text
 
+    def test_image_logs_drop_echoed_metadata_on_empty_replies(self, fake_ai, caplog):
+        echo = "PRIVATE_UPLOAD_CONTENT"
+        fake_ai.responses = [httpx.Response(200, json={
+            "choices": [{"message": {"content": ""}, "finish_reason": echo}],
+            "usage": {"prompt_tokens": echo, "completion_tokens": {"x": echo}},
+        }) for _ in range(2)]
+        with caplog.at_level(logging.INFO, logger="stock_manager.api.ai_client"):
+            with pytest.raises(AIUpstreamError):
+                _chat(images=self.IMAGE)
+        assert "retrying once" in caplog.text and "finish=- tokens=?/?" in caplog.text
+        assert echo not in caplog.text
+
     def test_non_json_http_body_is_upstream_error(self, fake_ai):
         fake_ai.responses = [httpx.Response(200, text="<html>")]
         with pytest.raises(AIUpstreamError):

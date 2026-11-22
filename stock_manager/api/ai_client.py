@@ -354,6 +354,17 @@ class CallStats:
         )
 
 
+# Finish reasons that may appear in image call logs. Anything else could be
+# echoed provider content and is logged as "-".
+_KNOWN_FINISH_REASONS = frozenset({
+    "stop", "length", "content_filter", "tool_calls", "function_call", "insufficient_system_resource",
+})
+
+
+def _safe_finish(reason: Any) -> str:
+    return reason if isinstance(reason, str) and reason in _KNOWN_FINISH_REASONS else "-"
+
+
 @dataclass
 class _Reply:
     parts: list[str] = field(default_factory=list)
@@ -592,12 +603,17 @@ async def chat_json(
     def diagnostics() -> str:
         retried = " rounds=2" if rounds > 1 else ""
         if images:
-            # Providers can echo image input in error bodies, so image calls log
-            # only counters: timing, why the reply ended and token usage.
+            # Providers can echo image input in error bodies and response metadata,
+            # so image calls log only known finish reasons and integer counters.
             usage = stats.usage or {}
+
+            def count(key: str) -> str:
+                value = usage.get(key)
+                return str(value) if isinstance(value, int) and not isinstance(value, bool) else "?"
+
             return (
-                f"{stats.now():.1f}s finish={stats.finish_reason or '-'} "
-                f"tokens={usage.get('prompt_tokens', '?')}/{usage.get('completion_tokens', '?')} "
+                f"{stats.now():.1f}s finish={_safe_finish(stats.finish_reason)} "
+                f"tokens={count('prompt_tokens')}/{count('completion_tokens')} "
                 f"reasoning_chars={stats.reasoning_chars} attempts={stats.attempts}{retried}"
             )
         return stats.describe() + retried
@@ -636,7 +652,7 @@ async def chat_json(
         if error.reason != "no_content" or not stats.empty_reply or rounds > 1 or left < stats.now():
             raise fail(error)
         logger.warning("AI %s empty reply after %.1fs (finish=%s), retrying once",
-                       label, stats.now(), stats.finish_reason or "-")
+                       label, stats.now(), _safe_finish(stats.finish_reason))
         rounds += 1
         stats = CallStats()
         reply = _Reply()
