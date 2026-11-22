@@ -398,8 +398,11 @@ final class IntakeContractTests: XCTestCase {
             PreparedIntakeImage(jpeg: Data("image-\($0)".utf8))
         }
         let milk = try decode(IntakeCandidate.self, Self.milk)
-        let existing = try decode(IntakeCandidate.self, Self.milk.replacingOccurrences(of: milk.id, with: "cand_12345678"))
+        let existing = try decode(IntakeCandidate.self, Self.milk.replacingOccurrences(of: milk.id, with: "cand_00000001"))
         XCTAssertNotNil(existing.purchaseDate)
+        let receiptFixture = Self.receipt.replacingOccurrences(of: #""image_index": 1"#,
+                                                                 with: #""image_index": 0, "future_key": true"#)
+        let receipt = try decode(IntakeCandidate.self, receiptFixture)
         let batches = [Array(1...8), Array(9...16), Array(9...16), [17]]
         var attempts = 0
         let client = stubbedClient { request in
@@ -418,7 +421,15 @@ final class IntakeContractTests: XCTestCase {
             XCTAssertEqual(Set(payload.keys), ["draft", "context"])
             let draft = try XCTUnwrap(payload["draft"] as? [String: Any])
             let items = try XCTUnwrap(draft["items"] as? [[String: Any]])
-            XCTAssertEqual(items.map { $0["temporary_id"] as? String }, attempts == 0 ? [existing.id] : [existing.id, milk.id])
+            var expectedIDs = [existing.id]
+            if attempts > 0 { expectedIDs.append(milk.id) }
+            if attempts == 3 {
+                expectedIDs.append(receipt.id)
+                let source = try XCTUnwrap(items.last?["source"] as? [String: Any])
+                XCTAssertEqual(source["image_index"] as? Int, 8)
+                XCTAssertEqual(source["future_key"] as? Bool, true)
+            }
+            XCTAssertEqual(items.map { $0["temporary_id"] as? String }, expectedIDs)
             let context = try XCTUnwrap(payload["context"] as? [String: String])
             XCTAssertEqual(context, attempts < 2 ? [:] : ["purchase_date": "2026-11-19"])
 
@@ -439,7 +450,13 @@ final class IntakeContractTests: XCTestCase {
             if attempts == 2 {
                 return (422, #"{"code":"intake_image_too_large","params":{"index":1},"detail":"Too large"}"#)
             }
-            return (200, #"{"operations":[],"unparsed_fragments":["next"],"locale":"en","warnings":[]}"#)
+            if attempts == 3 {
+                return (200, """
+                {"operations":[{"op":"add","candidate":\(receiptFixture)}],"unparsed_fragments":["second"],
+                 "locale":"en","warnings":[]}
+                """)
+            }
+            return (200, #"{"operations":[],"unparsed_fragments":["third"],"locale":"en","warnings":[]}"#)
         }
         let store = makeStore(client, candidates: [existing])
         await store.parse(photos: photos)
@@ -454,8 +471,11 @@ final class IntakeContractTests: XCTestCase {
         XCTAssertEqual(attempts, 4)
         XCTAssertNil(store.photoUpload)
         XCTAssertEqual(store.action, .succeeded(nil))
-        XCTAssertEqual(store.candidates.map(\.id), [existing.id, milk.id])
-        XCTAssertEqual(store.lastParse?.unparsedFragments, ["first", "next", "next"])
+        XCTAssertEqual(store.candidates.map(\.id), [existing.id, milk.id, receipt.id])
+        let source = try XCTUnwrap(store.candidates.last?.source)
+        XCTAssertEqual(source.imageIndex, 8)
+        XCTAssertEqual(DisplayText.intakeSource(source), "小票 · 第 9 张")
+        XCTAssertEqual(store.lastParse?.unparsedFragments, ["first", "second", "third"])
     }
 
     @MainActor func testUnnamedReceiptLinesRequireNamesAndKeepAliasMetadata() throws {

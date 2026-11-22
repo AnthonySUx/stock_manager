@@ -161,7 +161,7 @@ final class IntakeStore {
             do {
                 let response = try await client.parseIntakeImages(batch, draft: .init(items: candidates), context: context)
                 try Task.checkCancellation()
-                try apply(response, appendingReview: upload.batch > 1)
+                try apply(response, photoBatch: upload.batch)
                 if batch.count == upload.remaining.count {
                     photoUpload = nil
                 } else {
@@ -195,9 +195,10 @@ final class IntakeStore {
         return true
     }
 
-    private func apply(_ response: IntakeParseResponse, appendingReview: Bool = false) throws {
-        let (updated, clarification) = try applying(response.operations)
-        let previous = appendingReview ? lastParse : nil
+    private func apply(_ response: IntakeParseResponse, photoBatch: Int = 1) throws {
+        let imageIndexOffset = (photoBatch - 1) * Self.photoBatchSize
+        let (updated, clarification) = try applying(response.operations, imageIndexOffset: imageIndexOffset)
+        let previous = photoBatch > 1 ? lastParse : nil
         candidates = updated
         lastParse = .init(clarifications: (previous?.clarifications ?? []) + clarification,
                           unparsedFragments: (previous?.unparsedFragments ?? []) + response.unparsedFragments,
@@ -246,14 +247,15 @@ final class IntakeStore {
         return dates.count == 1 ? dates.first : nil
     }
 
-    private func applying(_ operations: [IntakeOperation]) throws -> ([IntakeCandidate], [IntakeClarification]) {
+    private func applying(_ operations: [IntakeOperation], imageIndexOffset: Int) throws
+        -> ([IntakeCandidate], [IntakeClarification]) {
         var updated = candidates
         var clarification: [IntakeClarification] = []
         for operation in operations {
             switch operation {
             case .add(let candidate, _):
                 guard !updated.contains(where: { $0.id == candidate.id }) else { throw ApplyError.invalidTarget }
-                updated.append(candidate)
+                updated.append(try candidate.offsettingImageIndex(by: imageIndexOffset))
             case .update(let id, let changes, _):
                 guard let index = updated.firstIndex(where: { $0.id == id }) else { throw ApplyError.invalidTarget }
                 updated[index] = try updated[index].applying(changes)

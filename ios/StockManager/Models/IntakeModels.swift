@@ -143,6 +143,13 @@ struct IntakeCandidate: Codable, Equatable, Identifiable {
         return try Self(fields: merged)
     }
 
+    func offsettingImageIndex(by offset: Int) throws -> Self {
+        guard offset > 0, let index = source.imageIndex, index >= 0, index < Int.max - offset,
+              case .object(var metadata) = fields["source"] else { return self }
+        metadata["image_index"] = .integer(index + offset)
+        return try applying(["source": .object(metadata)])
+    }
+
     mutating func adoptSuggestedExpiration() {
         guard let suggestion = suggestedUnopenedExpirationDate else { return }
         unopenedExpirationDate = suggestion
