@@ -386,6 +386,8 @@ WARNING:  stock_manager.api.ai_client: AI explore/repair fail timeout_idle model
 WARNING:  stock_manager.api.ai_client: POST /api/recipes/explore -> ai_upstream_error [no_usable_ideas]: AI reply contained no usable ideas: Idea #1 title "Tomato soup" is not in Simplified Chinese. | ...
 ```
 
+Image calls do not log reply text. Their log line shows the time, `finish`, `tokens` (prompt/completion), `reasoning_chars` and `attempts`.
+
 | Reason | Meaning |
 |---|---|
 | `timeout_first_token` | Nothing arrived within the first-data limit |
@@ -395,8 +397,8 @@ WARNING:  stock_manager.api.ai_client: POST /api/recipes/explore -> ai_upstream_
 | `connection` | The provider could not be reached (or the connection broke mid-reply) |
 | `http_error` | The provider returned an HTTP error; its message is logged (401 / 403: "check AI_API_KEY") |
 | `stream_error` | The stream carried an error or a broken chunk |
-| `no_content` | The reply was empty |
-| `truncated` | The reply hit `max_tokens` (`finish=length`) and is not complete JSON |
+| `no_content` | The reply was empty or only whitespace. DeepSeek documents that JSON mode occasionally does this. The call is retried once when another attempt of the same length fits in the round limit; the log then shows `rounds=2` |
+| `truncated` | The reply hit `max_tokens` (`finish=length`) and is not complete JSON, or reasoning used the whole budget before any content. Not retried |
 | `not_json` | The reply is not JSON (its start is logged) |
 | `no_usable_ideas` | Explore: no idea passed validation (the first problems are logged) |
 | `draft_unusable` | Expand: no draft passed validation (the first problems are logged) |
@@ -469,5 +471,5 @@ Currently AI is used **only** for Explore Recipes. Today Recommendations use loc
 | `AI_TIMEOUT_SECONDS` | `30` | Timeout per non-streamed text request (`AI_STREAM=false`) |
 | `AI_IMAGE_TIMEOUT_SECONDS` | `60` | Timeout per image request (images are not streamed) |
 | `AI_TOTAL_TIMEOUT_SECONDS` | `50` | Upper bound for one text round, retry included; the repair round gets its own |
-| `AI_IMAGE_TOTAL_TIMEOUT_SECONDS` | `75` | Upper bound for one image call, retry included |
+| `AI_IMAGE_TOTAL_TIMEOUT_SECONDS` | `110` | Upper bound for one image call, including retries and one retry after an empty reply |
 | `AI_MAX_RETRIES` | `1` | Retries after a connection error, `429` or `5xx`, before any content arrived. Timeouts are not retried |

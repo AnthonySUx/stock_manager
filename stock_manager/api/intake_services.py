@@ -136,7 +136,9 @@ _RECEIPT_RULES = """
 def _build_text_prompt(request: ParseRequest, prepared: PreparedParse) -> tuple[str, str]:
     language = localization.LANGUAGE_NAMES[prepared.locale]
     system = f"""You help turn household stock intake text into operations on an existing draft.
-Return only a json object with operations and unparsed_fragments arrays, for example:
+Return only a json object with operations and unparsed_fragments arrays. Always return
+this object, even when nothing is recognized: use an empty operations array and put
+unreadable text in unparsed_fragments. Never return an empty reply. For example:
 {{"operations": [{{"op": "add", "candidate": {{"name": "<item name in {language}>",
   "quantity_value": 2, "quantity_unit": "<unit>", "expiration_source": "none",
   "confidence": 0.9, "source": {{"span": "<original words>"}}}}}}], "unparsed_fragments": []}}
@@ -218,7 +220,9 @@ async def parse_intake(db: Session, request: ParseRequest, prepared: PreparedPar
 async def parse_images(db: Session, request: ParseDraftRequest, prepared: PreparedParse, images: list[dict]) -> dict:
     language = localization.LANGUAGE_NAMES[prepared.locale]
     system = f"""You turn stock intake images into incremental draft operations.
-Return only a json object with operations and unparsed_fragments arrays, for example:
+Return only a json object with operations and unparsed_fragments arrays. Always return
+this object, even when nothing is recognized: use an empty operations array and put
+unreadable text in unparsed_fragments. Never return an empty reply. For example:
 {{"operations": [{{"op": "add", "source": {{"input_kind": "product_overview", "image_index": 0}},
   "candidate": {{"name": "<item name>", "quantity_value": 2, "quantity_unit": "<unit>",
   "confidence": 0.9}}}}], "unparsed_fragments": []}}

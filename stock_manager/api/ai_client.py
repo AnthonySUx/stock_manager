@@ -119,7 +119,8 @@ class AIConfig:
     image_timeout: float = 60.0
     # Upper bound for one call (one round), retries included.
     text_total_timeout: float = 50.0
-    image_total_timeout: float = 75.0
+    # Two image attempts of about 45 s must fit below the iOS request timeout (120 s).
+    image_total_timeout: float = 110.0
     # Retries after a connection error, 429 or 5xx, before any content arrived.
     max_retries: int = 1
 
@@ -324,6 +325,8 @@ class CallStats:
     reasoning_chars: int = 0
     content_chars: int = 0
     finish_reason: Optional[str] = None
+    # A well-formed reply whose content was empty or whitespace (retryable once).
+    empty_reply: bool = False
     usage: Optional[dict] = None
     attempts: int = 0
 
@@ -375,12 +378,19 @@ def _read_completion(body: Any, stats: CallStats, reply: _Reply, on_text: Option
     """A whole (non-streamed) chat completion."""
     try:
         choice = body["choices"][0]
-        content = choice["message"]["content"]
+        message = choice["message"]
+        content = message["content"]
     except (KeyError, IndexError, TypeError) as exc:
         raise AIUpstreamError("AI response has no message content", "no_content") from exc
+    # Record why the reply ended before rejecting it, so an empty reply can be diagnosed.
     stats.finish_reason = choice.get("finish_reason") if isinstance(choice, dict) else None
     stats.usage = body.get("usage") if isinstance(body.get("usage"), dict) else None
-    if not isinstance(content, str) or not content:
+    reasoning = message.get("reasoning_content") if isinstance(message, dict) else None
+    if isinstance(reasoning, str):
+        stats.reasoning_chars += len(reasoning)
+    # DeepSeek's JSON mode can return empty or whitespace-only content.
+    if not isinstance(content, str) or not content.strip():
+        stats.empty_reply = content is None or isinstance(content, str)
         raise AIUpstreamError("AI response has no message content", "no_content")
     _add_content(content, stats, reply, on_text)
 
@@ -576,28 +586,61 @@ async def chat_json(
     stats = CallStats()
     reply = _Reply()
     mode = "stream" if stream else "plain"
+    started = time.monotonic()
+    rounds = 1
 
     def diagnostics() -> str:
-        # Providers can echo image input in response metadata and error bodies.
-        return f"{stats.now():.1f}s attempts={stats.attempts}" if images else stats.describe()
+        retried = " rounds=2" if rounds > 1 else ""
+        if images:
+            # Providers can echo image input in error bodies, so image calls log
+            # only counters: timing, why the reply ended and token usage.
+            usage = stats.usage or {}
+            return (
+                f"{stats.now():.1f}s finish={stats.finish_reason or '-'} "
+                f"tokens={usage.get('prompt_tokens', '?')}/{usage.get('completion_tokens', '?')} "
+                f"reasoning_chars={stats.reasoning_chars} attempts={stats.attempts}{retried}"
+            )
+        return stats.describe() + retried
 
     def fail(error: AIUpstreamError) -> AIUpstreamError:
         logger.warning("AI %s fail %s model=%s %s %s: %s",
                        label, error.reason, config.model, mode, diagnostics(), error)
         return error
 
-    try:
-        await asyncio.wait_for(
-            _request(config, payload, stream, timeout, total, stats, reply, on_text, protect_content=bool(images)),
-            total,
-        )
-    except asyncio.TimeoutError as exc:
-        raise fail(_round_error(total)) from exc
-    except AIUpstreamError as exc:
-        raise fail(exc)
+    while True:
+        remaining = total - (time.monotonic() - started)
+        try:
+            await asyncio.wait_for(
+                _request(config, payload, stream, timeout, remaining, stats, reply, on_text,
+                         protect_content=bool(images)),
+                remaining,
+            )
+        except asyncio.TimeoutError as exc:
+            raise fail(_round_error(total)) from exc
+        except AIUpstreamError as exc:
+            error = exc
+        else:
+            if reply.text.strip():
+                break
+            stats.empty_reply = True
+            error = AIUpstreamError("AI response has no message content", "no_content")
 
-    if not reply.text:
-        raise fail(AIUpstreamError("AI response has no message content", "no_content"))
+        if error.reason == "no_content" and stats.finish_reason == "length":
+            # The token budget ran out (for example, in reasoning) before any answer.
+            error = AIUpstreamError(
+                f"AI reply was cut off at max_tokens={payload['max_tokens']} before any content", "truncated"
+            )
+        # DeepSeek documents that JSON mode occasionally returns empty content.
+        # Retry once, but only when another round of the same length still fits.
+        left = total - (time.monotonic() - started)
+        if error.reason != "no_content" or not stats.empty_reply or rounds > 1 or left < stats.now():
+            raise fail(error)
+        logger.warning("AI %s empty reply after %.1fs (finish=%s), retrying once",
+                       label, stats.now(), stats.finish_reason or "-")
+        rounds += 1
+        stats = CallStats()
+        reply = _Reply()
+
     parsed = parse_json_reply(reply.text)
     if parsed is None:
         if stats.finish_reason == "length":
