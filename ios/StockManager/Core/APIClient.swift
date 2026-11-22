@@ -13,7 +13,7 @@ enum APIClientError: LocalizedError, Equatable {
         case .invalidURL: "服务器地址无效"
         case .invalidResponse: "服务器返回了无效响应"
         case .unauthorized: "API 令牌无效或缺失"
-        case .server(_, let code, let params, let fallback): code.map { DisplayText.error($0, params: params) } ?? fallback
+        case .server(_, let code, let params, let fallback): code.flatMap { DisplayText.error($0, params: params) } ?? fallback
         case .invalidMultipart: "上传文件的表单名称、文件名或类型无效"
         case .decoding(let message): "无法解析服务器数据：\(message)"
         }

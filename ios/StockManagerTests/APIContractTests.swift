@@ -126,12 +126,15 @@ final class APIContractTests: XCTestCase {
         XCTAssertEqual(APIClient.serverError(data, status: 404, method: "GET", path: "recipes/1").localizedDescription, "Recipe not found")
 
         let conflict = Data(#"{"detail":"Already done"}"#.utf8)
-        XCTAssertEqual(APIClient.serverError(conflict, status: 409, method: "POST", path: "restock/1/done").localizedDescription, "补货已完成")
+        XCTAssertEqual(APIClient.serverError(conflict, status: 409, method: "POST", path: "restock/1/done").localizedDescription, "这条补货之前已经入库，无需重复操作")
         XCTAssertEqual(APIClient.serverError(conflict, status: 409, method: "PATCH", path: "restock/1").localizedDescription, "Already done")
         XCTAssertEqual(APIClient.serverError(Data(), status: 500, method: "GET", path: "settings").localizedDescription, "请求失败（500）")
 
         let future = Data(#"{"code":"future_error","detail":"Unrecognized error"}"#.utf8)
-        XCTAssertEqual(APIClient.serverError(future, status: 400, method: "GET", path: "settings").localizedDescription, "future_error")
+        XCTAssertEqual(APIClient.serverError(future, status: 400, method: "GET", path: "settings").localizedDescription, "Unrecognized error")
+
+        let futureWithoutDetail = Data(#"{"code":"future_error"}"#.utf8)
+        XCTAssertEqual(APIClient.serverError(futureWithoutDetail, status: 400, method: "GET", path: "settings").localizedDescription, "请求失败（400）")
     }
 
     @MainActor func testCapabilitiesUsesBearerAndFallsBackAfterFailedRefresh() async {

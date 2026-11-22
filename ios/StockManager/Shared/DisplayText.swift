@@ -1,7 +1,7 @@
 enum DisplayText {
-    static let restockAlreadyDone = "补货已完成"
+    static let restockAlreadyDone = "这条补货之前已经入库，无需重复操作"
 
-    static func error(_ code: String, params: [String: JSONValue] = [:]) -> String {
+    static func error(_ code: String, params: [String: JSONValue] = [:]) -> String? {
         let max = params["max"]?.text
         switch code {
         case "ai_unavailable": return "AI 功能未开启"
@@ -26,7 +26,7 @@ enum DisplayText {
         case "audio_format_unsupported": return "录音格式无效或不受支持"
         case "audio_too_long": return "录音不能超过 120 秒"
         case "asr_upstream_error": return "语音转写服务暂时不可用，请重试"
-        default: return code
+        default: return nil
         }
     }
 
