@@ -143,6 +143,12 @@ final class IntakeStore {
         let request = IntakeConfirmRequest(defaults: defaults.normalized,
                                            items: candidates.map(IntakeConfirmItem.init(candidate:)))
         action = .running
+        // Once submitted, finish the write and reconcile it even if the view's task is cancelled.
+        // Otherwise the draft could still contain items the server has already saved.
+        return await Task { await finishConfirmation(request) }.value
+    }
+
+    private func finishConfirmation(_ request: IntakeConfirmRequest) async -> IntakeConfirmResponse? {
         do {
             let response = try await client.confirmIntake(request)
             // Reconcile a successful write before refreshing the other stores.

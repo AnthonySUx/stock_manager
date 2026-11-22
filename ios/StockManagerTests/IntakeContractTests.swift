@@ -182,6 +182,47 @@ final class IntakeContractTests: XCTestCase {
         XCTAssertEqual(store.action, .succeeded("物品已入库，补货条目之前已完成"))
     }
 
+    @MainActor func testIntakeConfirmationFinishesAfterCallerCancellation() async throws {
+        let milk = try reviewedMilk()
+        let posted = expectation(description: "Confirmation submitted exactly once")
+        posted.assertForOverFulfill = true
+        let inventoryRefresh = expectation(description: "Inventory refreshed despite cancellation")
+        let restockRefresh = expectation(description: "Restock refreshed despite cancellation")
+        let releaseResponse = DispatchSemaphore(value: 0)
+        let client = stubbedClient { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("POST", "/api/intake/confirm"):
+                posted.fulfill()
+                guard releaseResponse.wait(timeout: .now() + 5) == .success else { throw URLError(.timedOut) }
+                return (201, #"{"created":[{"temporary_id":"cand_1a2b3c4d","item_id":41}],"restock_done":[7],"restock_partial":[],"warnings":[]}"#)
+            case ("GET", "/api/items"):
+                inventoryRefresh.fulfill()
+                return (200, "[]")
+            case ("GET", "/api/restock"):
+                restockRefresh.fulfill()
+                return (200, "[]")
+            default:
+                throw URLError(.badURL)
+            }
+        }
+        let store = makeStore(client, candidates: [milk])
+        store.defaults = .init(owner: "me", location: "Fridge")
+        let caller = Task { await store.confirm() }
+        await fulfillment(of: [posted], timeout: 2)
+
+        caller.cancel()
+        let duplicate = await store.confirm()
+        XCTAssertNil(duplicate)
+        XCTAssertEqual(store.action, .running)
+        releaseResponse.signal()
+
+        let response = await caller.value
+        await fulfillment(of: [inventoryRefresh, restockRefresh], timeout: 2)
+        XCTAssertEqual(response?.created.map(\.temporaryId), [milk.id])
+        XCTAssertTrue(store.candidates.isEmpty)
+        XCTAssertEqual(store.action, .succeeded(nil))
+    }
+
     @MainActor func testIntakeRejectedBatchKeepsDraftAndLocatesFieldByIDOrIndex() async throws {
         let milk = try reviewedMilk()
         let receipt = try decode(IntakeCandidate.self, Self.receipt)
