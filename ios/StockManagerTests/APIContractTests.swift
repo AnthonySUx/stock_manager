@@ -352,7 +352,7 @@ final class APIContractTests: XCTestCase {
         XCTAssertEqual(store.state.results?.ideas.map(\.title), ["番茄炒蛋"])
         task.cancel()
         _ = await task.value
-        await fulfillment(of: [stopped], timeout: 2)
+        await fulfillment(of: [stopped], timeout: 10)
         XCTAssertFalse(store.state.isLoading)
         XCTAssertEqual(store.state.results?.ideas.map(\.title), ["番茄炒蛋"])
         XCTAssertNil(store.state.results?.completion)

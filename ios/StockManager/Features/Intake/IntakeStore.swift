@@ -25,7 +25,11 @@ final class IntakeStore {
     private(set) var lastParse: IntakeParseReview?
     private(set) var action: ActionState = .idle
     private(set) var serverIssue: IntakeFieldIssue?
-    var defaults = IntakeConfirmDefaults()
+    var defaults = IntakeConfirmDefaults() {
+        didSet {
+            if defaults != oldValue { clearFailure() }
+        }
+    }
     var purchaseDate: String?
 
     init(client: any APIClientProtocol, inventory: InventoryStore, restock: RestockStore,
@@ -75,6 +79,7 @@ final class IntakeStore {
         } while taken.contains(id)
         let candidate = IntakeCandidate.manual(temporaryId: id)
         candidates.append(candidate)
+        clearFailure()
         return candidate
     }
 
@@ -82,12 +87,19 @@ final class IntakeStore {
         guard !action.isRunning, let index = candidates.firstIndex(where: { $0.id == candidate.id }) else { return }
         candidates[index] = candidate
         if serverIssue?.temporaryId == candidate.id { serverIssue = nil }
+        clearFailure()
     }
 
     func removeCandidate(id: String) {
         guard !action.isRunning else { return }
+        let previousCount = candidates.count
         candidates.removeAll { $0.id == id }
         if serverIssue?.temporaryId == id { serverIssue = nil }
+        if candidates.count != previousCount { clearFailure() }
+    }
+
+    private func clearFailure() {
+        if case .failed = action { action = .idle }
     }
 
     @discardableResult

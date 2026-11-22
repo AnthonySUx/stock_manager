@@ -247,6 +247,53 @@ final class IntakeContractTests: XCTestCase {
         XCTAssertEqual(store.serverIssue, .init(temporaryId: milk.id, field: "category_id"))
     }
 
+    @MainActor func testIntakeReplacingCandidateClearsFailureButPreservesUnrelatedFieldIssue() async throws {
+        var milk = try reviewedMilk()
+        let receipt = try decode(IntakeCandidate.self, Self.receipt)
+        let client = stubbedClient { _ in
+            (422, #"{"code":"intake_item_invalid","params":{"temporary_id":"cand_12345678","field":"quantity_value"},"detail":"Invalid item"}"#)
+        }
+        let store = makeStore(client, candidates: [milk, receipt])
+        store.defaults = .init(owner: "me", location: "Fridge")
+
+        await store.confirm()
+        XCTAssertNotNil(store.action.errorMessage)
+        milk.notes = "Reviewed"
+        store.replaceCandidate(milk)
+        XCTAssertNil(store.action.errorMessage)
+        XCTAssertEqual(store.action, .idle)
+        XCTAssertEqual(store.serverIssue, .init(temporaryId: receipt.id, field: "quantity_value"))
+
+        await store.confirm()
+        XCTAssertNotNil(store.action.errorMessage)
+        store.replaceCandidate(receipt)
+        XCTAssertEqual(store.action, .idle)
+        XCTAssertNil(store.serverIssue)
+    }
+
+    @MainActor func testIntakeAddingRemovingAndChangingDefaultsClearFailure() async throws {
+        let client = stubbedClient { _ in
+            XCTFail("An empty description must be rejected locally")
+            return (500, "{}")
+        }
+        let store = makeStore(client, candidates: [])
+
+        await store.parse(text: "")
+        XCTAssertNotNil(store.action.errorMessage)
+        let added = try XCTUnwrap(store.addManualCandidate())
+        XCTAssertEqual(store.action, .idle)
+
+        await store.parse(text: "")
+        XCTAssertNotNil(store.action.errorMessage)
+        store.removeCandidate(id: added.id)
+        XCTAssertEqual(store.action, .idle)
+
+        await store.parse(text: "")
+        XCTAssertNotNil(store.action.errorMessage)
+        store.defaults.location = "Fridge"
+        XCTAssertEqual(store.action, .idle)
+    }
+
     @MainActor func testIntakeParseFailureDoesNotApplyPartialOperations() async throws {
         let milk = try decode(IntakeCandidate.self, Self.milk)
         let client = stubbedClient { _ in

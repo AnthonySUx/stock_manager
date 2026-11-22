@@ -45,6 +45,8 @@ private struct RootView: View {
             ExploreUITestHost()
         } else if ProcessInfo.processInfo.arguments.contains("-ui-testing-household-settings") {
             HouseholdSettingsUITestHost()
+        } else if ProcessInfo.processInfo.arguments.contains("-ui-testing-intake") {
+            IntakeUITestHost()
         } else {
             sessionContent
         }
