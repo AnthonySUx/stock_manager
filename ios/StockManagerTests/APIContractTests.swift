@@ -730,7 +730,7 @@ final class APIContractTests: XCTestCase {
         return try XCTUnwrap(JSONSerialization.jsonObject(with: encoder.encode(value)) as? [String: Any])
     }
 
-    private static func readBody(_ stream: InputStream) throws -> Data {
+    static func readBody(_ stream: InputStream) throws -> Data {
         stream.open()
         defer { stream.close() }
         var data = Data()
@@ -744,7 +744,7 @@ final class APIContractTests: XCTestCase {
     }
 }
 
-private final class URLProtocolStub: URLProtocol {
+final class URLProtocolStub: URLProtocol {
     static var handler: ((URLRequest) throws -> (Int, String))?
     static var holdOpen = false
     static var onStop: (() -> Void)?

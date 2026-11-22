@@ -64,8 +64,89 @@ enum DisplayText {
         case "step_dropped_malformed":
             return params["index"].map { "第 \($0) 步信息不完整，已省略" } ?? "已省略信息不完整的步骤"
         default:
-            return warning.message?.nilIfBlank ?? warning.detail?.nilIfBlank ?? "AI 结果包含一条提示，请检查内容。"
+            return warningText(warning) ?? "AI 结果包含一条提示，请检查内容。"
         }
+    }
+
+    static func intakeWarning(_ warning: AIWarning) -> String {
+        let params = warning.params
+        let index = params["index"].map(JSONValue.string)
+        let field = params["field"].map(intakeField) ?? "字段"
+        switch warning.code {
+        case "locale_fallback":
+            return aiWarning(warning)
+        case "op_invalid":
+            return "\(indexedLabel("操作", counter: "条", index: index))无效，已忽略"
+        case "op_target_unknown":
+            return "\(indexedLabel("操作", counter: "条", index: index))找不到对应条目，已忽略"
+        case "op_conflict":
+            return "\(indexedLabel("操作", counter: "条", index: index))的条目已删除，已忽略更新"
+        case "ops_dropped":
+            return params["count"].map { "已忽略 \($0) 条无效操作" } ?? "已忽略无效操作"
+        case "op_field_dropped":
+            return "\(indexedLabel("操作", counter: "条", index: index))中不允许修改\(field)"
+        case "field_value_dropped":
+            return "\(field)无效，已清除"
+        case "quantity_dropped":
+            return "数量无效，已清除"
+        case "category_dropped":
+            return "找不到对应分类，请选择分类"
+        case "date_dropped":
+            return "\(field)的日期无效，请检查"
+        case "expiration_moved_to_suggested":
+            return "未确认的到期日已作为建议保留"
+        case "expiration_date_inferred":
+            return params["basis"] == "category_default" ? "按分类默认保质期建议到期日" : "已生成建议到期日"
+        case "ai_expiration_ignored":
+            return params["date"].map { "已忽略推测的到期日（\($0)）" } ?? "已忽略推测的到期日"
+        case "expiration_before_purchase":
+            return "到期日在购买日期之前，请检查"
+        case "printed_date_unclear":
+            return "商品标签上的日期不明确，请检查"
+        case "printed_evidence_dropped":
+            return "无法使用这张图片上的日期标签"
+        case "quantity_value_inferred":
+            return "照片中的数量为估计值，请检查"
+        case "restock_match_dropped":
+            return "关联的补货条目已不可用"
+        case "restock_already_done":
+            return "物品已入库，补货条目之前已完成"
+        case "duplicate_generic_line":
+            return "小票上有同名条目，请分别核对"
+        case "purchase_date_from_receipt":
+            return "购买日期来自小票"
+        case "quantity_unit_inferred":
+            return "数量单位为推测值，请检查"
+        case "location_inferred":
+            return "存放位置为推测值，请检查"
+        default:
+            return warningText(warning) ?? "入库结果包含一条提示，请检查内容。"
+        }
+    }
+
+    static func intakeField(_ code: String) -> String {
+        switch code {
+        case "name": "名称"
+        case "category_id": "分类"
+        case "quantity_value": "数量"
+        case "quantity_unit": "数量单位"
+        case "owner": "所有者"
+        case "location": "存放位置"
+        case "purchase_date": "购买日期"
+        case "unopened_expiration_date": "未开封到期日"
+        case "suggested_unopened_expiration_date": "建议到期日"
+        case "opened_expiration_date": "开封后到期日"
+        case "opened_date": "开封日期"
+        case "expiration_source": "到期日来源"
+        case "matched_restock_id": "补货关联"
+        case "restock_action": "补货操作"
+        case "notes": "备注"
+        default: "字段"
+        }
+    }
+
+    private static func warningText(_ warning: AIWarning) -> String? {
+        warning.message?.nilIfBlank ?? warning.detail?.nilIfBlank
     }
 
     static func difficulty(_ code: String) -> String {
