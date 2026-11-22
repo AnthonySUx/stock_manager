@@ -20,7 +20,7 @@
 - 首页：今日推荐使用 `LoadState<[RecipeRecommendation]>`；库存与补货卡片读取各自 Store 的 `LoadPhase` 和唯一数据源。
 - 库存列表：`InventoryPresentation` 独占新增、筛选和批量清理展示；列表加载使用 `LoadPhase`。
 - 库存详情：`LoadState<StockItem>` 管理详情；`ItemDetailPresentation` 独占编辑、消耗和删除确认。
-- 库存表单：`ExpirationChoice` 表示无限期或指定日期；`OpeningChoice` 表示未开封或已开封，并把开封日期与开封后期限绑定在同一状态中。
+- 库存表单：`ExpirationChoice` 表示无限期或指定日期。新增库存时，`UnopenedExpirationSource` 区分初始值、分类保质期和手动选择。手动选择后保留该到期日。仅手动设置的购买日期会随新增请求发送。`OpeningChoice` 将开封日期与开封后期限绑定在同一状态中。
 - 分类：`CategoryPresentation` 独占新增、编辑和删除确认；系统分类限制仍由后端与界面共同执行。
 - 补货：`RestockFilter` 与 `RestockStatus` 取代自由字符串；`RestockPresentation` 独占新增、编辑、完成、删除和清理。
 - 菜谱库：`RecipeMode` 决定菜谱库、今日推荐或探索；列表加载使用 `LoadPhase`，分页数据只保存在 `RecipeStore.recipes`。
@@ -28,7 +28,7 @@
 - 菜谱详情：`LoadState<Recipe>` 管理详情；`RecipeDetailPresentation` 独占编辑、烹饪和删除确认。
 - 烹饪：`LoadState<ConsumePreview>` 管理扣库存预览；提交使用 `ActionState`，预览未完成时不能提交。
 - AI 探索：`ExploreState` 在流式生成中逐张发布创意，收到 `done` 后才显示最终警告。停止和离开页面均取消请求，并保留已收到的创意。流内错误或 502 保留当前创意并提供原请求的重试操作。503 立即禁用 AI 文本操作并刷新能力；已有菜谱仍可打开。
-- 设置：设置与来源作为一个 `SettingsSnapshot` 原子加载；`SettingsPresentation` 独占连接编辑和断开确认。
+- 设置：设置与来源作为一个 `SettingsSnapshot` 原子加载。`HouseholdSettingsDraft` 仅提交与已保存快照不同的字段，成功则采用服务器返回值，422 则恢复快照。`SettingsPresentation` 独占连接编辑和断开确认。
 
 ## 约束
 

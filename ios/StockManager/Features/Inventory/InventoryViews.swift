@@ -164,12 +164,15 @@ struct ItemEditorView: View {
                 TextField("名称", text: $draft.name)
                 Picker("分类", selection: $draft.categoryId) { Text("请选择").tag(Int?.none); ForEach(categories.flat) { Text($0.name).tag(Optional($0.id)) } }
                 TextField("所有者", text: $draft.owner); TextField("位置", text: $draft.location)
-                DatePicker("购买日期", selection: $draft.purchaseDate, displayedComponents: .date)
+                DatePicker("购买日期", selection: purchaseDateBinding, displayedComponents: .date)
             }
             Section("数量") { TextField("数量", text: $draft.quantity).keyboardType(.decimalPad); TextField("单位", text: $draft.unit) }
             Section("有效期") {
                 Toggle("永久有效", isOn: unopenedInfiniteBinding)
                 if case .dated = draft.unopenedExpiration { DatePicker("未开封到期", selection: unopenedDateBinding, displayedComponents: .date) }
+                if draft.unopenedExpirationSource == .categoryDefault {
+                    Text("按分类默认保质期").font(.caption).foregroundStyle(.secondary)
+                }
                 Toggle("已开封", isOn: openedBinding)
                 if case .opened = draft.opening {
                     DatePicker("开封日期", selection: openedDateBinding, displayedComponents: .date)
@@ -187,11 +190,38 @@ struct ItemEditorView: View {
             ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
             ToolbarItem(placement: .confirmationAction) { Button("保存") { Task { await save() } }.disabled(!valid || action.isRunning) }
         }
-        .task { if categories.flat.isEmpty { await categories.load() } }.savingOverlay(action.isRunning).actionErrorAlert($action)
+        .task { if categories.flat.isEmpty { await categories.load() } }
+        .task { await loadDefaultPurchaseDate() }
+        .onChange(of: selectedShelfLife, initial: true) { applySelectedShelfLife() }
+        .savingOverlay(action.isRunning).actionErrorAlert($action)
     }
     private var valid: Bool { !draft.name.trimmed.isEmpty && draft.categoryId != nil && !draft.owner.trimmed.isEmpty && Double(draft.quantity).map { $0 > 0 } == true && !draft.unit.trimmed.isEmpty && !draft.location.trimmed.isEmpty }
-    private var unopenedInfiniteBinding: Binding<Bool> { Binding(get: { draft.unopenedExpiration == .infinite }, set: { draft.unopenedExpiration = $0 ? .infinite : .dated(.now) }) }
-    private var unopenedDateBinding: Binding<Date> { Binding(get: { if case .dated(let date) = draft.unopenedExpiration { date } else { .now } }, set: { draft.unopenedExpiration = .dated($0) }) }
+    private var selectedShelfLife: Int? { categories.flat.first { $0.id == draft.categoryId }?.defaultShelfLifeDays }
+    private var purchaseDateBinding: Binding<Date> {
+        Binding(get: { draft.purchaseDate }, set: { date in
+            draft.setPurchaseDate(date)
+            applySelectedShelfLife()
+        })
+    }
+    private var unopenedInfiniteBinding: Binding<Bool> {
+        Binding(get: { draft.unopenedExpiration == .infinite },
+                set: { draft.setUnopenedExpiration($0 ? .infinite : .dated(.now)) })
+    }
+    private var unopenedDateBinding: Binding<Date> {
+        Binding(get: { if case .dated(let date) = draft.unopenedExpiration { date } else { .now } },
+                set: { draft.setUnopenedExpiration(.dated($0)) })
+    }
+    private func applySelectedShelfLife() {
+        guard item == nil else { return }
+        draft.applyShelfLife(selectedShelfLife)
+    }
+    private func loadDefaultPurchaseDate() async {
+        guard item == nil,
+              let settings = try? await inventory.client.settings(), !Task.isCancelled,
+              let identifier = settings.defaultTimezone, let timeZone = TimeZone(identifier: identifier) else { return }
+        draft.useHouseholdToday(.now, in: timeZone)
+        applySelectedShelfLife()
+    }
     private var openedBinding: Binding<Bool> { Binding(get: { if case .opened = draft.opening { true } else { false } }, set: { draft.opening = $0 ? .opened(date: .now, expiration: nil) : .unopened }) }
     private var openedDateBinding: Binding<Date> { Binding(get: { if case .opened(let date, _) = draft.opening { date } else { .now } }, set: { newDate in if case .opened(_, let expiration) = draft.opening { draft.opening = .opened(date: newDate, expiration: expiration) } }) }
     private var openedExpirationEnabledBinding: Binding<Bool> { Binding(get: { if case .opened(_, .some) = draft.opening { true } else { false } }, set: { enabled in if case .opened(let date, _) = draft.opening { draft.opening = .opened(date: date, expiration: enabled ? .dated(.now) : nil) } }) }

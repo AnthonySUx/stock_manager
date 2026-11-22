@@ -493,6 +493,106 @@ final class APIContractTests: XCTestCase {
         XCTAssertEqual(store.value, .unavailable)
     }
 
+    func testSettingsPatchOnlyEncodesChangesAndClearsWithEmptyStrings() async throws {
+        let saved = AppSettings(expirationReminderDays: "3", defaultLocale: "en", defaultTimezone: "Asia/Tokyo")
+        var draft = HouseholdSettingsDraft(settings: saved)
+        XCTAssertNil(draft.changes(from: saved))
+
+        draft.reminderDays = 4
+        XCTAssertEqual(try encodedObject(XCTUnwrap(draft.changes(from: saved))) as? [String: String],
+                       ["expiration_reminder_days": "4"])
+
+        draft = .init(settings: saved)
+        draft.timezone = nil
+        draft.locale = nil
+        let changes = try XCTUnwrap(draft.changes(from: saved))
+        let client = stubbedClient { request in
+            XCTAssertEqual(request.url?.path, "/api/settings")
+            XCTAssertEqual(request.httpMethod, "PATCH")
+            let data = try XCTUnwrap(request.httpBody ?? request.httpBodyStream.map(Self.readBody))
+            let json = try JSONSerialization.jsonObject(with: data) as? [String: String]
+            XCTAssertEqual(json, ["default_locale": "", "default_timezone": ""])
+            return (200, #"{"expiration_reminder_days":"3","default_locale":null,"default_timezone":null}"#)
+        }
+        let result = try await client.updateSettings(changes)
+        XCTAssertNil(result.defaultLocale)
+        XCTAssertNil(result.defaultTimezone)
+    }
+
+    func testInventoryShelfLifeRecalculatesUntilExpirationIsEdited() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+        let now = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-11-21T18:00:00Z"))
+        let tokyo = try XCTUnwrap(TimeZone(identifier: "Asia/Tokyo"))
+        let purchase = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 11, day: 22)))
+        var draft = ItemDraft()
+        draft.useHouseholdToday(now, in: tokyo, calendar: calendar)
+        XCTAssertEqual(draft.purchaseDate, purchase)
+        XCTAssertNil(draft.explicitPurchaseDate)
+        draft.applyShelfLife(7, calendar: calendar)
+        XCTAssertEqual(draft.unopenedExpiration, .dated(try XCTUnwrap(calendar.date(byAdding: .day, value: 7, to: purchase))))
+        XCTAssertEqual(draft.unopenedExpirationSource, .categoryDefault)
+        draft.applyShelfLife(nil, calendar: calendar)
+        XCTAssertEqual(draft.unopenedExpiration, .dated(purchase))
+        XCTAssertEqual(draft.unopenedExpirationSource, .initial)
+
+        let manualPurchase = try XCTUnwrap(calendar.date(byAdding: .day, value: 2, to: purchase))
+        draft.setPurchaseDate(manualPurchase)
+        draft.useHouseholdToday(now, in: tokyo, calendar: calendar)
+        XCTAssertEqual(draft.purchaseDate, manualPurchase)
+        draft.applyShelfLife(1, calendar: calendar)
+        XCTAssertEqual(draft.unopenedExpiration, .dated(try XCTUnwrap(calendar.date(byAdding: .day, value: 1, to: manualPurchase))))
+
+        let manualExpiration = ExpirationChoice.dated(try XCTUnwrap(calendar.date(byAdding: .day, value: 15, to: purchase)))
+        draft.setUnopenedExpiration(manualExpiration)
+        draft.applyShelfLife(30, calendar: calendar)
+        XCTAssertEqual(draft.unopenedExpiration, manualExpiration)
+        XCTAssertEqual(draft.unopenedExpirationSource, .manual)
+        draft.setUnopenedExpiration(.infinite)
+        draft.applyShelfLife(3, calendar: calendar)
+        XCTAssertEqual(draft.unopenedExpiration, .infinite)
+    }
+
+    @MainActor func testInventoryOnlySendsPurchaseDateOnCreateWhenEdited() async throws {
+        let item = #"{"id":1,"name":"牛奶","category_id":7,"category":{"id":7,"name":"饮品","slug":"drink","recipe_usage":"conditional","is_system":true,"sort_order":2},"owner":"全家","purchase_date":"2026-11-16","quantity_value":2,"quantity_unit":"盒","location":"冰箱","unopened_expiration_date":"infinite","current_expiration_date":"infinite","status":"active"}"#
+        func makeClient(expectedPurchaseDate: String?, editing: Bool) -> APIClient {
+            stubbedClient { request in
+                if request.httpMethod == "GET" { return (200, "[]") }
+                XCTAssertEqual(request.url?.path, editing ? "/api/items/1" : "/api/items")
+                XCTAssertEqual(request.httpMethod, editing ? "PATCH" : "POST")
+                let data = try XCTUnwrap(request.httpBody ?? request.httpBodyStream.map(Self.readBody))
+                let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+                if let expectedPurchaseDate { XCTAssertEqual(json["purchase_date"] as? String, expectedPurchaseDate) }
+                else { XCTAssertNil(json["purchase_date"]) }
+                return (200, item)
+            }
+        }
+        let existing = try exploreDecoder.decode(StockItem.self, from: Data(item.utf8))
+        var draft = ItemDraft(item: existing)
+        try await InventoryStore(client: makeClient(expectedPurchaseDate: nil, editing: false)).save(draft, editing: nil)
+        try await InventoryStore(client: makeClient(expectedPurchaseDate: "2026-11-16", editing: true)).save(draft, editing: 1)
+        draft.setPurchaseDate(try XCTUnwrap(API.date("2026-11-17")))
+        try await InventoryStore(client: makeClient(expectedPurchaseDate: "2026-11-17", editing: false)).save(draft, editing: nil)
+    }
+
+    @MainActor func testSystemCategoryCanClearShelfLifeWithoutSendingProtectedFields() async throws {
+        let original = #"{"id":7,"name":"蔬菜","slug":"vegetables","recipe_usage":"always","is_system":true,"sort_order":0,"default_shelf_life_days":7}"#
+        let category = try exploreDecoder.decode(Category.self, from: Data(original.utf8))
+        let client = stubbedClient { request in
+            if request.httpMethod == "GET" { return (200, "[]") }
+            XCTAssertEqual(request.url?.path, "/api/categories/7")
+            XCTAssertEqual(request.httpMethod, "PATCH")
+            let data = try XCTUnwrap(request.httpBody ?? request.httpBodyStream.map(Self.readBody))
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            XCTAssertNil(json["name"])
+            XCTAssertNil(json["parent_id"])
+            XCTAssertTrue(json["default_shelf_life_days"] is NSNull)
+            return (200, original)
+        }
+        try await CategoryStore(client: client).update(category, name: category.name, parent: nil,
+                                                       usage: .always, order: 0, shelfLife: nil)
+    }
+
     func testSettingsDecodesHouseholdLocaleAndTimezoneWhenPresent() throws {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase

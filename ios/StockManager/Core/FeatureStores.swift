@@ -43,7 +43,7 @@ final class InventoryStore {
             _ = try await client.updateItem(id: id, body)
         } else {
             let body = ItemCreate(name: draft.name.trimmed, categoryId: categoryId, owner: draft.owner.trimmed,
-                purchaseDate: API.string(draft.purchaseDate), quantityValue: quantity, quantityUnit: draft.unit.trimmed,
+                purchaseDate: draft.explicitPurchaseDate, quantityValue: quantity, quantityUnit: draft.unit.trimmed,
                 location: draft.location.trimmed, unopenedExpirationDate: expiration,
                 openedExpirationDate: openedExpiration, openedDate: openedDate,
                 currentExpirationDate: openedDate != nil ? (openedExpiration ?? expiration) : expiration,
@@ -72,11 +72,18 @@ final class CategoryStore {
         do { async let a = client.categories(tree: true); async let b = client.categories(tree: false); (tree, flat) = try await (a, b); state = .loaded }
         catch { state = .failed(error.localizedDescription) }
     }
-    func create(name: String, parent: Int?, usage: RecipeUsage, order: Int) async throws {
-        _ = try await client.createCategory(.init(name: name.trimmed, parentId: parent, recipeUsage: usage, sortOrder: order)); await load()
+    func create(name: String, parent: Int?, usage: RecipeUsage, order: Int, shelfLife: Int?) async throws {
+        _ = try await client.createCategory(.init(name: name.trimmed, parentId: parent,
+                                                  recipeUsage: usage, sortOrder: order, defaultShelfLifeDays: shelfLife))
+        await load()
     }
-    func update(_ category: Category, name: String, parent: Int?, usage: RecipeUsage, order: Int) async throws {
-        _ = try await client.updateCategory(id: category.id, .init(name: name.trimmed, parentId: parent, includeParentId: true, recipeUsage: usage, sortOrder: order)); await load()
+    func update(_ category: Category, name: String, parent: Int?, usage: RecipeUsage, order: Int, shelfLife: Int?) async throws {
+        let body = CategoryUpdate(name: category.isSystem ? nil : name.trimmed,
+                                  parentId: parent, includeParentId: !category.isSystem,
+                                  recipeUsage: usage, sortOrder: order, defaultShelfLifeDays: shelfLife,
+                                  includeDefaultShelfLifeDays: shelfLife != category.defaultShelfLifeDays)
+        _ = try await client.updateCategory(id: category.id, body)
+        await load()
     }
     func delete(_ category: Category) async throws { try await client.deleteCategory(id: category.id); await load() }
 }

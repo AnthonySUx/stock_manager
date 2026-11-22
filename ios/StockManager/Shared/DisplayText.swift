@@ -2,6 +2,17 @@ enum DisplayText {
     static let restockAlreadyDone = "这条补货之前已经入库，无需重复操作"
     static let aiUnavailable = "AI 功能未开启"
     static let recipeDifficulties = ["easy", "medium", "hard"]
+    static let aiOutputLocales = ["zh-CN", "en", "ja"]
+
+    static func aiOutputLocale(_ code: String?) -> String {
+        switch code {
+        case nil: "跟随设备"
+        case "zh-CN": "简体中文"
+        case "en": "English"
+        case "ja": "日本語"
+        case let code?: code
+        }
+    }
 
     static func error(_ code: String, params: [String: JSONValue] = [:]) -> String? {
         let max = params["max"]?.text

@@ -63,7 +63,11 @@ struct AppSettings: Codable, Hashable {
     var defaultLocale: String? = nil
     var defaultTimezone: String? = nil
 }
-struct SettingsUpdate: Encodable { let expirationReminderDays: String }
+struct SettingsUpdate: Encodable {
+    var expirationReminderDays: String?
+    var defaultLocale: String?
+    var defaultTimezone: String?
+}
 
 struct Capabilities: Decodable, Equatable, Sendable {
     struct AI: Decodable, Equatable, Sendable {
@@ -145,11 +149,13 @@ struct ItemDraft: Hashable {
     var name = ""
     var categoryId: Int?
     var owner = ""
-    var purchaseDate = Date()
+    private(set) var purchaseDate = Date()
+    private(set) var didEditPurchaseDate = false
     var quantity = "1"
     var unit = "个"
     var location = ""
-    var unopenedExpiration: ExpirationChoice = .dated(.now)
+    private(set) var unopenedExpiration: ExpirationChoice = .dated(.now)
+    private(set) var unopenedExpirationSource: UnopenedExpirationSource = .initial
     var opening: OpeningChoice = .unopened
     var notes = ""
 
@@ -165,6 +171,49 @@ struct ItemDraft: Hashable {
         }
         notes = item.notes ?? ""
     }
+
+    var explicitPurchaseDate: String? {
+        didEditPurchaseDate ? API.string(purchaseDate) : nil
+    }
+
+    mutating func setPurchaseDate(_ date: Date) {
+        purchaseDate = date
+        didEditPurchaseDate = true
+    }
+
+    mutating func useHouseholdToday(_ now: Date, in timeZone: TimeZone,
+                                     calendar: Calendar = Calendar(identifier: .gregorian)) {
+        guard !didEditPurchaseDate else { return }
+        var householdCalendar = calendar
+        householdCalendar.timeZone = timeZone
+        let day = householdCalendar.dateComponents([.year, .month, .day], from: now)
+        if let localDate = calendar.date(from: day) {
+            purchaseDate = localDate
+            if unopenedExpirationSource == .initial { unopenedExpiration = .dated(localDate) }
+        }
+    }
+
+    mutating func setUnopenedExpiration(_ expiration: ExpirationChoice) {
+        unopenedExpiration = expiration
+        unopenedExpirationSource = .manual
+    }
+
+    mutating func applyShelfLife(_ days: Int?, calendar: Calendar = Calendar(identifier: .gregorian)) {
+        guard unopenedExpirationSource != .manual else { return }
+        if let days, let date = calendar.date(byAdding: .day, value: days, to: purchaseDate) {
+            unopenedExpiration = .dated(date)
+            unopenedExpirationSource = .categoryDefault
+        } else if unopenedExpirationSource == .categoryDefault {
+            unopenedExpiration = .dated(purchaseDate)
+            unopenedExpirationSource = .initial
+        }
+    }
+}
+
+enum UnopenedExpirationSource: Hashable {
+    case initial
+    case categoryDefault
+    case manual
 }
 
 enum OpeningChoice: Hashable {
@@ -173,7 +222,7 @@ enum OpeningChoice: Hashable {
 }
 
 struct ItemCreate: Encodable {
-    let name: String; let categoryId: Int; let owner: String; let purchaseDate: String
+    let name: String; let categoryId: Int; let owner: String; let purchaseDate: String?
     let quantityValue: Double; let quantityUnit: String; let location: String
     let unopenedExpirationDate: String; let openedExpirationDate: String?; let openedDate: String?
     let currentExpirationDate: String; let notes: String?
