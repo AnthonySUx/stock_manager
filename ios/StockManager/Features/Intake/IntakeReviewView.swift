@@ -30,6 +30,7 @@ struct IntakeReviewView: View {
     @Environment(CapabilitiesStore.self) private var capabilities
     @Bindable var store: IntakeStore
     @State private var text = ""
+    @State private var voice = VoiceInputStore()
     @State private var showsPhotoPicker = false
     @State private var showsCamera = false
     @State private var selectedPhotos: [PhotosPickerItem] = []
@@ -65,6 +66,7 @@ struct IntakeReviewView: View {
             }
         }
         .interactiveDismissDisabled(isBusy)
+        .onDisappear { voice.cancel() }
         .safeAreaInset(edge: .bottom, spacing: 0) { confirmationBar }
         .sheet(item: $editedCandidate) { candidate in
             NavigationStack {
@@ -98,7 +100,7 @@ struct IntakeReviewView: View {
         }
     }
 
-    private var isBusy: Bool { operation != nil || store.action.isRunning }
+    private var isBusy: Bool { operation != nil || store.action.isRunning || voice.action.isRunning }
 
     private var inputSection: some View {
         Section {
@@ -107,6 +109,10 @@ struct IntakeReviewView: View {
                 .focused($inputFocused)
                 .accessibilityIdentifier("intake.input")
                 .disabled(isBusy)
+            VoiceInputControl(voice: voice, isAvailable: capabilities.value.ai.asr, isDisabled: isBusy) {
+                inputFocused = false
+                voice.start(client: inventory.client, capabilities: capabilities, feature: .stockIntake) { text.appendVoiceTranscript($0) }
+            }
             Button("解析文字", systemImage: "sparkles") { parse() }
                 .disabled(isBusy || store.photoUpload != nil || text.nilIfBlank == nil || !capabilities.value.ai.text)
                 .accessibilityIdentifier("intake.parse")

@@ -81,6 +81,13 @@ protocol APIClientProtocol: Sendable {
 }
 
 extension APIClientProtocol {
+    func transcribeSpeech(_ audio: Data, feature: SpeechFeature) async throws -> SpeechTranscription {
+        let file = MultipartFile(field: "audio", filename: "recording.wav", contentType: "audio/wav", data: audio)
+        return try await sendMultipart(path: "speech/transcribe", fields: ["feature": feature.rawValue],
+                                       files: [file], timeout: 60)
+    }
+
+
     func parseIntakeImages(_ images: [PreparedIntakeImage], draft: IntakeDraft,
                            context: IntakeContext) async throws -> IntakeParseResponse {
         let encoder = JSONEncoder()

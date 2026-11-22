@@ -78,7 +78,10 @@ private final class ExploreUITestProtocol: URLProtocol {
         switch (request.httpMethod, url.path) {
         case ("GET", "/api/capabilities"):
             let enabled = !ProcessInfo.processInfo.arguments.contains("-ui-testing-explore-unavailable")
-            (status, body) = (200, #"{"ai":{"text":\#(enabled),"vision":false,"asr":false}}"#)
+            let asr = ProcessInfo.processInfo.arguments.contains("-ui-testing-asr")
+            (status, body) = (200, #"{"ai":{"text":\#(enabled),"vision":false,"asr":\#(asr)}}"#)
+        case ("POST", "/api/speech/transcribe"):
+            (status, body) = (200, #"{"transcript":"找一道牛奶和鸡蛋的晚餐","duration_ms":3000}"#)
         case ("GET", "/api/items"), ("GET", "/api/recipes"):
             (status, body) = (200, "[]")
         case ("POST", "/api/recipes/explore/stream"):

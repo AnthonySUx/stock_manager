@@ -38,7 +38,9 @@ struct InventoryListView: View {
         .refreshableWithCapabilities { await inventory.load() }
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
-                if capabilities.value.ai.text || capabilities.value.ai.vision || !intake.candidates.isEmpty || intake.photoUpload != nil {
+                // Speech alone cannot produce a draft: a transcript still needs text parsing.
+                if capabilities.value.ai.text || capabilities.value.ai.vision ||
+                    !intake.candidates.isEmpty || intake.photoUpload != nil {
                     Button("AI 入库", systemImage: "sparkles") { showsIntake = true }
                         .accessibilityIdentifier("inventory.aiIntake")
                 }

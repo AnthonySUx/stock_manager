@@ -38,10 +38,20 @@ final class CapabilitiesStore {
     }
 
     func refreshAfterTextUnavailable(using client: any APIClientProtocol) async {
+        let ai = value.ai
+        await refreshAfterUnavailable(Capabilities(ai: .init(text: false, vision: ai.vision, asr: ai.asr)), using: client)
+    }
+
+    func refreshAfterSpeechUnavailable(using client: any APIClientProtocol) async {
+        let ai = value.ai
+        await refreshAfterUnavailable(Capabilities(ai: .init(text: ai.text, vision: ai.vision, asr: false)), using: client)
+    }
+
+    /// Hides the failed feature at once, then reloads the server flags.
+    private func refreshAfterUnavailable(_ fallback: Capabilities, using client: any APIClientProtocol) async {
         // A refresh already in flight predates the 503 and may publish stale flags.
         generation += 1
-        let ai = value.ai
-        value = Capabilities(ai: .init(text: false, vision: ai.vision, asr: ai.asr))
+        value = fallback
         phase = .idle
         await refresh(using: client)
     }
