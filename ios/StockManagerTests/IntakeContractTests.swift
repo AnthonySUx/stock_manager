@@ -110,6 +110,24 @@ final class IntakeContractTests: XCTestCase {
         XCTAssertEqual(store.lastParse?.locale, "en")
     }
 
+    @MainActor func testIntakeParseDefaultsToHouseholdLocaleAndTimezone() async throws {
+        let client = stubbedClient { request in
+            XCTAssertEqual(request.url?.path, "/api/intake/parse")
+            let body = try Self.body(request)
+            let context = try XCTUnwrap(body["context"] as? [String: String])
+            let input = try XCTUnwrap(body["input"] as? [String: String])
+            XCTAssertEqual(context, input["text"] == "With purchase date" ? ["purchase_date": "2026-11-20"] : [:])
+            return (200, #"{"operations":[],"unparsed_fragments":[],"locale":"ja","warnings":[]}"#)
+        }
+        let store = makeStore(client, candidates: [])
+        let withoutDate = await store.parse(text: "Without purchase date")
+        XCTAssertTrue(withoutDate)
+        store.purchaseDate = "2026-11-20"
+        let withDate = await store.parse(text: "With purchase date")
+        XCTAssertTrue(withDate)
+        XCTAssertEqual(store.lastParse?.locale, "ja")
+    }
+
     @MainActor func testIntakeConfirmEncodesDefaultsOverridesAndRestockLinkThenRefreshes() async throws {
         let inventoryRefresh = expectation(description: "Inventory refreshed after confirmation")
         let restockRefresh = expectation(description: "Restock refreshed after confirmation")

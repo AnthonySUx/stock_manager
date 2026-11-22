@@ -82,8 +82,7 @@ final class IntakeStore {
     }
 
     @discardableResult
-    func parse(text: String, locale: String = Locale.preferredLanguages.first ?? Locale.current.identifier,
-               timezone: String = TimeZone.current.identifier) async -> Bool {
+    func parse(text: String, locale: String? = nil, timezone: String? = nil) async -> Bool {
         guard !action.isRunning, !Task.isCancelled else { return false }
         serverIssue = nil
         let text = text.trimmed
