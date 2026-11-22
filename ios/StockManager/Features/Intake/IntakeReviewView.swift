@@ -1,7 +1,31 @@
+import PhotosUI
 import SwiftUI
+import UIKit
 
 struct IntakeReviewView: View {
-    private enum Operation { case parse, confirm }
+    private enum Operation { case parse, photos, confirm }
+
+    private enum PhotoSelection {
+        case library(PhotosPickerItem)
+        case image(Data?, captureDate: String?)
+
+        func prepare() async throws -> PreparedIntakeImage {
+            let data: Data?
+            let captureDate: String?
+            switch self {
+            case .library(let item):
+                data = try await item.loadTransferable(type: Data.self)
+                captureDate = nil
+            case .image(let image, let date):
+                data = image
+                captureDate = date
+            }
+            guard let data else { throw ImagePreparation.Failure.unreadable }
+            return try await Task.detached(priority: .userInitiated) {
+                try ImagePreparation.prepare(data, captureDate: captureDate)
+            }.value
+        }
+    }
 
     @Environment(\.dismiss) private var dismiss
     @Environment(InventoryStore.self) private var inventory
@@ -9,6 +33,10 @@ struct IntakeReviewView: View {
     @Environment(CapabilitiesStore.self) private var capabilities
     @Bindable var store: IntakeStore
     @State private var text = ""
+    @State private var showsPhotoPicker = false
+    @State private var showsCamera = false
+    @State private var selectedPhotos: [PhotosPickerItem] = []
+    @State private var photoPreparationErrors: [String] = []
     @State private var editedCandidate: IntakeCandidate?
     @State private var operation: Operation?
     @State private var confirmationMessage: String?
@@ -19,6 +47,7 @@ struct IntakeReviewView: View {
         ScrollViewReader { scroll in
             Form {
                 inputSection
+                photoSection
                 feedbackSection
                 if let review = store.lastParse {
                     reviewNotes(review, scroll: scroll)
@@ -46,6 +75,22 @@ struct IntakeReviewView: View {
                                       issues: issues(for: candidate.id), onSave: store.replaceCandidate)
             }
         }
+        .photosPicker(isPresented: $showsPhotoPicker, selection: $selectedPhotos,
+                      selectionBehavior: .ordered, matching: .images, preferredItemEncoding: .current)
+        .onChange(of: selectedPhotos) { _, result in
+            guard !result.isEmpty else { return }
+            selectedPhotos = []
+            upload(result.map(PhotoSelection.library))
+        }
+        .fullScreenCover(isPresented: $showsCamera) {
+            IntakeCamera { data in
+                showsCamera = false
+                upload([.image(data, captureDate: API.string(.now))])
+            } onCancel: {
+                showsCamera = false
+            }
+            .ignoresSafeArea()
+        }
         .task {
             if categories.flat.isEmpty { await categories.load() }
         }
@@ -66,7 +111,7 @@ struct IntakeReviewView: View {
                 .accessibilityIdentifier("intake.input")
                 .disabled(isBusy)
             Button("解析文字", systemImage: "sparkles") { parse() }
-                .disabled(isBusy || text.nilIfBlank == nil || !capabilities.value.ai.text)
+                .disabled(isBusy || store.photoUpload != nil || text.nilIfBlank == nil || !capabilities.value.ai.text)
                 .accessibilityIdentifier("intake.parse")
         } header: {
             Text("物品描述")
@@ -75,10 +120,50 @@ struct IntakeReviewView: View {
         }
     }
 
+    @ViewBuilder private var photoSection: some View {
+        if capabilities.value.ai.vision || store.photoUpload != nil || !photoPreparationErrors.isEmpty {
+            Section("照片与小票") {
+                if capabilities.value.ai.vision, store.photoUpload == nil {
+                    Button("从相册选择", systemImage: "photo.on.rectangle") {
+                        inputFocused = false
+                        openPhotoLibrary()
+                    }
+                    .disabled(isBusy)
+                    .accessibilityIdentifier("intake.photos")
+                    if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                        Button("拍照", systemImage: "camera") {
+                            inputFocused = false
+                            showsCamera = true
+                        }
+                        .disabled(isBusy)
+                    }
+                }
+                if let upload = store.photoUpload, !isBusy {
+                    Text("已暂停 · 第 \(upload.batch)/\(upload.totalBatches) 批")
+                    Button("重试本批", systemImage: "arrow.clockwise") { retryUpload() }
+                        .disabled(!capabilities.value.ai.vision)
+                    Button("放弃剩余照片", role: .destructive) { store.discardPhotoUpload() }
+                }
+                ForEach(Array(photoPreparationErrors.enumerated()), id: \.offset) { _, message in
+                    Text(message).foregroundStyle(.red)
+                }
+            }
+        }
+    }
+
     @ViewBuilder private var feedbackSection: some View {
         if let operation {
             Section {
-                ProgressView(operation == .confirm ? "正在确认入库…" : "正在解析文字…")
+                switch operation {
+                case .confirm: ProgressView("正在确认入库…")
+                case .parse: ProgressView("正在解析文字…")
+                case .photos:
+                    if let upload = store.photoUpload {
+                        ProgressView("正在解析照片 · 第 \(upload.batch)/\(upload.totalBatches) 批")
+                    } else {
+                        ProgressView("正在准备照片…")
+                    }
+                }
             }
         } else if let message = store.action.errorMessage {
             Section {
@@ -163,6 +248,17 @@ struct IntakeReviewView: View {
             .buttonStyle(.plain)
             .accessibilityIdentifier("intake.candidate.\(candidate.id)")
 
+            if let source = DisplayText.intakeSource(candidate.source) {
+                Label(source, systemImage: "photo").foregroundStyle(.secondary)
+            }
+            if candidate.source.inputKind == "receipt" {
+                if let raw = candidate.rawName?.nilIfBlank, raw != candidateTitle(candidate) {
+                    Text("小票原文：\(raw)").foregroundStyle(.secondary)
+                }
+                if let generic = candidate.genericName?.nilIfBlank {
+                    Text("商品类型：\(generic)").foregroundStyle(.secondary)
+                }
+            }
             if candidate.confidence < 0.6 || candidate.fieldConfidence.values.contains(where: { $0 < 0.6 }) {
                 Label("置信度较低，请核对", systemImage: "exclamationmark.circle").foregroundStyle(.orange)
             }
@@ -276,13 +372,57 @@ struct IntakeReviewView: View {
     }
 
     private func parse() {
-        guard !isBusy, capabilities.value.ai.text, let input = text.nilIfBlank else { return }
+        guard !isBusy, store.photoUpload == nil, capabilities.value.ai.text, let input = text.nilIfBlank else { return }
         inputFocused = false
         confirmationMessage = nil
         operation = .parse
         Task {
             defer { operation = nil }
             if await store.parse(text: input) { text = "" }
+        }
+    }
+
+    private func openPhotoLibrary() {
+        #if DEBUG
+        if let fixtures = IntakeUITestHost.photoFixtures {
+            upload(fixtures.map { .image($0, captureDate: nil) })
+            return
+        }
+        #endif
+        showsPhotoPicker = true
+    }
+
+    private func upload(_ selections: [PhotoSelection]) {
+        guard !isBusy, capabilities.value.ai.vision, store.photoUpload == nil else { return }
+        operation = .photos
+        confirmationMessage = nil
+        photoPreparationErrors = []
+        Task {
+            defer { operation = nil }
+            var images: [PreparedIntakeImage] = []
+            for (index, selection) in selections.enumerated() {
+                do {
+                    images.append(try await selection.prepare())
+                } catch ImagePreparation.Failure.tooLarge {
+                    photoPreparationErrors.append("第 \(index + 1) 张图片超过大小限制")
+                } catch {
+                    photoPreparationErrors.append("无法读取第 \(index + 1) 张图片")
+                }
+            }
+            guard capabilities.value.ai.vision else {
+                photoPreparationErrors.append(DisplayText.aiUnavailable)
+                return
+            }
+            await store.parse(photos: images)
+        }
+    }
+
+    private func retryUpload() {
+        guard !isBusy, capabilities.value.ai.vision else { return }
+        operation = .photos
+        Task {
+            defer { operation = nil }
+            await store.retryPhotoUpload()
         }
     }
 

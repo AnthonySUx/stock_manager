@@ -124,6 +124,18 @@ enum DisplayText {
         }
     }
 
+    static func intakeSource(_ source: IntakeSource) -> String? {
+        let title: String
+        switch source.inputKind {
+        case "receipt": title = "小票"
+        case "product_closeup": title = "商品特写"
+        case "product_overview": title = "整体照片"
+        default: return nil
+        }
+        guard let index = source.imageIndex, index >= 0, index < Int.max else { return title }
+        return "\(title) · 第 \(index + 1) 张"
+    }
+
     static func intakeField(_ code: String) -> String {
         switch code {
         case "name": "名称"

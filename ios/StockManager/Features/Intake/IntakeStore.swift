@@ -17,6 +17,16 @@ struct IntakeParseReview {
 final class IntakeStore {
     static let maxTextLength = 4_000
     static let maxCandidates = 100
+    private static let photoBatchSize = 8
+
+    struct PhotoUpload {
+        fileprivate var remaining: [PreparedIntakeImage]
+        fileprivate let draftPurchaseDate: String?
+        let totalBatches: Int
+        fileprivate(set) var batch = 1
+    }
+
+    private(set) var photoUpload: PhotoUpload?
 
     private let client: any APIClientProtocol
     private let inventory: InventoryStore
@@ -41,7 +51,7 @@ final class IntakeStore {
     }
 
     var canConfirm: Bool {
-        !action.isRunning && (1...Self.maxCandidates).contains(candidates.count) && confirmationIssues.isEmpty
+        !action.isRunning && photoUpload == nil && (1...Self.maxCandidates).contains(candidates.count) && confirmationIssues.isEmpty
     }
 
     var draftIssues: [IntakeFieldIssue] {
@@ -104,7 +114,7 @@ final class IntakeStore {
 
     @discardableResult
     func parse(text: String, locale: String? = nil, timezone: String? = nil) async -> Bool {
-        guard !action.isRunning, !Task.isCancelled else { return false }
+        guard !action.isRunning, photoUpload == nil, !Task.isCancelled else { return false }
         serverIssue = nil
         let text = text.trimmed
         guard !text.isEmpty else {
@@ -115,6 +125,68 @@ final class IntakeStore {
             action = .failed(DisplayText.error("intake_text_too_long", params: ["max": .integer(Self.maxTextLength)]) ?? "")
             return false
         }
+        guard validateDraftForParsing() else { return false }
+
+        let request = IntakeParseRequest(input: .init(text: text), draft: .init(items: candidates),
+                                         context: .init(locale: locale, timezone: timezone, purchaseDate: contextPurchaseDate))
+        action = .running
+        do {
+            let response = try await client.parseIntake(request)
+            try Task.checkCancellation()
+            try apply(response)
+            action = .succeeded(nil)
+            return true
+        } catch {
+            if Task.isCancelled { action = .idle }
+            else { record(error, candidateIDs: request.draft.items.map(\.temporaryId)) }
+            return false
+        }
+    }
+
+    func parse(photos: [PreparedIntakeImage]) async {
+        guard !action.isRunning, photoUpload == nil, !photos.isEmpty, !Task.isCancelled else { return }
+        let batches = (photos.count - 1) / Self.photoBatchSize + 1
+        photoUpload = .init(remaining: photos, draftPurchaseDate: contextPurchaseDate, totalBatches: batches)
+        await retryPhotoUpload()
+    }
+
+    func retryPhotoUpload() async {
+        guard !action.isRunning, photoUpload != nil, !Task.isCancelled else { return }
+        serverIssue = nil
+        action = .running
+        while let upload = photoUpload {
+            guard validateDraftForParsing() else { return }
+            let batch = Array(upload.remaining.prefix(Self.photoBatchSize))
+            // A context date applies to the entire request. Use a photo date only when every photo agrees.
+            let commonDate = batch.first?.captureDate.flatMap { date in
+                batch.allSatisfy { $0.captureDate == date } ? date : nil
+            }
+            let context = IntakeContext(purchaseDate: purchaseDate?.nilIfBlank ?? commonDate ?? upload.draftPurchaseDate)
+            do {
+                let response = try await client.parseIntakeImages(batch, draft: .init(items: candidates), context: context)
+                try Task.checkCancellation()
+                try apply(response, appendingReview: upload.batch > 1)
+                if batch.count == upload.remaining.count {
+                    photoUpload = nil
+                } else {
+                    photoUpload?.remaining.removeFirst(batch.count)
+                    photoUpload?.batch += 1
+                }
+            } catch {
+                record(error, candidateIDs: candidates.map(\.temporaryId))
+                return
+            }
+        }
+        action = .succeeded(nil)
+    }
+
+    func discardPhotoUpload() {
+        guard !action.isRunning else { return }
+        photoUpload = nil
+        clearFailure()
+    }
+
+    private func validateDraftForParsing() -> Bool {
         guard candidates.count <= Self.maxCandidates else {
             action = .failed(Self.draftLimitMessage)
             return false
@@ -124,24 +196,16 @@ final class IntakeStore {
             action = .failed("草稿中的\(DisplayText.intakeField(issue.field))无效，请修改后再解析")
             return false
         }
+        return true
+    }
 
-        let request = IntakeParseRequest(input: .init(text: text), draft: .init(items: candidates),
-                                         context: .init(locale: locale, timezone: timezone, purchaseDate: contextPurchaseDate))
-        action = .running
-        do {
-            let response = try await client.parseIntake(request)
-            try Task.checkCancellation()
-            let (updated, clarification) = try applying(response.operations)
-            candidates = updated
-            lastParse = .init(clarifications: clarification, unparsedFragments: response.unparsedFragments,
-                              locale: response.locale, warnings: response.warnings)
-            action = .succeeded(nil)
-            return true
-        } catch {
-            if Task.isCancelled { action = .idle }
-            else { record(error, candidateIDs: request.draft.items.map(\.temporaryId)) }
-            return false
-        }
+    private func apply(_ response: IntakeParseResponse, appendingReview: Bool = false) throws {
+        let (updated, clarification) = try applying(response.operations)
+        let previous = appendingReview ? lastParse : nil
+        candidates = updated
+        lastParse = .init(clarifications: (previous?.clarifications ?? []) + clarification,
+                          unparsedFragments: (previous?.unparsedFragments ?? []) + response.unparsedFragments,
+                          locale: response.locale, warnings: (previous?.warnings ?? []) + response.warnings)
     }
 
     @discardableResult

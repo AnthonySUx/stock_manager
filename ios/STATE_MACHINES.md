@@ -34,6 +34,8 @@
 
 - 入库界面：连接期间共享同一个入库草稿。全屏审核期间，解析与确认独占操作状态，禁用重复提交和关闭。条目编辑采用局部副本，保存才替换草稿，清空日期写入 `nil`。校验问题在草稿条目及对应编辑字段标出。
 
+- Photo intake: The shared draft applies each successful photo batch in order. A failed batch remains at the front of the pending upload. Retry resumes there, and discarding remaining images keeps all changes from successful batches. Text parsing and confirmation can resume once the queue completes or is discarded.
+
 ## 约束
 
 1. 不要同时添加 `isLoading`、`error` 和可选结果来描述同一请求；使用 `LoadState`。
