@@ -99,6 +99,65 @@ final class StockManagerUITests: XCTestCase {
         XCTAssertFalse(stop.exists)
     }
 
+    func testHouseholdSettingsSearchesTimezonesAndRollsBackValidationFailure() {
+        let app = launchHouseholdSettings()
+        let timezone = app.descendants(matching: .any)["settings.householdTimezone"].firstMatch
+        XCTAssertTrue(timezone.waitForExistence(timeout: 5))
+        if !timezone.isHittable { app.swipeUp() }
+        XCTAssertEqual(timezone.value as? String, "Asia/Tokyo")
+        capture("F4 household settings")
+
+        timezone.tap()
+        let search = app.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["settings.timezone.device"].exists)
+        search.tap()
+        search.typeText("Paris")
+        let paris = app.buttons["settings.timezone.Europe/Paris"]
+        XCTAssertTrue(paris.waitForExistence(timeout: 5))
+        paris.tap()
+        XCTAssertTrue(timezone.waitForExistence(timeout: 5))
+        XCTAssertEqual(timezone.value as? String, "Europe/Paris")
+
+        let save = app.buttons["settings.saveHousehold"]
+        if !save.isHittable { app.swipeUp() }
+        XCTAssertTrue(save.isEnabled)
+        save.tap()
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        XCTAssertTrue(alert.staticTexts["时区设置未通过验证"].exists)
+        alert.buttons.firstMatch.tap()
+        XCTAssertEqual(timezone.value as? String, "Asia/Tokyo")
+        XCTAssertFalse(save.isEnabled)
+    }
+
+    func testSystemCategoryShelfLifeIsEditableAndValidated() {
+        let app = launchHouseholdSettings()
+        let manage = app.buttons["分类管理"]
+        if !manage.isHittable { app.swipeUp() }
+        XCTAssertTrue(manage.waitForExistence(timeout: 5))
+        manage.tap()
+        let category = app.buttons["categories.row.7"]
+        XCTAssertTrue(category.waitForExistence(timeout: 5))
+        category.tap()
+        let field = app.textFields["category.defaultShelfLife"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        XCTAssertEqual(field.value as? String, "7")
+        capture("F4 system category shelf life")
+
+        field.tap()
+        field.typeText("9999")
+        XCTAssertTrue(app.staticTexts["请输入 1 到 3650 的整数，或留空。"].exists)
+        XCTAssertFalse(app.buttons["保存"].isEnabled)
+    }
+
+    private func launchHouseholdSettings() -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui-testing-reset", "-ui-testing-household-settings"]
+        app.launch()
+        return app
+    }
+
     private func openExplore(in app: XCUIApplication) {
         let explore = app.buttons["探索"]
         XCTAssertTrue(explore.waitForExistence(timeout: 5))

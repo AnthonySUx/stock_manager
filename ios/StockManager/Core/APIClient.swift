@@ -37,7 +37,7 @@ protocol APIClientProtocol: Sendable {
     func health() async throws -> HealthResponse
     func capabilities() async throws -> Capabilities
     func settings() async throws -> AppSettings
-    func updateSettings(days: Int) async throws -> AppSettings
+    func updateSettings(_ body: SettingsUpdate) async throws -> AppSettings
     func sendMultipart<Response: Decodable>(path: String, fields: [String: String], files: [MultipartFile], timeout: TimeInterval) async throws -> Response
 
     func items(filters: ItemFilters) async throws -> [StockItem]
@@ -86,8 +86,8 @@ struct APIClient: APIClientProtocol {
     func health() async throws -> HealthResponse { try await send("health", authenticated: false) }
     func capabilities() async throws -> Capabilities { try await send("capabilities") }
     func settings() async throws -> AppSettings { try await send("settings") }
-    func updateSettings(days: Int) async throws -> AppSettings {
-        try await send("settings", method: "PATCH", body: SettingsUpdate(expirationReminderDays: String(days)))
+    func updateSettings(_ body: SettingsUpdate) async throws -> AppSettings {
+        try await send("settings", method: "PATCH", body: body)
     }
 
     func items(filters: ItemFilters = .init()) async throws -> [StockItem] {
