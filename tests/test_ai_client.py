@@ -29,7 +29,7 @@ class TestConfig:
         assert config == AIConfig()
         assert (config.model, config.base_url) == ("deepseek-flash", "https://api.deepseek.com")
         assert (config.text_timeout, config.image_timeout) == (30, 60)
-        assert (config.text_total_timeout, config.image_total_timeout) == (50, 75)
+        assert (config.text_total_timeout, config.image_total_timeout) == (50, 110)
         assert (config.first_token_timeout, config.idle_timeout) == (20, 15)
         assert (config.stream, config.max_tokens) == (True, 8192)
         assert config.max_retries == 1
@@ -127,7 +127,7 @@ class TestChatJson:
         fake_ai.reply = reply
         assert _chat() == expected
 
-    @pytest.mark.parametrize("reply", ["not json", '"a string"', "42", "null", "", "```json\nnope\n```"])
+    @pytest.mark.parametrize("reply", ["not json", '"a string"', "42", "null", "```json\nnope\n```"])
     def test_unparseable_reply_is_upstream_error(self, fake_ai, reply):
         fake_ai.reply = reply
         with pytest.raises(AIUpstreamError):
@@ -139,6 +139,87 @@ class TestChatJson:
         fake_ai.responses = [httpx.Response(200, json=body)]
         with pytest.raises(AIUpstreamError):
             _chat()
+
+    # Empty replies: DeepSeek documents that JSON mode occasionally returns
+    # empty content. A well-formed empty reply is retried once if time allows.
+
+    IMAGE = [{"data": b"img", "mime": "image/png"}]
+
+    @staticmethod
+    def _plain(content, finish="stop", reasoning=None):
+        message = {"content": content}
+        if reasoning is not None:
+            message["reasoning_content"] = reasoning
+        return httpx.Response(200, json={
+            "choices": [{"message": message, "finish_reason": finish}],
+            "usage": {"prompt_tokens": 900, "completion_tokens": 40},
+        })
+
+    @pytest.mark.parametrize("content", ["", "   \n ", None])
+    def test_empty_image_reply_is_retried_once(self, fake_ai, content, caplog):
+        fake_ai.responses = [self._plain(content), self._plain('{"ok": 1}')]
+        with caplog.at_level(logging.INFO, logger="stock_manager.api.ai_client"):
+            assert _chat(images=self.IMAGE) == {"ok": 1}
+        assert len(fake_ai.requests) == 2
+        assert "empty reply" in caplog.text and "retrying once" in caplog.text
+        assert "rounds=2" in caplog.text
+
+    def test_empty_streamed_reply_is_retried_once(self, fake_ai):
+        fake_ai.responses = ["   ", '{"ok": 1}']
+        assert _chat() == {"ok": 1}
+        assert len(fake_ai.requests) == 2
+
+    def test_second_empty_reply_fails(self, fake_ai):
+        fake_ai.responses = [self._plain(""), self._plain("")]
+        with pytest.raises(AIUpstreamError) as error:
+            _chat(images=self.IMAGE)
+        assert error.value.reason == "no_content"
+        assert len(fake_ai.requests) == 2
+
+    def test_empty_reply_at_token_limit_is_truncated_and_not_retried(self, fake_ai):
+        fake_ai.responses = [self._plain("", finish="length", reasoning="thinking" * 10)]
+        with pytest.raises(AIUpstreamError, match="cut off at max_tokens=8192 before any content") as error:
+            _chat(images=self.IMAGE)
+        assert error.value.reason == "truncated"
+        assert len(fake_ai.requests) == 1
+
+    def test_empty_reply_is_not_retried_without_time_for_another_attempt(self, monkeypatch):
+        requests = []
+
+        async def slow_empty(request):
+            requests.append(request)
+            await asyncio.sleep(0.2)
+            return self._plain("")
+
+        monkeypatch.setattr(ai_client, "_transport", httpx.MockTransport(slow_empty))
+        monkeypatch.setattr(ai_client, "_config", AIConfig(
+            enabled=True, api_key="k", image_timeout=5, image_total_timeout=0.3,
+        ))
+        with pytest.raises(AIUpstreamError) as error:
+            _chat(images=self.IMAGE)
+        assert error.value.reason == "no_content"
+        assert len(requests) == 1
+
+    def test_image_failure_log_has_counters_but_no_content(self, fake_ai, caplog):
+        fake_ai.responses = [self._plain("", reasoning="secret label text") for _ in range(2)]
+        with caplog.at_level(logging.WARNING, logger="stock_manager.api.ai_client"):
+            with pytest.raises(AIUpstreamError):
+                _chat(images=[{"data": b"PRIVATE-IMAGE", "mime": "image/png"}])
+        assert "finish=stop tokens=900/40 reasoning_chars=17" in caplog.text
+        assert "secret label text" not in caplog.text
+        assert base64.b64encode(b"PRIVATE-IMAGE").decode() not in caplog.text
+
+    def test_image_logs_drop_echoed_metadata_on_empty_replies(self, fake_ai, caplog):
+        echo = "PRIVATE_UPLOAD_CONTENT"
+        fake_ai.responses = [httpx.Response(200, json={
+            "choices": [{"message": {"content": ""}, "finish_reason": echo}],
+            "usage": {"prompt_tokens": echo, "completion_tokens": {"x": echo}},
+        }) for _ in range(2)]
+        with caplog.at_level(logging.INFO, logger="stock_manager.api.ai_client"):
+            with pytest.raises(AIUpstreamError):
+                _chat(images=self.IMAGE)
+        assert "retrying once" in caplog.text and "finish=- tokens=?/?" in caplog.text
+        assert echo not in caplog.text
 
     def test_non_json_http_body_is_upstream_error(self, fake_ai):
         fake_ai.responses = [httpx.Response(200, text="<html>")]

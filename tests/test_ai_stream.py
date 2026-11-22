@@ -194,7 +194,15 @@ class TestFailureReasons:
         assert "Sure! Here are ideas" in str(error)
 
     def test_empty_reply(self, monkeypatch, caplog):
-        _fails(monkeypatch, caplog, _streaming(_content(""), _finish(), DONE), "no_content")
+        # An empty reply is retried once (DeepSeek JSON mode can return empty content).
+        requests = _use(monkeypatch, *(_streaming(_content(""), _finish(), DONE) for _ in range(2)))
+        with caplog.at_level(logging.WARNING, logger="stock_manager.api.ai_client"):
+            with pytest.raises(AIUpstreamError) as info:
+                _chat(label="explore/first")
+        assert info.value.reason == "no_content"
+        assert "AI explore/first fail no_content model=deepseek-flash" in caplog.text
+        assert "rounds=2" in caplog.text
+        assert len(requests) == 2
 
     def test_error_inside_the_stream(self, monkeypatch, caplog):
         error = _fails(monkeypatch, caplog, _streaming(_data({"error": {"message": "server overloaded"}})),
@@ -621,7 +629,8 @@ class TestEdges:
         assert str(info.value).startswith("AI returned HTTP 400")
 
     def test_empty_plain_reply(self, monkeypatch):
-        _use(monkeypatch, httpx.Response(200, json={"choices": [{"message": {"content": ""}}]}), stream=False)
+        _use(monkeypatch, *(httpx.Response(200, json={"choices": [{"message": {"content": ""}}]}) for _ in range(2)),
+             stream=False)
         with pytest.raises(AIUpstreamError) as info:
             _chat()
         assert info.value.reason == "no_content"
