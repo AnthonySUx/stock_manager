@@ -38,7 +38,7 @@ struct InventoryListView: View {
         .refreshableWithCapabilities { await inventory.load() }
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
-                if capabilities.value.ai.text {
+                if capabilities.value.ai.text || !intake.candidates.isEmpty {
                     Button("AI 入库", systemImage: "sparkles") { showsIntake = true }
                         .accessibilityIdentifier("inventory.aiIntake")
                 }

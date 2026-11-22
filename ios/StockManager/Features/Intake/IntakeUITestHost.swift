@@ -15,7 +15,20 @@ struct IntakeUITestHost: View {
         let inventory = InventoryStore(client: client)
         _inventory = State(initialValue: inventory)
         _categories = State(initialValue: CategoryStore(client: client))
-        _intake = State(initialValue: IntakeStore(client: client, inventory: inventory, restock: RestockStore(client: client)))
+        var candidates: [IntakeCandidate] = []
+        if ProcessInfo.processInfo.arguments.contains("-ui-testing-intake-existing-draft") {
+            var milk = IntakeCandidate.manual(temporaryId: "cand_1a2b3c4d")
+            milk.name = "牛奶"
+            milk.categoryId = 12
+            milk.quantityValue = 2
+            milk.quantityUnit = "瓶"
+            milk.unopenedExpirationDate = "2026-11-27"
+            milk.owner = "小林"
+            milk.location = "冰箱"
+            candidates.append(milk)
+        }
+        _intake = State(initialValue: IntakeStore(client: client, inventory: inventory,
+                                               restock: RestockStore(client: client), candidates: candidates))
     }
 
     var body: some View {
@@ -69,6 +82,9 @@ private final class IntakeUITestProtocol: URLProtocol {
             }
             return (200, #"{"operations":[],"unparsed_fragments":["已用清空购买日期的草稿重新解析"],"locale":"zh-CN","warnings":[]}"#)
         case ("POST", "/api/intake/confirm"):
+            if ProcessInfo.processInfo.arguments.contains("-ui-testing-intake-existing-draft") {
+                return (201, #"{"created":[{"temporary_id":"cand_1a2b3c4d","item_id":41}],"restock_done":[],"restock_partial":[],"warnings":[]}"#)
+            }
             return (201, Self.confirmed)
         default:
             return (404, #"{"detail":"Unexpected intake UI test request"}"#)

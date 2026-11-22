@@ -215,6 +215,36 @@ final class StockManagerUITests: XCTestCase {
         XCTAssertFalse(app.buttons["inventory.aiIntake"].exists)
     }
 
+    func testTextIntakeExistingDraftCanBeConfirmedWhenAIIsUnavailable() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-ui-testing-reset", "-ui-testing-intake", "-ui-testing-intake-unavailable",
+            "-ui-testing-intake-existing-draft"
+        ]
+        app.launch()
+
+        let entry = app.buttons["inventory.aiIntake"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 10))
+        entry.tap()
+
+        let parse = app.buttons["intake.parse"]
+        XCTAssertTrue(parse.waitForExistence(timeout: 10))
+        XCTAssertFalse(parse.isEnabled)
+        XCTAssertTrue(app.staticTexts["AI 功能未开启"].exists)
+        let input = app.descendants(matching: .any)["intake.input"].firstMatch
+        input.tap()
+        input.typeText("More milk")
+        XCTAssertFalse(parse.isEnabled)
+        let confirm = app.buttons["intake.confirm"]
+        XCTAssertTrue(confirm.isEnabled)
+        confirm.tap()
+        XCTAssertTrue(app.staticTexts["已入库 1 项"].waitForExistence(timeout: 10))
+        XCTAssertEqual(confirm.label, "确认入库（0）")
+        app.buttons["关闭"].tap()
+        XCTAssertTrue(app.navigationBars["库存"].waitForExistence(timeout: 10))
+        XCTAssertFalse(entry.exists)
+    }
+
     private func launchHouseholdSettings() -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-ui-testing-reset", "-ui-testing-household-settings"]
