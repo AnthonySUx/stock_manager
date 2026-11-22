@@ -378,7 +378,7 @@ struct AIWarning: Decodable, Hashable {
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         code = try values.decode(String.self, forKey: .code)
-        params = try values.decodeIfPresent([String: String].self, forKey: .params) ?? [:]
+        params = (try? values.decodeIfPresent([String: String].self, forKey: .params)) ?? [:]
         message = try? values.decodeIfPresent(String.self, forKey: .message)
         detail = try? values.decodeIfPresent(String.self, forKey: .detail)
     }

@@ -138,6 +138,13 @@ final class APIContractTests: XCTestCase {
         ])
     }
 
+    func testExploreDecodesWarningWithNumericParams() throws {
+        let fixture = #"{"mode":"ai","input_mode":"natural_language","locale":"zh-CN","ideas":[],"warnings":[{"code":"ingredient_dropped_malformed","params":{"index":2}}]}"#
+        let response = try exploreDecoder.decode(ExploreResponse.self, from: Data(fixture.utf8))
+        XCTAssertEqual(response.warnings.first?.code, "ingredient_dropped_malformed")
+        XCTAssertEqual(response.warnings.first?.params, [:])
+    }
+
     func testDifficultyLabelsKeepLegacyFreeText() {
         XCTAssertEqual(["easy", "medium", "hard", "适合新手"].map(DisplayText.difficulty),
                        ["简单", "中等", "困难", "适合新手"])

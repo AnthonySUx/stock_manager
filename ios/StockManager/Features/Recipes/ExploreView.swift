@@ -172,7 +172,7 @@ private struct ExploreIdeaSummary: View {
             if let reason = idea.reason { Text(reason).font(.caption).foregroundStyle(.secondary) }
             let metadata = [
                 idea.cookingMethod.map(DisplayText.cookingMethod),
-                idea.cuisineGroup.map(DisplayText.cuisineGroup) ?? idea.cuisine,
+                idea.cuisine ?? idea.cuisineGroup.map(DisplayText.cuisineGroup),
                 idea.estimatedTimeMinutes.map { "\($0) 分钟" }
             ].compactMap { $0 }
             if !metadata.isEmpty {
