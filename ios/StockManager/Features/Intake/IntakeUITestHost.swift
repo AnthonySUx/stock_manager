@@ -23,6 +23,9 @@ struct IntakeUITestHost: View {
             milk.quantityValue = 2
             milk.quantityUnit = "瓶"
             milk.unopenedExpirationDate = "2026-11-27"
+            if ProcessInfo.processInfo.arguments.contains("-ui-testing-intake-invalid-date") {
+                milk.purchaseDate = "2026-13-40"
+            }
             milk.owner = "小林"
             milk.location = "冰箱"
             candidates.append(milk)

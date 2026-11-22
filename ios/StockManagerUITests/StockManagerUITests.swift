@@ -183,6 +183,12 @@ final class StockManagerUITests: XCTestCase {
         capture("F5b intake editor")
         clearPurchaseDate.tap()
         XCTAssertFalse(clearPurchaseDate.exists)
+        let setPurchaseDate = app.buttons["intake.set.purchase_date"]
+        XCTAssertTrue(setPurchaseDate.exists)
+        setPurchaseDate.tap()
+        XCTAssertTrue(clearPurchaseDate.waitForExistence(timeout: 10))
+        clearPurchaseDate.tap()
+        XCTAssertTrue(setPurchaseDate.exists)
         let expirationIssue = app.descendants(matching: .any)["intake.editor.issue.unopened_expiration_date"].firstMatch
         if !expirationIssue.isHittable { app.swipeUp() }
         XCTAssertTrue(expirationIssue.exists)
@@ -243,6 +249,35 @@ final class StockManagerUITests: XCTestCase {
         app.buttons["关闭"].tap()
         XCTAssertTrue(app.navigationBars["库存"].waitForExistence(timeout: 10))
         XCTAssertFalse(entry.exists)
+    }
+
+    func testTextIntakeInvalidLegacyDateCanBeCleared() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-ui-testing-reset", "-ui-testing-intake", "-ui-testing-intake-existing-draft",
+            "-ui-testing-intake-invalid-date"
+        ]
+        app.launch()
+
+        let entry = app.buttons["inventory.aiIntake"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 10))
+        entry.tap()
+        let milk = app.buttons["intake.candidate.cand_1a2b3c4d"]
+        XCTAssertTrue(milk.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["intake.confirm"].isEnabled)
+        milk.tap()
+
+        let invalidDate = app.staticTexts["intake.invalid.purchase_date"]
+        XCTAssertTrue(invalidDate.waitForExistence(timeout: 10))
+        XCTAssertEqual(invalidDate.label, "2026-13-40")
+        let issue = app.descendants(matching: .any)["intake.editor.issue.purchase_date"].firstMatch
+        XCTAssertTrue(issue.exists)
+        app.buttons["intake.clear.purchase_date"].tap()
+        XCTAssertFalse(invalidDate.exists)
+        XCTAssertFalse(issue.exists)
+        XCTAssertTrue(app.buttons["intake.set.purchase_date"].exists)
+        app.buttons["保存草稿"].tap()
+        XCTAssertTrue(app.buttons["intake.confirm"].isEnabled)
     }
 
     private func launchHouseholdSettings() -> XCUIApplication {
