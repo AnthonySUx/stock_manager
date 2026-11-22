@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-struct IntakeFieldIssue: Equatable {
+struct IntakeFieldIssue: Hashable {
     let temporaryId: String
     let field: String
 }
@@ -40,20 +40,29 @@ final class IntakeStore {
         !action.isRunning && (1...Self.maxCandidates).contains(candidates.count) && confirmationIssues.isEmpty
     }
 
+    var draftIssues: [IntakeFieldIssue] {
+        candidates.flatMap { candidate in
+            candidate.invalidDraftFields.map { IntakeFieldIssue(temporaryId: candidate.id, field: $0) }
+        }
+    }
+
     var confirmationIssues: [IntakeFieldIssue] {
         let defaults = defaults.normalized
-        return candidates.flatMap { candidate in
+        let missing = candidates.flatMap { candidate in
             let item = IntakeConfirmItem(candidate: candidate)
             var fields: [String] = []
             if item.name == nil { fields.append("name") }
-            if (item.categoryId ?? 0) <= 0 { fields.append("category_id") }
-            if item.quantityValue.map({ $0.isFinite && $0 > 0 }) != true { fields.append("quantity_value") }
+            if item.categoryId == nil { fields.append("category_id") }
+            if item.quantityValue == nil { fields.append("quantity_value") }
             if item.quantityUnit == nil { fields.append("quantity_unit") }
-            if !Self.isValidExpiration(item.unopenedExpirationDate) { fields.append("unopened_expiration_date") }
+            if item.unopenedExpirationDate == nil { fields.append("unopened_expiration_date") }
             if item.owner == nil && defaults.owner == nil { fields.append("owner") }
             if item.location == nil && defaults.location == nil { fields.append("location") }
             return fields.map { IntakeFieldIssue(temporaryId: candidate.temporaryId, field: $0) }
         }
+        let invalid = draftIssues
+        let invalidSet = Set(invalid)
+        return invalid + missing.filter { !invalidSet.contains($0) }
     }
 
     @discardableResult
@@ -96,6 +105,11 @@ final class IntakeStore {
         }
         guard candidates.count <= Self.maxCandidates else {
             action = .failed(Self.draftLimitMessage)
+            return false
+        }
+        if let issue = draftIssues.first {
+            serverIssue = issue
+            action = .failed("草稿中的\(DisplayText.intakeField(issue.field))无效，请修改后再解析")
             return false
         }
 
@@ -193,12 +207,6 @@ final class IntakeStore {
             }
         }
         action = .failed(error.localizedDescription)
-    }
-
-    private static func isValidExpiration(_ value: String?) -> Bool {
-        guard let value else { return false }
-        if value == "infinite" { return true }
-        return API.date(value).map(API.string) == value
     }
 
     private static var draftLimitMessage: String {

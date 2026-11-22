@@ -252,6 +252,50 @@ final class IntakeContractTests: XCTestCase {
         XCTAssertEqual(oversized.candidates.count, 101)
     }
 
+    @MainActor func testIntakeRejectsInvalidDraftFieldsBeforeSendingParse() async throws {
+        let milk = try reviewedMilk()
+        let client = stubbedClient { _ in
+            XCTFail("Invalid draft must not send a request")
+            return (500, "{}")
+        }
+        let valid = IntakeCandidate.manual(temporaryId: "cand_12345678")
+        let fields: [(String, JSONValue, String)] = [
+            ("quantity_value", .integer(0), "数量"),
+            ("category_id", .integer(0), "分类"),
+            ("purchase_date", .string("2026-13-40"), "购买日期")
+        ]
+        for (field, value, label) in fields {
+            let invalid = try milk.applying([field: value])
+            let store = makeStore(client, candidates: [valid, invalid])
+            let expected = IntakeFieldIssue(temporaryId: milk.id, field: field)
+            let parsed = await store.parse(text: "Correction")
+            XCTAssertFalse(parsed)
+            XCTAssertEqual(store.draftIssues, [expected])
+            XCTAssertEqual(store.serverIssue, expected)
+            XCTAssertEqual(store.action, .failed("草稿中的\(label)无效，请修改后再解析"))
+            XCTAssertEqual(store.candidates, [valid, invalid])
+            XCTAssertEqual(store.confirmationIssues.filter { $0 == expected }.count, 1)
+        }
+    }
+
+    func testIntakeDraftChecksOptionalDatesAndTextLimits() throws {
+        let candidate = IntakeCandidate.manual(temporaryId: "cand_12345678")
+        let valid: [String: JSONValue] = ["quantity_value": .number(1.5), "category_id": .integer(1),
+                                          "purchase_date": .string("2028-02-29"), "unopened_expiration_date": .string("infinite"),
+                                          "name": .string(String(repeating: "乳", count: 255)), "owner": .null]
+        XCTAssertTrue(try candidate.applying(valid).invalidDraftFields.isEmpty)
+        let invalid: [String: JSONValue] = [
+            "purchase_date": .string("2026-02-29"),
+            "suggested_unopened_expiration_date": .string("2026-1-01"),
+            "opened_expiration_date": .string("infinite"), "opened_date": .string("2026-01-32"),
+            "unopened_expiration_date": .string("2026-01-01T00:00:00Z"),
+            "name": .string(String(repeating: "乳", count: 256)), "raw_name": .string(String(repeating: "乳", count: 256)),
+            "quantity_unit": .string(String(repeating: "乳", count: 51)), "owner": .string(String(repeating: "乳", count: 101)),
+            "location": .string(String(repeating: "乳", count: 101))
+        ]
+        XCTAssertEqual(try Set(candidate.applying(invalid).invalidDraftFields), Set(invalid.keys))
+    }
+
     func testIntakeWarningsUseKnownTextAndFutureFallback() throws {
         let warning = try decode(AIWarning.self, #"{"code":"op_invalid","params":{"index":"0"}}"#)
         let future = try decode(AIWarning.self, #"{"code":"future_warning","message":"Check this item"}"#)

@@ -64,6 +64,47 @@ struct IntakeCandidate: Codable, Equatable, Identifiable {
     var matchMethod: String? { self[text: "match_method"] }
     var suggestions: [IntakeReceiptSuggestion]? { try? Self.decodeField(fields["suggestions"]) }
 
+    var invalidDraftFields: [String] {
+        var invalid: [String] = []
+        if !allows("quantity_value", when: { $0.intakeNumber.map { $0.isFinite && $0 > 0 } == true }) {
+            invalid.append("quantity_value")
+        }
+        if !allows("category_id", when: { $0.intakeInteger.map { $0 > 0 } == true }) {
+            invalid.append("category_id")
+        }
+        for key in ["purchase_date", "suggested_unopened_expiration_date", "opened_expiration_date", "opened_date",
+                    "unopened_expiration_date"] {
+            if !allows(key, when: { value in
+                guard let date = value.intakeString else { return false }
+                return (key == "unopened_expiration_date" && date == "infinite") || Self.isValidDate(date)
+            }) {
+                invalid.append(key)
+            }
+        }
+        for (key, limit) in [("name", 255), ("raw_name", 255), ("quantity_unit", 50), ("owner", 100), ("location", 100)] {
+            if !allows(key, when: { $0.intakeString.map { $0.unicodeScalars.count <= limit } == true }) {
+                invalid.append(key)
+            }
+        }
+        return invalid
+    }
+
+    private func allows(_ key: String, when valid: (JSONValue) -> Bool) -> Bool {
+        guard let value = fields[key], value != .null else { return true }
+        return valid(value)
+    }
+
+    private static let dateFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = .withFullDate
+        formatter.timeZone = .gmt
+        return formatter
+    }()
+
+    private static func isValidDate(_ value: String) -> Bool {
+        dateFormatter.date(from: value).map(dateFormatter.string(from:)) == value
+    }
+
     init(from decoder: Decoder) throws {
         try self.init(fields: decoder.singleValueContainer().decode([String: JSONValue].self))
     }
