@@ -21,6 +21,8 @@ The app supports recording:
 - Notes
 
 For items without an expiration date, use `infinite`.
+On `POST /api/items`, `current_expiration_date` and `status` are optional legacy inputs.
+The server calculates both fields and ignores the supplied values.
 
 The backend also supports [AI-assisted text intake](intake.md) for drafting and reviewing multiple items before saving.
 
@@ -45,7 +47,15 @@ Displays current stock with:
 Edit one or more fields: name, category, owner, purchase date, quantity, location, expiration dates, notes.
 Current expiration date and status are calculated automatically.
 
+On `POST /api/items` and `PATCH /api/items/{id}`, the backend trims `name`, `owner`
+and `location`. Blank values return `422`. Stock write quantities, including
+`quantity_value` and `POST /api/items/{id}/consume`'s `quantity`, must be positive
+and finite. NaN and Infinity return `422`.
+
 Validation (returns `422`):
+
+- Including a `status` key in `PATCH /api/items/{id}` returns `item_status_readonly`,
+  including when the value is `null`.
 
 - Dates must be real calendar dates in `YYYY-MM-DD` form (`2026-02-30` is rejected).
   Expiration dates may also be `infinite`; `purchase_date` and `opened_date` may not.
@@ -107,6 +117,17 @@ Features:
   and the restock update are saved together or not at all.
 - Add purchased items to the main stock list
 - Edit and delete restock items
+
+`POST /api/restock` and `PATCH /api/restock/{id}` trim `name` and reject blank
+names with `422`. When supplied, numeric `quantity_value` and
+`POST /api/restock/{id}/done`'s `purchased_quantity` must be positive and finite.
+NaN and Infinity return `422`.
+
+On `PATCH /api/restock/{id}`, send `null` to clear `notes`, `category_id`,
+`quantity_value` or `quantity_unit`. Omit a field to keep its value. A null
+`name` returns `422`; an empty object returns `400`.
+Responses use `pending` and `done`. Use `/done` to complete a purchase.
+Any `status` key in a PATCH request returns `422 restock_status_readonly`.
 
 ---
 

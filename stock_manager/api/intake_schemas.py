@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field, model_serializer
 
 from stock_manager.api.recipe_schemas import AIWarning
 from stock_manager.api.receipt_schemas import ReceiptCandidateFields, ReceiptSpecificity
-from stock_manager.api.schemas import DateStr, ExpirationStr
+from stock_manager.api.schemas import DateStr, ExpirationStr, PositiveQuantity
 
 MAX_DRAFT_ITEMS = 100
 MAX_TEXT_LENGTH = 4000
@@ -25,7 +25,6 @@ EditableField = Literal[
     "expiration_source", "notes", "matched_restock_id",
 ]
 TemporaryId = Annotated[str, Field(pattern=r"^cand_[0-9a-f]{8}$")]
-PositiveQuantity = Annotated[float, Field(gt=0, allow_inf_nan=False)]
 Confidence = Annotated[float, Field(ge=0, le=1)]
 
 

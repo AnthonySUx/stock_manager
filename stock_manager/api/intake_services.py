@@ -282,11 +282,7 @@ def _confirm_item_data(item: ConfirmItem, defaults: ConfirmDefaults, index: int)
     if item.quantity_value is not None and not isfinite(item.quantity_value):
         raise _item_invalid(index, item, "quantity_value")
     try:
-        # ItemCreate requires the legacy request field. Its value is replaced below
-        # by prepare_item_data, as it is for regular item creation.
-        return ItemCreate.model_validate({
-            **data, "current_expiration_date": data["unopened_expiration_date"],
-        }).model_dump()
+        return ItemCreate.model_validate(data).model_dump()
     except ValidationError as exc:
         raise _item_invalid(index, item, exc.errors()[0]["loc"][0]) from None
 

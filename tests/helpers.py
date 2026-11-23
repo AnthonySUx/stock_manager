@@ -4,11 +4,7 @@ from datetime import date, timedelta
 
 
 def make_item_create_payload(**overrides):
-    """Generate a valid payload for POST /api/items.
-
-    Note: current_expiration_date is included because ItemCreate requires it,
-    but the router will recalculate it — do not rely on it as a client-controlled field.
-    """
+    """Generate a valid item payload with optional legacy fields."""
     today = date.today()
     future = today + timedelta(days=7)
 

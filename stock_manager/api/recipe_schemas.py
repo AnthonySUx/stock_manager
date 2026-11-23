@@ -4,6 +4,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from stock_manager.api.schemas import ItemStatus, PositiveQuantity
+
 # Dish categories = HowToCook `dishes/<dir>` names (template excluded), so user
 # recipes and imported ones share one vocabulary (#46).
 RecipeCategory = Literal[
@@ -165,7 +167,7 @@ class ConsumePreviewItem(BaseModel):
     suggested_quantity: Optional[float] = None
     unit: str = ""  # stock unit, the unit the amount is deducted in
     needs_user_input: bool = False
-    status: str = "active"
+    status: ItemStatus = "active"
     current_expiration_date: Optional[str] = None
     confidence: str = "high"
 
@@ -181,7 +183,7 @@ class ConsumePreviewResponse(BaseModel):
 class CookConsumeItem(BaseModel):
     """User-confirmed inventory consumption for a cooked recipe."""
     item_id: int
-    quantity: float = Field(..., gt=0)
+    quantity: PositiveQuantity
     ingredient_name: str = ""
 
 
@@ -197,7 +199,7 @@ class CookConsumedItem(BaseModel):
     item_name: str
     consumed_quantity: float
     remaining_quantity: float
-    status: str
+    status: ItemStatus
 
 
 class CookRecipeResponse(BaseModel):

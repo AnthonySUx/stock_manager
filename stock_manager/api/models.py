@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    CheckConstraint,
     Column,
     Boolean,
     DateTime,
@@ -96,6 +97,13 @@ class ReceiptAliasName(Base):
 
 class Item(Base):
     __tablename__ = "items"
+    __table_args__ = (
+        # Compare exact bytes even with a case-insensitive MySQL collation.
+        CheckConstraint(
+            "HEX(status) IN (HEX('active'), HEX('expiring soon'), HEX('expired'), HEX('consumed'))",
+            name="ck_items_status",
+        ),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(255), nullable=False)
@@ -134,6 +142,9 @@ class Item(Base):
 
 class RestockItem(Base):
     __tablename__ = "restock_items"
+    __table_args__ = (
+        CheckConstraint("HEX(status) IN (HEX('pending'), HEX('done'))", name="ck_restock_items_status"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(255), nullable=False)

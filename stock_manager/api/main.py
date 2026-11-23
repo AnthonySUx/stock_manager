@@ -3,7 +3,10 @@
 import logging
 import os
 from contextlib import asynccontextmanager
+from math import isfinite
 from fastapi import Depends, FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -96,6 +99,15 @@ app.include_router(categories.router, prefix="/api/categories", tags=["Categorie
 app.include_router(capabilities.router, prefix="/api/capabilities", tags=["Capabilities"], dependencies=_auth)
 app.include_router(intake.router, prefix="/api/intake", tags=["Intake"], dependencies=_auth)
 app.include_router(speech.router, prefix="/api/speech", tags=["Speech"], dependencies=_auth)
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_error_handler(request: Request, exc: RequestValidationError):
+    # Invalid numeric input may contain a non-finite float that JSON cannot echo.
+    detail = jsonable_encoder(
+        exc.errors(), custom_encoder={float: lambda value: value if isfinite(value) else str(value)}
+    )
+    return JSONResponse(status_code=422, content={"detail": detail})
 
 
 @app.exception_handler(APIError)
