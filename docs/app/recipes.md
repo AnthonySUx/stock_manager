@@ -464,6 +464,7 @@ Currently AI is used **only** for Explore Recipes. Today Recommendations use loc
 | `AI_API_KEY` | — | API key |
 | `AI_MODEL` | `deepseek-flash` | Model name (`deepseek-chat` is retired) |
 | `AI_TEMPERATURE` | `0.2` | Response temperature |
+| `AI_IMAGE_THINKING` | `false` | `false`: image intake sends `thinking: {"type": "disabled"}`. `true`: no thinking setting is sent (the provider default) |
 | `AI_STREAM` | `true` | Stream text replies from the provider (`false`: one JSON body per request) |
 | `AI_MAX_TOKENS` | `8192` | `max_tokens` per request (reasoning counts toward it on thinking models) |
 | `AI_FIRST_TOKEN_TIMEOUT_SECONDS` | `20` | Streamed: first data must arrive within this time |

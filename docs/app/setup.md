@@ -103,6 +103,8 @@ API_PORT=8000
 # Image intake is opt-in after checking that the provider supports images with JSON mode.
 # AI_VISION_ENABLED=false
 # AI_IMAGE_DETAIL=high
+# Image intake disables the model's thinking mode; true sends no thinking setting.
+# AI_IMAGE_THINKING=false
 # DeepSeek speech transcription is independent of recipe and vision features.
 # AI_ASR_PROVIDER=none
 # AI_ASR_TIMEOUT_SECONDS=60
@@ -134,6 +136,10 @@ port and exits with a configuration error if they differ.
 `AI_VISION_ENABLED` defaults to `false`. Image intake also requires the
 backend's AI feature and key to be configured. `AI_IMAGE_DETAIL` accepts
 `low`, `high` (default), or `auto`. An invalid detail disables image intake.
+`AI_IMAGE_THINKING` defaults to `false`: image requests send
+`thinking: {"type": "disabled"}`, because with thinking on the model can spend
+the whole `max_tokens` budget reasoning and return no answer. Set it to `true`
+to leave the provider's default; an invalid value disables image intake.
 Restart the backend after changing either setting.
 
 Speech transcription is off by default (`AI_ASR_PROVIDER=none`). To enable it,
