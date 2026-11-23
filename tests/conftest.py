@@ -205,7 +205,8 @@ def fake_ai(monkeypatch):
     monkeypatch.setenv("AI_API_KEY", "test-key")
     monkeypatch.setenv("AI_BASE_URL", "http://ai.invalid")
     for var in ("AI_MODEL", "AI_TEMPERATURE", "AI_TIMEOUT_SECONDS", "AI_MAX_RETRIES",
-                "AI_TOTAL_TIMEOUT_SECONDS", "AI_IMAGE_TIMEOUT_SECONDS", "AI_IMAGE_TOTAL_TIMEOUT_SECONDS"):
+                "AI_TOTAL_TIMEOUT_SECONDS", "AI_IMAGE_TIMEOUT_SECONDS", "AI_IMAGE_TOTAL_TIMEOUT_SECONDS",
+                "AI_IMAGE_THINKING"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setattr(ai_client, "_transport", httpx.MockTransport(fake.handle))
     ai_client.reload_config()

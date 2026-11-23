@@ -33,6 +33,7 @@ class TestConfig:
         assert (config.first_token_timeout, config.idle_timeout) == (20, 15)
         assert (config.stream, config.max_tokens) == (True, 8192)
         assert config.max_retries == 1
+        assert config.image_thinking is False
         assert not config.available
 
     def test_reads_environment(self):
@@ -63,6 +64,24 @@ class TestConfig:
             config = ai_client.load_config({"AI_RECIPE_ENABLED": "true", "AI_API_KEY": "k", var: value})
         assert not config.available
         assert var in caplog.text
+
+    @pytest.mark.parametrize("value,expected", [("", False), (" FALSE ", False), ("True", True)])
+    def test_image_thinking_setting(self, value, expected):
+        config = ai_client.load_config({
+            "AI_RECIPE_ENABLED": "true", "AI_API_KEY": "k", "AI_VISION_ENABLED": "true",
+            "AI_IMAGE_THINKING": value,
+        })
+        assert config.image_thinking is expected
+        assert config.vision_available
+
+    def test_invalid_image_thinking_disables_vision_only(self, caplog):
+        with caplog.at_level(logging.ERROR, logger="stock_manager.api.ai_client"):
+            config = ai_client.load_config({
+                "AI_RECIPE_ENABLED": "true", "AI_API_KEY": "k", "AI_VISION_ENABLED": "true",
+                "AI_IMAGE_THINKING": "maybe",
+            })
+        assert config.available and not config.vision_available
+        assert "AI_IMAGE_THINKING" in caplog.text
 
     def test_enabled_without_key_is_unavailable(self):
         assert not ai_client.load_config({"AI_RECIPE_ENABLED": "true"}).available
@@ -313,6 +332,20 @@ class TestChatJson:
         }}
         assert content[2]["image_url"]["detail"] == "auto"
         assert content[2]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+
+    def test_image_calls_disable_thinking_and_text_calls_do_not(self, fake_ai):
+        fake_ai.reply = "{}"
+        _chat(images=[{"data": b"img", "mime": "image/png"}])
+        _chat()
+        assert fake_ai.requests[0]["thinking"] == {"type": "disabled"}
+        assert "thinking" not in fake_ai.requests[1]
+
+    def test_image_thinking_true_sends_no_thinking_setting(self, fake_ai, monkeypatch):
+        fake_ai.reply = "{}"
+        monkeypatch.setenv("AI_IMAGE_THINKING", "true")
+        ai_client.reload_config()
+        _chat(images=[{"data": b"img", "mime": "image/png"}])
+        assert "thinking" not in fake_ai.requests[0]
 
 
 # ─── /api/capabilities ────────────────────────────────────────────

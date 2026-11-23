@@ -107,6 +107,9 @@ class AIConfig:
     stream: bool = True
     vision_enabled: bool = False
     image_detail: str = "high"
+    # Image intake runs without thinking: with it, the model can spend the whole
+    # max_tokens budget reasoning and return no answer.
+    image_thinking: bool = False
     receipt_lookup_provider: str = "none"
     asr_provider: str = "none"
     asr_timeout: float = 60.0
@@ -190,6 +193,14 @@ def load_config(environ=None) -> AIConfig:
     else:
         values["asr_timeout"] = timeout
     values["asr_provider"] = asr_provider
+    image_thinking = env.get("AI_IMAGE_THINKING", "").strip().lower()
+    if image_thinking in ("", "false"):
+        values["image_thinking"] = False
+    elif image_thinking == "true":
+        values["image_thinking"] = True
+    else:
+        logger.error("Invalid AI_IMAGE_THINKING (use true or false); AI vision is disabled.")
+        values["vision_enabled"] = False
     stream = env.get("AI_STREAM", "").strip().lower()
     if stream in ("", "true"):
         values["stream"] = True
@@ -589,6 +600,8 @@ async def chat_json(
         "max_tokens": max_tokens or config.max_tokens,
         "response_format": {"type": "json_object"},
     }
+    if images and not config.image_thinking:
+        payload["thinking"] = {"type": "disabled"}
     if stream:
         payload["stream"] = True
         payload["stream_options"] = {"include_usage": True}
