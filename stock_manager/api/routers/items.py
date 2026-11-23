@@ -143,7 +143,7 @@ def update_item_endpoint(
     return result
 
 
-@router.post("/{item_id}/consume", response_model=schemas.ItemResponse)
+@router.post("/{item_id}/consume", response_model=schemas.ConsumeResponse)
 def consume_item_endpoint(
     item_id: int,
     payload: schemas.ConsumeRequest,
@@ -158,16 +158,18 @@ def consume_item_endpoint(
     )
     if result is None:
         raise HTTPException(status_code=404, detail="Item not found")
-    return result["item"]
+    data = schemas.ItemResponse.model_validate(result["item"]).model_dump()
+    return schemas.ConsumeResponse(**data, restock_item=result["restock_item"])
 
 
 @router.delete("/{item_id}", response_model=schemas.MessageResponse)
 def delete_item_endpoint(
     item_id: int,
+    add_to_restock: bool = Query(False),
     db: Session = Depends(get_session),
 ):
-    """Delete a stock item."""
-    if not delete_item(db, item_id):
+    """Delete a stock item and optionally queue its remaining amount for restock."""
+    if not delete_item(db, item_id, add_to_restock=add_to_restock):
         raise HTTPException(status_code=404, detail="Item not found")
     return {"message": "Item deleted"}
 

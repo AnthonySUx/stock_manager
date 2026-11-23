@@ -109,6 +109,21 @@ After choosing a recipe:
   Each `consume_items[].quantity` must be positive and finite. NaN and Infinity return `422`.
   The response can report a `remaining_quantity` of zero when cooking uses up an item.
 
+Cook rejects a repeated `item_id` with `422 duplicate_item` and `params.item_id`.
+Each request line has one outcome in `lines`, in request order:
+
+| `result` | Additional fields | Inventory change |
+|---|---|---|
+| `consumed` | `consumed_quantity` | Deducts the requested quantity |
+| `skipped` | `reason` is `item_not_found` or `not_recipe_usable` | None |
+| `insufficient` | `requested`, `available` | None |
+
+If at least one line is consumed, the deductions and cook history commit together, and the
+response includes every line alongside the existing `consumed_items` list. If every requested
+line fails, the endpoint returns `409 cook_nothing_consumed` with the outcomes in
+`params.lines`. It leaves stock and cook history unchanged. Send an empty `consume_items`
+list to record a cook without deducting any stock.
+
 #### Suggested amounts and units
 
 Each suggestion carries the amount in the **stock item's unit** (`unit`), because that is what
