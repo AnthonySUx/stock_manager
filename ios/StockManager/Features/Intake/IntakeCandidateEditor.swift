@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct IntakeCandidateEditor: View {
+    @Environment(AppTheme.self) private var theme
     @Environment(\.dismiss) private var dismiss
     @State private var candidate: IntakeCandidate
     @State private var quantity: String
@@ -124,7 +125,7 @@ struct IntakeCandidateEditor: View {
                     } else {
                         LabeledContent {
                             Text(verbatim: raw.isEmpty ? "空字符串" : raw)
-                                .foregroundStyle(.red)
+                                .foregroundStyle(theme.statusExpired)
                                 .accessibilityIdentifier("intake.invalid.\(key)")
                         } label: {
                             Text(title)
@@ -153,13 +154,13 @@ struct IntakeCandidateEditor: View {
 
     private func marked<FieldContent: View>(_ key: String, hasIssue: Bool? = nil,
                                              @ViewBuilder content: () -> FieldContent) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: AppSpacing.small) {
             content()
             if (hasIssue ?? issues.contains(key)) || candidate.invalidDraftFields.contains(key) ||
                 (key == "quantity_value" && quantityIsInvalid) {
                 Label("请检查\(DisplayText.intakeField(key))", systemImage: "exclamationmark.circle")
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(theme.statusExpired)
                     .accessibilityIdentifier("intake.editor.issue.\(key)")
             }
         }

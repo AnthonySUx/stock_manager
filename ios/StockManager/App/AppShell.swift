@@ -8,6 +8,7 @@ enum AppTab: String, CaseIterable, Identifiable {
 }
 
 struct ConnectedAppView: View {
+    @Environment(AppTheme.self) private var theme
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var selected: AppTab = .home
     @State private var inventory: InventoryStore
@@ -34,8 +35,8 @@ struct ConnectedAppView: View {
                         Button { selected = tab } label: {
                             Label(tab.title, systemImage: tab.icon)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .foregroundStyle(selected == tab ? Color.accentColor : Color.primary)
-                        }.buttonStyle(.plain).listRowBackground(selected == tab ? Color.accentColor.opacity(0.12) : Color.clear)
+                                .foregroundStyle(selected == tab ? theme.accent : Color.primary)
+                        }.buttonStyle(.plain).listRowBackground(selected == tab ? theme.accent.opacity(0.12) : Color.clear)
                     }
                         .navigationTitle("Stock Manager")
                 } detail: { NavigationStack { tabContent(selected) } }
@@ -47,6 +48,7 @@ struct ConnectedAppView: View {
                 }
             }
         }
+        .tint(theme.accent)
         .environment(inventory).environment(categories).environment(restock).environment(recipes)
         .environment(intake)
     }

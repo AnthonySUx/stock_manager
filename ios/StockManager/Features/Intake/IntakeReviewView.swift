@@ -3,6 +3,7 @@ import SwiftUI
 import UIKit
 
 struct IntakeReviewView: View {
+    @Environment(AppTheme.self) private var theme
     private enum Operation { case parse, photos, confirm }
 
     private enum PhotoSelection {
@@ -148,7 +149,7 @@ struct IntakeReviewView: View {
                     Button("放弃剩余照片", role: .destructive) { store.discardPhotoUpload() }
                 }
                 ForEach(Array(photoPreparationErrors.enumerated()), id: \.offset) { _, message in
-                    Text(message).foregroundStyle(.red)
+                    Text(message).foregroundStyle(theme.statusExpired)
                 }
             }
         }
@@ -171,7 +172,7 @@ struct IntakeReviewView: View {
         } else if let message = store.action.errorMessage {
             Section {
                 Label(message, systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.red)
+                    .foregroundStyle(theme.statusExpired)
             }
         } else if let confirmationMessage {
             Section {
@@ -184,7 +185,7 @@ struct IntakeReviewView: View {
         if !review.clarifications.isEmpty {
             Section("待澄清") {
                 ForEach(Array(review.clarifications.enumerated()), id: \.offset) { _, clarification in
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: AppSpacing.small) {
                         Text(clarification.question)
                         ForEach(clarification.temporaryIds, id: \.self) { id in
                             if let candidate = store.candidates.first(where: { $0.id == id }) {
@@ -231,13 +232,13 @@ struct IntakeReviewView: View {
     }
 
     private func candidateRow(_ candidate: IntakeCandidate, fields: [String]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: AppSpacing.small) {
             Button {
                 inputFocused = false
                 editedCandidate = candidate
             } label: {
                 HStack {
-                    VStack(alignment: .leading, spacing: 5) {
+                    VStack(alignment: .leading, spacing: AppSpacing.xSmall) {
                         Text(candidateTitle(candidate)).font(.headline).foregroundStyle(.primary)
                         Text(candidateDetails(candidate)).font(.subheadline).foregroundStyle(.secondary)
                         Text("到期日：\(expirationLabel(candidate.unopenedExpirationDate))")
@@ -263,7 +264,7 @@ struct IntakeReviewView: View {
                 }
             }
             if candidate.confidence < 0.6 || candidate.fieldConfidence.values.contains(where: { $0 < 0.6 }) {
-                Label("置信度较低，请核对", systemImage: "exclamationmark.circle").foregroundStyle(.orange)
+                Label("置信度较低，请核对", systemImage: "exclamationmark.circle").foregroundStyle(theme.statusExpiring)
             }
             ForEach(Array(candidate.warnings.enumerated()), id: \.offset) { _, warning in
                 Text(DisplayText.intakeWarning(warning)).foregroundStyle(.secondary)
@@ -289,12 +290,12 @@ struct IntakeReviewView: View {
             if !fields.isEmpty {
                 Label("请检查：\(fields.map(DisplayText.intakeField).joined(separator: "、"))",
                       systemImage: "exclamationmark.circle")
-                    .foregroundStyle(.red)
+                    .foregroundStyle(theme.statusExpired)
                     .accessibilityIdentifier("intake.issues.\(candidate.id)")
             }
         }
         .font(.caption)
-        .padding(.vertical, 4)
+        .padding(.vertical, AppSpacing.xSmall)
         .swipeActions {
             Button("移除", role: .destructive) { store.removeCandidate(id: candidate.id) }
         }
@@ -322,7 +323,7 @@ struct IntakeReviewView: View {
         .controlSize(.large)
         .disabled(!store.canConfirm || isBusy)
         .accessibilityIdentifier("intake.confirm")
-        .padding()
+        .padding(AppSpacing.large)
         .background(.bar)
     }
 

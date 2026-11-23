@@ -9,13 +9,14 @@ private enum RecipeDetailPresentation: Identifiable {
 }
 
 struct RecipeLibraryView: View {
+    @Environment(AppTheme.self) private var theme
     @Environment(RecipeStore.self) private var recipes
     @Environment(CapabilitiesStore.self) private var capabilities
     @State private var mode: RecipeMode = .library
     @State private var sheet: RecipeSheet?
     var body: some View {
         VStack(spacing: 0) {
-            Picker("模式", selection: $mode) { ForEach(RecipeMode.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented).padding()
+            Picker("模式", selection: $mode) { ForEach(RecipeMode.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented).padding(AppSpacing.large)
             switch mode {
             case .library: library
             case .today: RecommendationView()
@@ -54,35 +55,37 @@ private struct RecipeFilterBar: View {
                 Menu { Button("全部来源") { store.source = nil }; ForEach(RecipeSourceFilter.allCases) { value in Button(value.title) { store.source = value } } } label: { Label(store.source?.title ?? "全部来源", systemImage: "tray.full") }
                 Menu { Button("全部分类") { store.category = nil }; ForEach(RecipeCategory.allCases) { value in Button(value.title) { store.category = value } } } label: { Label(store.category?.title ?? "全部分类", systemImage: "square.grid.2x2") }
                 Toggle(isOn: $store.favoritesOnly) { Label("仅收藏", systemImage: "heart") }.toggleStyle(.button)
-            }.padding(.horizontal).padding(.vertical, 8)
+            }.padding(.horizontal, AppSpacing.page).padding(.vertical, AppSpacing.small)
         }.background(.bar).onChange(of: store.source) { Task { await store.load() } }.onChange(of: store.category) { Task { await store.load() } }.onChange(of: store.favoritesOnly) { Task { await store.load() } }
     }
 }
 
 private struct RecipeSummaryRow: View {
+    @Environment(AppTheme.self) private var theme
     let recipe: RecipeSummary
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack { Text(recipe.title).font(.headline); Spacer(); if recipe.isFavorite { Image(systemName: "heart.fill").foregroundStyle(.red) } }
+        VStack(alignment: .leading, spacing: AppSpacing.small) {
+            HStack { Text(recipe.title).font(.headline); Spacer(); if recipe.isFavorite { Image(systemName: "heart.fill").foregroundStyle(theme.statusExpired) } }
             HStack { if let category = recipe.category { Text(RecipeCategory(rawValue: category)?.title ?? category) }; if let time = recipe.cookTimeMinutes { Label("\(time) 分钟", systemImage: "clock") }; if recipe.hasBeenCooked { Label("做过", systemImage: "checkmark.circle") } }.font(.caption).foregroundStyle(.secondary)
             Text(recipe.isUserCreated ? "我的菜谱" : recipe.sourceName).font(.caption2).foregroundStyle(.tertiary)
-        }.padding(.vertical, 4)
+        }.padding(.vertical, AppSpacing.xSmall)
     }
 }
 
 private struct RecommendationView: View {
+    @Environment(AppTheme.self) private var theme
     @Environment(RecipeStore.self) private var store
     @State private var scene: RecommendationScene = .all
     @State private var state: LoadState<RecommendationSnapshot> = .idle
     var body: some View {
         VStack {
-            Picker("场景", selection: $scene) { ForEach(RecommendationScene.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented).padding(.horizontal)
+            Picker("场景", selection: $scene) { ForEach(RecommendationScene.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented).padding(.horizontal, AppSpacing.page)
             switch state {
             case .idle, .loading: LoadingView()
             case .failed(let message): FailureView(message: message) { Task { await load() } }
             case .loaded(let snapshot):
                 if snapshot.recommendations.isEmpty { EmptyStateView(title: "暂无推荐", message: snapshot.emptyMessage, icon: "sparkles") }
-                else { List(snapshot.recommendations) { item in NavigationLink { RecipeDetailView(recipeID: item.recipeId) } label: { VStack(alignment: .leading, spacing: 7) { Text(item.title).font(.headline); if let reason = item.reason { Text(reason).font(.subheadline).foregroundStyle(.secondary) }; HStack { Label("匹配 \(item.matchedInventoryItems.count)", systemImage: "checkmark.circle"); if !item.expiringInventoryItems.isEmpty { Label("优先消耗", systemImage: "clock").foregroundStyle(.orange) }; Spacer(); Text(item.score.formatted()) }.font(.caption) } } } }
+                else { List(snapshot.recommendations) { item in NavigationLink { RecipeDetailView(recipeID: item.recipeId) } label: { VStack(alignment: .leading, spacing: AppSpacing.small) { Text(item.title).font(.headline); if let reason = item.reason { Text(reason).font(.subheadline).foregroundStyle(.secondary) }; HStack { Label("匹配 \(item.matchedInventoryItems.count)", systemImage: "checkmark.circle"); if !item.expiringInventoryItems.isEmpty { Label("优先消耗", systemImage: "clock").foregroundStyle(theme.statusExpiring) }; Spacer(); Text(item.score.formatted()) }.font(.caption) } } } }
             }
         }.task(id: scene) { await load() }.refreshableWithCapabilities { await load() }
     }
@@ -101,7 +104,7 @@ struct RecipeDetailView: View {
             switch state {
             case .loaded(let recipe):
                 List {
-                    Section { VStack(alignment: .leading, spacing: 10) { Text(recipe.title).font(.largeTitle.bold()); if let description = recipe.description { Text(description).foregroundStyle(.secondary) }; HStack { if let value = recipe.difficulty { Label(DisplayText.difficulty(value), systemImage: "gauge") }; if let value = recipe.servings { Label(value, systemImage: "person.2") }; if let value = recipe.cookTimeMinutes { Label("\(value) 分钟", systemImage: "clock") } }.font(.subheadline) } }
+                    Section { VStack(alignment: .leading, spacing: AppSpacing.medium) { Text(recipe.title).font(.largeTitle.bold()); if let description = recipe.description { Text(description).foregroundStyle(.secondary) }; HStack { if let value = recipe.difficulty { Label(DisplayText.difficulty(value), systemImage: "gauge") }; if let value = recipe.servings { Label(value, systemImage: "person.2") }; if let value = recipe.cookTimeMinutes { Label("\(value) 分钟", systemImage: "clock") } }.font(.subheadline) } }
                     Section("食材") { ForEach(recipe.ingredients) { ingredient in HStack { Text(ingredient.ingredientName); if ingredient.isOptional { Text("可选").font(.caption).foregroundStyle(.secondary) }; Spacer(); Text([ingredient.quantity, ingredient.unit].compactMap { $0 }.joined()).foregroundStyle(.secondary) } } }
                     Section("步骤") { ForEach(recipe.steps.sorted { $0.stepNumber < $1.stepNumber }) { step in HStack(alignment: .top) { Text("\(step.stepNumber)").font(.headline).frame(width: 28, height: 28).background(.tint.opacity(0.15), in: Circle()); Text(step.instruction) } } }
                     Section("来源") { LabeledValue(label: "来源", value: recipe.sourceName); if let license = recipe.licenseName { LabeledValue(label: "许可", value: license) }; if let text = recipe.sourceUrl, let url = URL(string: text) { Link("查看原始来源", destination: url) } }
@@ -276,7 +279,7 @@ private struct CookSuggestionRow: View {
     @Binding var amount: String
     var body: some View {
         Toggle(isOn: $isSelected) {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: AppSpacing.xSmall) {
                 Text("\(item.ingredientName) → \(item.itemName)")
                 Text("库存 \(item.availableQuantity.formatted()) \(item.unit) · 菜谱 \(item.recipeQuantity ?? "未注明")")
                     .font(.caption).foregroundStyle(.secondary)

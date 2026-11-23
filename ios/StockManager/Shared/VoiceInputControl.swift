@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 
 struct VoiceInputControl: View {
+    @Environment(AppTheme.self) private var theme
     @Environment(\.openURL) private var openURL
     let voice: VoiceInputStore
     let isAvailable: Bool
@@ -10,15 +11,15 @@ struct VoiceInputControl: View {
 
     var body: some View {
         if voice.action.isRunning {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: AppSpacing.medium) {
                 if voice.recorder.isRecording {
                     HStack {
-                        Label("正在录音", systemImage: "mic.fill").foregroundStyle(.red)
+                        Label("正在录音", systemImage: "mic.fill").foregroundStyle(theme.statusExpired)
                         Spacer()
                         Text("剩余 \(voice.recorder.remainingSeconds) 秒").monospacedDigit()
                     }
                     ProgressView(value: voice.recorder.level)
-                        .tint(.red)
+                        .tint(theme.statusExpired)
                         .accessibilityLabel("麦克风音量")
                     Button("完成录音", action: voice.recorder.stop)
                         .accessibilityIdentifier("voice.finish")
@@ -36,9 +37,9 @@ struct VoiceInputControl: View {
         }
 
         if let message = voice.action.errorMessage {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: AppSpacing.small) {
                 Label(message, systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.red)
+                    .foregroundStyle(theme.statusExpired)
                 if voice.permissionDenied, let settings = URL(string: UIApplication.openSettingsURLString) {
                     Button("打开系统设置") { openURL(settings) }.buttonStyle(.borderless)
                 }

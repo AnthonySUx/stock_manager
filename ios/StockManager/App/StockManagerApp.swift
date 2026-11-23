@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct StockManagerApp: App {
     @State private var session = AppSession()
+    @State private var theme = AppTheme()
 
     init() {
         #if DEBUG
@@ -18,7 +19,11 @@ struct StockManagerApp: App {
     }
     var body: some Scene {
         WindowGroup {
-            RootView().environment(session).environment(session.capabilities)
+            RootView()
+                .environment(session)
+                .environment(session.capabilities)
+                .environment(theme)
+                .tint(theme.accent)
                 .task { await session.restoreAndValidate() }
         }
     }
