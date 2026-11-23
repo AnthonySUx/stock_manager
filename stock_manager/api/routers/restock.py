@@ -156,7 +156,7 @@ def done_restock(
     except RestockAlreadyDoneError:
         raise APIError(409, "restock_already_done", RESTOCK_ALREADY_DONE_DETAIL)
 
-    return {"message": f"Added {purchased_qty} {unit} to stock"}
+    return {"message": f"Added {float(purchased_qty)} {unit} to stock"}
 
 
 @router.delete("/{item_id}", response_model=schemas.MessageResponse)

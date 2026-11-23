@@ -7,6 +7,7 @@ from math import isfinite
 from typing import Optional
 
 from sqlalchemy import case, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from stock_manager.api.category_services import RECIPE_USAGE_NEVER
@@ -21,7 +22,12 @@ from stock_manager.api.models import (
     utcnow,
 )
 from stock_manager.api.recipe_schemas import RecipeCreate, RecipeDraft, RecipeUpdate
-from stock_manager.api.quantity import parse_quantity, same_unit
+from stock_manager.api.quantity import (
+    parse_quantity,
+    quantize_stock_quantity,
+    round_stock_quantity,
+    same_unit,
+)
 from stock_manager.api.services import _add_stock_to_restock, deduct_item_quantity
 from stock_manager.api.text_search import contains_ci
 
@@ -442,20 +448,27 @@ def fork_recipe(db: Session, recipe_id: int) -> Optional[Recipe]:
 # ─── Favorites ────────────────────────────────────────────────────
 
 
-def add_favorite(db: Session, recipe_id: int) -> bool:
-    """Add a recipe to favorites."""
-    recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
-    if recipe is None:
-        return False
-    existing = db.query(RecipeFavorite).filter(
-        RecipeFavorite.recipe_id == recipe_id
-    ).first()
-    if existing:
-        return True  # already favorited
-    db.add(RecipeFavorite(recipe_id=recipe_id))
+def add_favorite(db: Session, recipe_id: int) -> RecipeFavorite | None:
+    """Return the favorite, creating it and its history entry when needed."""
+    if db.get(Recipe, recipe_id) is None:
+        return None
+    favorites = db.query(RecipeFavorite).filter(RecipeFavorite.recipe_id == recipe_id)
+    existing = favorites.first()
+    if existing is not None:
+        return existing
+
+    favorite = RecipeFavorite(recipe_id=recipe_id)
+    db.add(favorite)
     db.add(RecipeUsageHistory(recipe_id=recipe_id, event_type="favorited"))
-    db.commit()
-    return True
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = favorites.first()
+        if existing is None:
+            raise
+        return existing
+    return favorite
 
 
 def remove_favorite(db: Session, recipe_id: int) -> bool:
@@ -723,9 +736,15 @@ def get_recommendations(
 
 def _restock_recipe_ingredient(db: Session, ingredient: RecipeIngredient) -> RestockItem:
     quantity, parsed_unit = parse_quantity(ingredient.quantity, ingredient.unit)
+    stock_quantity = None
+    if quantity is not None and isfinite(quantity) and quantity > 0:
+        try:
+            stock_quantity = quantize_stock_quantity(quantity) or None
+        except ValueError:
+            pass  # Keep the gap and let the user choose a quantity that fits in stock.
     entry = RestockItem(
         name=ingredient.ingredient_name,
-        quantity_value=quantity if quantity is not None and isfinite(quantity) and quantity > 0 else None,
+        quantity_value=stock_quantity,
         quantity_unit=ingredient.unit or parsed_unit,
         category_id=None,
         source_item_id=None,
@@ -831,11 +850,13 @@ def get_consume_preview(db: Session, recipe_id: int) -> Optional[dict]:
         allocations = []
         first = matches[0]
         needs_user_input = True
-        if number is not None and isfinite(number) and number > 0 and compatible:
-            remaining = Decimal(str(number))
+        remaining = round_stock_quantity(Decimal(str(number))) if (
+            number is not None and isfinite(number) and number > 0
+        ) else Decimal(0)
+        if remaining and compatible:
             first = compatible[0]
             for item in compatible:
-                quantity = min(remaining, Decimal(str(item.quantity_value)))
+                quantity = min(remaining, item.quantity_value)
                 allocations.append({"item_id": item.id, "quantity": float(quantity)})
                 del available[item.id]
                 remaining -= quantity
@@ -871,19 +892,19 @@ def get_consume_preview(db: Session, recipe_id: int) -> Optional[dict]:
 
 def _cook_line(db: Session, entry: dict, *, add_depleted_to_restock: bool) -> tuple[dict, dict | None]:
     item_id = entry["item_id"]
-    quantity = entry["quantity"]
+    quantity = quantize_stock_quantity(entry["quantity"])
     item, deducted = deduct_item_quantity(db, item_id, quantity, recipe_only=True)
     line = {"item_id": item_id, "ingredient_name": entry.get("ingredient_name", "")}
     if deducted:
         if add_depleted_to_restock and item.quantity_value == 0:
             _add_stock_to_restock(db, item, quantity, source_item_id=item.id)
         return (
-            {**line, "result": "consumed", "consumed_quantity": quantity},
+            {**line, "result": "consumed", "consumed_quantity": float(quantity)},
             {
                 "item_id": item_id,
                 "item_name": item.name,
-                "consumed_quantity": quantity,
-                "remaining_quantity": item.quantity_value,
+                "consumed_quantity": float(quantity),
+                "remaining_quantity": float(item.quantity_value),
                 "status": item.status,
             },
         )
@@ -893,8 +914,8 @@ def _cook_line(db: Session, entry: dict, *, add_depleted_to_restock: bool) -> tu
         return {**line, "result": "skipped", "reason": "not_recipe_usable"}, None
 
     return {
-        **line, "result": "insufficient", "requested": quantity,
-        "available": item.quantity_value,
+        **line, "result": "insufficient", "requested": float(quantity),
+        "available": float(item.quantity_value),
     }, None
 
 

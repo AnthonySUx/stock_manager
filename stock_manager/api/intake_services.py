@@ -106,7 +106,8 @@ def prepare_parse(db: Session, request: ParseDraftRequest, accept_language: str 
         },
         restock={
             item.id: {
-                "id": item.id, "name": item.name, "quantity_value": item.quantity_value,
+                "id": item.id, "name": item.name,
+                "quantity_value": float(item.quantity_value) if item.quantity_value is not None else None,
                 "quantity_unit": item.quantity_unit,
             }
             for item in get_restock_items(db, status="pending")

@@ -7,9 +7,10 @@ from sqlalchemy import (
     Column,
     Boolean,
     DateTime,
-    Float,
     ForeignKey,
+    Index,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -103,6 +104,7 @@ class Item(Base):
             "HEX(status) IN (HEX('active'), HEX('expiring soon'), HEX('expired'), HEX('consumed'))",
             name="ck_items_status",
         ),
+        Index("ix_items_status", "status"),
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -110,7 +112,7 @@ class Item(Base):
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=False)
     owner = Column(String(100), nullable=False)
     purchase_date = Column(String(10), nullable=False)
-    quantity_value = Column(Float, nullable=False)
+    quantity_value = Column(Numeric(12, 3), nullable=False)
     quantity_unit = Column(String(50), nullable=False)
     location = Column(String(100), nullable=False)
     unopened_expiration_date = Column(String(10), nullable=False)
@@ -144,12 +146,13 @@ class RestockItem(Base):
     __tablename__ = "restock_items"
     __table_args__ = (
         CheckConstraint("HEX(status) IN (HEX('pending'), HEX('done'))", name="ck_restock_items_status"),
+        Index("ix_restock_items_status", "status"),
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(255), nullable=False)
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
-    quantity_value = Column(Float, nullable=True)
+    quantity_value = Column(Numeric(12, 3), nullable=True)
     quantity_unit = Column(String(50), nullable=True)
     source_item_id = Column(Integer, ForeignKey("items.id"), nullable=True)
     status = Column(
@@ -165,6 +168,9 @@ class RestockItem(Base):
         server_default=func.now(),
     )
     done_at = Column(DateTime, nullable=True)
+    updated_at = Column(
+        DateTime, nullable=False, default=utcnow, server_default=func.now(), onupdate=utcnow,
+    )
 
     # Relationships
     category = relationship("Category")
@@ -191,6 +197,7 @@ class Setting(Base):
 class Recipe(Base):
     """Recipe from HowToCook, user-created, or saved AI recommendations."""
     __tablename__ = "recipes"
+    __table_args__ = (Index("ix_recipes_source_type", "source_type"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     source_type = Column(String(20), nullable=False, default="howtocook")
@@ -247,6 +254,7 @@ class RecipeStep(Base):
 class RecipeFavorite(Base):
     """User's favorite recipes."""
     __tablename__ = "recipe_favorites"
+    __table_args__ = (UniqueConstraint("recipe_id", name="uq_recipe_favorites_recipe_id"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     recipe_id = Column(Integer, ForeignKey("recipes.id"), nullable=False)

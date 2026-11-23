@@ -1,7 +1,7 @@
 """Business logic layer for the Stock Manager API."""
 
 from datetime import date, timedelta
-from math import isfinite
+from decimal import Decimal
 from typing import Optional
 
 from sqlalchemy import case, func
@@ -11,13 +11,14 @@ from stock_manager.api.category_services import RECIPE_USAGE_NEVER
 from stock_manager.api.errors import APIError
 from stock_manager.api.localization import today as household_today
 from stock_manager.api.models import Category, Item, RestockItem, Setting, utcnow
+from stock_manager.api.quantity import quantize_stock_quantity
 
 
 # ─── Status Calculation ──────────────────────────────────────────
 
 
 def _calculate_status(
-    quantity_value: float,
+    quantity_value: Decimal | float,
     current_expiration_date: str,
     warning_days: int,
     today: date,
@@ -87,7 +88,7 @@ def ensure_fresh_statuses(db: Session) -> None:
 
 
 def calculate_item_status(
-    quantity_value: float,
+    quantity_value: Decimal | float,
     current_expiration_date: str,
     db: Session,
 ) -> str:
@@ -234,9 +235,16 @@ def prepare_item_data(db: Session, data: dict) -> dict:
     return item_data
 
 
+def _with_stock_quantity(data: dict) -> dict:
+    quantity = data.get("quantity_value")
+    if quantity is None:
+        return data
+    return {**data, "quantity_value": quantize_stock_quantity(quantity)}
+
+
 def create_item(db: Session, item_data: dict, *, commit: bool = True) -> Item:
     """Create a stock item, leaving the transaction open when requested."""
-    item = Item(**item_data)
+    item = Item(**_with_stock_quantity(item_data))
     db.add(item)
     if commit:
         db.commit()
@@ -252,7 +260,7 @@ def update_item(db: Session, item_id: int, item_data: dict) -> Optional[Item]:
     if item is None:
         return None
 
-    for key, value in item_data.items():
+    for key, value in _with_stock_quantity(item_data).items():
         setattr(item, key, value)
 
     db.commit()
@@ -261,10 +269,11 @@ def update_item(db: Session, item_id: int, item_data: dict) -> Optional[Item]:
 
 
 def deduct_item_quantity(
-    db: Session, item_id: int, quantity: float, *, recipe_only: bool = False,
+    db: Session, item_id: int, quantity: Decimal | float, *, recipe_only: bool = False,
 ) -> tuple[Item | None, bool]:
     """Attempt a guarded deduction and read the current row in the caller's transaction."""
-    if not isfinite(quantity) or quantity <= 0:
+    quantity = quantize_stock_quantity(quantity)
+    if quantity <= 0:
         raise ValueError("Consumption quantity must be positive and finite")
 
     stock = db.query(Item).filter(
@@ -274,8 +283,10 @@ def deduct_item_quantity(
     )
     if recipe_only:
         stock = stock.filter(Item.category.has(Category.recipe_usage != RECIPE_USAGE_NEVER))
+    # SQLite evaluates Numeric arithmetic as floats. Keep stored results at scale.
     deducted = stock.update(
-        {Item.quantity_value: Item.quantity_value - quantity}, synchronize_session=False,
+        {Item.quantity_value: func.round(Item.quantity_value - quantity, 3)},
+        synchronize_session=False,
     ) == 1
 
     # Read the current row even if the session already held a stale snapshot.
@@ -286,13 +297,13 @@ def deduct_item_quantity(
 
 
 def _add_stock_to_restock(
-    db: Session, item: Item, quantity: float, *, source_item_id: int | None,
+    db: Session, item: Item, quantity: Decimal | float, *, source_item_id: int | None,
 ) -> RestockItem:
     """Queue a restock row for the caller to commit."""
     restock = RestockItem(
         name=item.name,
         category_id=item.category_id,
-        quantity_value=quantity,
+        quantity_value=quantize_stock_quantity(quantity),
         quantity_unit=item.quantity_unit,
         source_item_id=source_item_id,
         status="pending",
@@ -305,7 +316,7 @@ def _add_stock_to_restock(
 def consume_item(
     db: Session,
     item_id: int,
-    quantity: float,
+    quantity: Decimal | float,
     add_to_restock: bool = False,
 ) -> Optional[dict]:
     """Deduct stock and optionally queue the consumed amount for restock."""
@@ -319,7 +330,7 @@ def consume_item(
                 raise APIError(409, "item_already_consumed", "Item is already consumed")
             raise APIError(
                 422, "consume_exceeds_stock", "Consumption quantity exceeds available stock",
-                available=item.quantity_value,
+                available=float(item.quantity_value),
             )
 
         restock = (
@@ -408,7 +419,7 @@ def get_restock_item(db: Session, item_id: int) -> Optional[RestockItem]:
 
 def create_restock_item(db: Session, item_data: dict) -> RestockItem:
     """Create a new restock item."""
-    item = RestockItem(**item_data)
+    item = RestockItem(**_with_stock_quantity(item_data))
     db.add(item)
     db.commit()
     db.refresh(item)
@@ -423,7 +434,7 @@ def update_restock_item(
     if item is None:
         return None
 
-    for key, value in item_data.items():
+    for key, value in _with_stock_quantity(item_data).items():
         setattr(item, key, value)
 
     # Handle done_at
@@ -449,7 +460,7 @@ def mark_restock_item_done(db: Session, item_id: int) -> bool:
     return True
 
 
-def update_restock_item_quantity(db: Session, item_id: int, quantity: float) -> bool:
+def update_restock_item_quantity(db: Session, item_id: int, quantity: Decimal | float) -> bool:
     """Update the remaining quantity for a pending restock item."""
     item = db.query(RestockItem).filter(
         RestockItem.id == item_id,
@@ -458,7 +469,7 @@ def update_restock_item_quantity(db: Session, item_id: int, quantity: float) -> 
     if item is None:
         return False
 
-    item.quantity_value = quantity
+    item.quantity_value = quantize_stock_quantity(quantity)
     db.commit()
     return True
 
@@ -470,7 +481,7 @@ class RestockAlreadyDoneError(Exception):
 def apply_restock_purchase(
     db: Session,
     restock_item: RestockItem,
-    purchased_quantity: float,
+    purchased_quantity: Decimal | float,
     stock_data: dict,
 ) -> Item:
     """Add a purchase to stock and update restock in the caller's transaction.
@@ -482,6 +493,7 @@ def apply_restock_purchase(
     Raises:
         RestockAlreadyDoneError: the item is done, or changed since it was read.
     """
+    purchased_quantity = quantize_stock_quantity(purchased_quantity)
     observed_qty = restock_item.quantity_value
     original_qty = observed_qty or purchased_quantity
     remaining = original_qty - purchased_quantity
@@ -512,7 +524,7 @@ def apply_restock_purchase(
 def complete_restock_purchase(
     db: Session,
     restock_item: RestockItem,
-    purchased_quantity: float,
+    purchased_quantity: Decimal | float,
     stock_data: dict,
 ) -> Item:
     """Commit a standalone restock purchase or roll back both writes."""

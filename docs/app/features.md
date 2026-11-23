@@ -54,6 +54,10 @@ On `POST /api/items` and `PATCH /api/items/{id}`, the backend trims `name`, `own
 and `location`. Blank values return `422`. Stock write quantities, including
 `quantity_value` and `POST /api/items/{id}/consume`'s `quantity`, must be positive
 and finite. NaN and Infinity return `422`.
+Stored quantities use up to nine integer digits and three fractional digits. Write
+amounts round to the nearest thousandth, with midpoint values rounded up. Values
+that round to zero or exceed the storage range return `422`. Response quantities
+remain JSON numbers.
 
 Validation (returns `422`):
 
