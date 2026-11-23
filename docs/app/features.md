@@ -45,7 +45,8 @@ Displays current stock with:
 ### Edit
 
 Edit one or more fields: name, category, owner, purchase date, quantity, location, expiration dates, notes.
-Current expiration date and status are calculated automatically.
+Current expiration date and status are calculated automatically. A supplied
+`current_expiration_date` is accepted as a legacy input and automatically replaced.
 
 On `POST /api/items` and `PATCH /api/items/{id}`, the backend trims `name`, `owner`
 and `location`. Blank values return `422`. Stock write quantities, including
@@ -56,11 +57,16 @@ Validation (returns `422`):
 
 - Including a `status` key in `PATCH /api/items/{id}` returns `item_status_readonly`,
   including when the value is `null`.
-
 - Dates must be real calendar dates in `YYYY-MM-DD` form (`2026-02-30` is rejected).
   Expiration dates may also be `infinite`; `purchase_date` and `opened_date` may not.
+- An unopened expiration date before the purchase date returns `expiration_before_purchase`.
+  The check applies when create or restock completion supplies a purchase date, or when an
+  item edit supplies either the purchase date or unopened expiration date. If create or
+  restock completion defaults the purchase date to today, an already expired item is accepted.
+- An opened expiration date before the opening date returns `opened_expiration_before_opened`.
 - On edit, leave a field out to keep it. Sending `null` is only allowed for
-  `opened_date`, `opened_expiration_date` and `notes`.
+  `opened_date`, `opened_expiration_date` and `notes`. Setting `opened_date` to
+  `null` also clears `opened_expiration_date`.
 
 ### Consume and Delete
 
@@ -129,6 +135,13 @@ On `PATCH /api/restock/{id}`, send `null` to clear `notes`, `category_id`,
 Responses use `pending` and `done`. Use `/done` to complete a purchase.
 Any `status` key in a PATCH request returns `422 restock_status_readonly`.
 
+On `POST /api/restock/{id}/done`, the backend resolves `owner` and `location`
+independently. It trims the request value and uses it if nonempty. Otherwise it
+uses the corresponding value from the source stock item, if available. If
+neither provides a value, the request returns `422 restock_item_invalid` with
+`params.field` set to the missing field. The backend derives the stock item's
+effective expiration date and status using the same rules as item creation.
+
 ---
 
 ## Expiration Reminder
@@ -140,10 +153,11 @@ Items are shown as `expiring soon` when within a configurable number of days (de
 - Items with `infinite` expiration are excluded
 - Consumed and deleted items are excluded
 
-Statuses depend on today's date, so they are recalculated once per request when items are
-listed, searched, cleaned up or reminders are read. The database is written only if a status
-actually changed. `GET /api/items/reminders` returns `expiring soon` items first, then
-`expired` items, each in id order.
+The backend refreshes stored statuses before listing, searching, or cleaning up stock,
+reading reminders, recommending recipes, previewing consumption, and loading Explore
+inventory. Changing the reminder window or household timezone also refreshes statuses.
+The refresh updates only rows whose status has changed. `GET /api/items/reminders` returns
+`expiring soon` items first, then `expired` items, each in id order.
 
 ---
 

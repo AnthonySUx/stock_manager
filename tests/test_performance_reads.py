@@ -17,7 +17,7 @@ from stock_manager.api.models import (
 from stock_manager.api.recipe_services import get_recipes
 from stock_manager.api.text_search import contains_ci
 from tests.conftest import test_engine
-from tests.helpers import make_item_create_payload
+from tests.helpers import make_item_create_payload, make_item_model_data
 
 
 @contextmanager
@@ -40,11 +40,14 @@ def _selects_from(statements, table):
 
 
 def _item(client, db_session, name, expires_in_days, quantity=2):
-    when = (date.today() + timedelta(days=expires_in_days)).isoformat()
+    today = date.today()
+    expiration = today + timedelta(days=expires_in_days)
+    when = expiration.isoformat()
     payload = make_item_create_payload(
         name=name,
         category_id=get_category_by_slug(db_session, "vegetables").id,
         quantity_value=quantity,
+        purchase_date=min(today, expiration).isoformat(),
         unopened_expiration_date=when,
         current_expiration_date=when,
     )
@@ -72,15 +75,17 @@ class TestReminders:
         # Expiring soon first, then expired; each in id order (same as before #48).
         assert [i["id"] for i in response.json()] == [soon_a, soon_b, expired_a, expired_b]
 
-    def test_one_refresh_and_one_query(self, client, db_session):
+    def test_reminders_refresh_in_bulk_and_select_once(self, client, db_session):
         _item(client, db_session, "临期", 1)
         _item(client, db_session, "过期", -1)
 
         with count_sql() as statements:
             assert client.get("/api/items/reminders").status_code == 200
 
-        # One full-table read for the refresh, one for the reminder list.
-        assert len(_selects_from(statements, "items")) == 2
+        item_selects = _selects_from(statements, "items")
+        assert len(item_selects) == 1
+        assert "where items.status in" in item_selects[0]
+        assert 1 <= sum(s.startswith("update items ") for s in statements) <= 4
 
     def test_reminders_see_status_that_went_stale(self, client, db_session):
         item_id = _item(client, db_session, "牛奶", 30)
@@ -119,6 +124,31 @@ class TestRefreshWritesOnlyWhenNeeded:
 
         assert [i["status"] for i in listed] == ["expiring soon"]
         assert commits == [1]
+
+
+def test_item_list_query_count_does_not_grow_with_item_count(client, db_session):
+    category_ids = [get_category_by_slug(db_session, slug).id for slug in ("vegetables", "dairy")]
+    counts = []
+    for added, total in ((2, 2), (20, 22)):
+        db_session.add_all(
+            Item(**make_item_model_data(
+                category_id=category_ids[index % len(category_ids)],
+                current_expiration_date="infinite",
+                status="expired",
+            ))
+            for index in range(added)
+        )
+        db_session.commit()
+
+        with count_sql() as statements:
+            response = client.get("/api/items?status=active")
+
+        assert response.status_code == 200
+        assert len(response.json()) == total
+        assert len(_selects_from(statements, "items")) == 1
+        counts.append(len(statements))
+
+    assert counts[0] == counts[1]
 
 
 # ─── Recipes list: same order as the old in-memory version ────────

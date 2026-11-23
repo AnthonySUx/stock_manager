@@ -8,12 +8,11 @@ from sqlalchemy.orm import Session
 from stock_manager.api import schemas
 from stock_manager.api.db import get_session
 from stock_manager.api.services import (
-    calculate_current_expiration_date,
-    calculate_item_status,
     consume_item,
     create_item,
     delete_item,
     delete_items_by_statuses,
+    derive_item_dates_and_status,
     get_item,
     get_items,
     get_reminder_items,
@@ -121,30 +120,22 @@ def update_item_endpoint(
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
-    # Recalculate current_expiration_date if relevant fields changed
-    if any(k in item_data for k in ("opened_date", "opened_expiration_date", "unopened_expiration_date")):
-        existing = get_item(db, item_id)
-        if existing:
-            merged = {
-                "opened_date": item_data.get("opened_date", existing.opened_date),
-                "opened_expiration_date": item_data.get(
-                    "opened_expiration_date", existing.opened_expiration_date
-                ),
-                "unopened_expiration_date": item_data.get(
-                    "unopened_expiration_date", existing.unopened_expiration_date
-                ),
-            }
-            item_data["current_expiration_date"] = calculate_current_expiration_date(merged)
+    existing = get_item(db, item_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Item not found")
 
-    # Refresh status from quantity or expiration changes
-    if "quantity_value" in item_data or "current_expiration_date" in item_data:
-        existing = get_item(db, item_id)
-        if existing:
-            qty = item_data.get("quantity_value", existing.quantity_value)
-            exp = item_data.get(
-                "current_expiration_date", existing.current_expiration_date
-            )
-            item_data["status"] = calculate_item_status(qty, exp, db)
+    if "opened_date" in item_data and item_data["opened_date"] is None:
+        item_data["opened_expiration_date"] = None
+
+    fields = (
+        "purchase_date", "unopened_expiration_date", "opened_date",
+        "opened_expiration_date", "quantity_value",
+    )
+    merged = {field: item_data.get(field, getattr(existing, field)) for field in fields}
+    item_data.update(derive_item_dates_and_status(
+        merged, db,
+        validate_purchase_date=bool({"purchase_date", "unopened_expiration_date"} & item_data.keys()),
+    ))
 
     result = update_item(db, item_id, item_data)
     if result is None:

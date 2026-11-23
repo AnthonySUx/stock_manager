@@ -38,9 +38,8 @@ Users can favorite/unfavorite recipes. Favorites are prioritized in search resul
 
 `GET /api/recipes/recommendations?scene=<scene>&limit=<n>`
 
-Generates a daily list of recipes to cook based on current inventory. The call is
-**read-only**: refreshing the page gives the same list until inventory, favorites or
-cooking history change.
+Generates a daily list of recipes to cook based on current inventory. The backend refreshes
+inventory statuses before scoring recipes using inventory, favorites, and cooking history.
 
 ### Scenes (`scene`, default `all`)
 
