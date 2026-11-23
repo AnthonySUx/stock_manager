@@ -380,6 +380,9 @@ def query_recipe_candidate_items(
     Never includes 'never' items.
     """
     from stock_manager.api.models import Item
+    from stock_manager.api.services import ensure_fresh_statuses
+
+    ensure_fresh_statuses(db)
     usages = list(RECIPE_ALLOWED_USAGES) if include_conditional else [RECIPE_USAGE_ALWAYS]
     return (
         db.query(Item)

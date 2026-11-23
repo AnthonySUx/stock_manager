@@ -132,8 +132,7 @@ def rule_recommendations(
     ),
     db: Session = Depends(get_session),
 ):
-    """Today Recommendations (local scoring). Read-only: refreshing does not
-    change scores; recipes cooked in the last 7 days are down-weighted."""
+    """Refresh inventory status and score recipes using recent cooking history."""
     results = get_recommendations(db, limit=limit, scene=scene)
     return RecipeRecommendationResponse(source_notice=HOWTOCOOK_SOURCE.notice,
         recommendations=[RecipeRecommendation(**r) for r in results])

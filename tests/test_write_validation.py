@@ -48,7 +48,9 @@ def test_restock_patch_rejects_status_without_writing(
     )
     url = f"/api/restock/{original['id']}"
     if already_done:
-        response = client.post(f"{url}/done", json={"purchased_quantity": 12})
+        response = client.post(f"{url}/done", json={
+            "purchased_quantity": 12, "owner": "Alex", "location": "Pantry",
+        })
         assert response.status_code == 200, response.text
         original = client.get(url).json()
         assert original["status"] == "done"

@@ -559,8 +559,8 @@ def get_recommendations(
 ) -> list[dict]:
     """Generate rule-based recipe recommendations from inventory.
 
-    Read-only: calling it does not change any data, so the same inventory
-    and history always give the same list (#46).
+    Refresh stored inventory statuses before scoring with the current
+    inventory and cooking history.
 
     Scoring:
     - Matched ingredient: +10 (conditional category: +6)
@@ -716,7 +716,7 @@ def _name_keys(name: Optional[str]) -> set[str]:
 
 def get_consume_preview(db: Session, recipe_id: int) -> Optional[dict]:
     """Preview which inventory items would be consumed for a recipe.
-    Returns suggestions without modifying any data.
+    Refreshes stored statuses without consuming inventory.
     """
     recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
     if recipe is None:

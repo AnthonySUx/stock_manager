@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from stock_manager.api import schemas
 from stock_manager.api.db import get_session
-from stock_manager.api.localization import today as household_today
+from stock_manager.api.errors import APIError
 from stock_manager.api.services import (
     RestockAlreadyDoneError,
     complete_restock_purchase,
@@ -17,6 +17,7 @@ from stock_manager.api.services import (
     get_item,
     get_restock_item,
     get_restock_items,
+    prepare_item_data,
     update_restock_item,
 )
 
@@ -127,21 +128,27 @@ def done_restock(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    stock_data = {
+    source = get_item(db, item.source_item_id) if item.source_item_id is not None else None
+    stock_context = {}
+    for field in ("owner", "location"):
+        requested = (getattr(payload, field) or "").strip()
+        fallback = (getattr(source, field, "") or "").strip()
+        stock_context[field] = requested or fallback
+        if not stock_context[field]:
+            raise APIError(422, "restock_item_invalid", "Invalid restock item", field=field)
+
+    stock_data = prepare_item_data(db, {
         "name": item.name,
         "category_id": final_category_id,
-        "owner": payload.owner or "",
-        "purchase_date": payload.purchase_date or household_today(db).isoformat(),
+        **stock_context,
+        "purchase_date": payload.purchase_date,
         "quantity_value": purchased_qty,
         "quantity_unit": item.quantity_unit or "pcs",
-        "location": payload.location or "",
         "unopened_expiration_date": payload.unopened_expiration_date or "infinite",
         "opened_expiration_date": payload.opened_expiration_date,
         "opened_date": payload.opened_date,
-        "current_expiration_date": payload.unopened_expiration_date or "infinite",
-        "status": "active",
         "notes": item.notes,
-    }
+    })
     unit = item.quantity_unit or "pcs"
 
     try:

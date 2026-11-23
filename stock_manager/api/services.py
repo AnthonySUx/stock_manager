@@ -6,6 +6,7 @@ from typing import Optional
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
+from stock_manager.api.errors import APIError
 from stock_manager.api.localization import today as household_today
 from stock_manager.api.models import Item, RestockItem, Setting, utcnow
 
@@ -51,31 +52,36 @@ def _get_expiration_warning_days(db: Session) -> int:
         return 2
 
 
-def refresh_item_statuses(db: Session) -> int:
-    """Refresh all item statuses and return the number of changed rows.
-
-    Commits only when a status actually changed, so a plain read does not
-    write to the database (#48).
-    """
+def refresh_item_statuses(db: Session, *, commit: bool = True) -> int:
+    """Refresh stale statuses in bulk and return the number of changed rows."""
     today = household_today(db)
     warning_days = _get_expiration_warning_days(db)
+    first_day = today.isoformat()
+    last_day = (today + timedelta(days=warning_days)).isoformat()
+    expiration = Item.current_expiration_date
+    has_expiration = expiration != "infinite"
+    in_stock = Item.quantity_value > 0
+    conditions = (
+        ("consumed", Item.quantity_value <= 0),
+        ("expired", in_stock & has_expiration & (expiration < first_day)),
+        ("expiring soon", in_stock & has_expiration & expiration.between(first_day, last_day)),
+        ("active", in_stock & ((expiration > last_day) | ~has_expiration)),
+    )
+
     changed = 0
-
-    items = db.query(Item).all()
-    for item in items:
-        new_status = _calculate_status(
-            item.quantity_value,
-            item.current_expiration_date,
-            warning_days,
-            today,
+    for status, condition in conditions:
+        changed += db.query(Item).filter(condition, Item.status != status).update(
+            {Item.status: status}, synchronize_session=False,
         )
-        if new_status != item.status:
-            item.status = new_status
-            changed += 1
 
-    if changed:
+    if changed and commit:
         db.commit()
     return changed
+
+
+def ensure_fresh_statuses(db: Session) -> None:
+    """Refresh stored statuses before querying by status."""
+    refresh_item_statuses(db)
 
 
 def calculate_item_status(
@@ -105,7 +111,7 @@ def get_items(
     status: Optional[str] = None,
 ) -> list[Item]:
     """Return stock items that match the optional filters."""
-    refresh_item_statuses(db)
+    ensure_fresh_statuses(db)
 
     query = db.query(Item)
     if category is not None:
@@ -126,7 +132,7 @@ REMINDER_STATUSES = ("expiring soon", "expired")
 
 def get_reminder_items(db: Session) -> list[Item]:
     """Items that are expiring soon or expired: one refresh, one query (#48)."""
-    refresh_item_statuses(db)
+    ensure_fresh_statuses(db)
     return (
         db.query(Item)
         .filter(Item.status.in_(REMINDER_STATUSES))
@@ -145,7 +151,7 @@ def search_items(
     status: Optional[str] = None,
 ) -> list[Item]:
     """Return stock items matching a keyword and optional filters."""
-    refresh_item_statuses(db)
+    ensure_fresh_statuses(db)
 
     from stock_manager.api.models import Category
     from stock_manager.api.text_search import contains_ci
@@ -187,17 +193,42 @@ def calculate_current_expiration_date(item_data: dict) -> str:
     return unopened_expiration
 
 
+def derive_item_dates_and_status(
+    data: dict, db: Session, *, validate_purchase_date: bool = True,
+) -> dict:
+    """Validate the input dates and compute the effective date and stock status."""
+    purchase_date = data.get("purchase_date")
+    unopened_expiration = data.get("unopened_expiration_date", "infinite")
+    if (
+        validate_purchase_date and purchase_date and unopened_expiration != "infinite"
+        and unopened_expiration < purchase_date
+    ):
+        raise APIError(
+            422, "expiration_before_purchase", "Unopened expiration date precedes purchase date"
+        )
+
+    opened_date = data.get("opened_date")
+    opened_expiration = data.get("opened_expiration_date")
+    if (
+        opened_date and opened_expiration and opened_expiration != "infinite"
+        and opened_expiration < opened_date
+    ):
+        raise APIError(
+            422, "opened_expiration_before_opened", "Opened expiration date precedes opening date"
+        )
+
+    expiration = calculate_current_expiration_date(data)
+    return {
+        "current_expiration_date": expiration,
+        "status": calculate_item_status(data["quantity_value"], expiration, db),
+    }
+
+
 def prepare_item_data(db: Session, data: dict) -> dict:
-    """Fill the purchase date and derive expiration and status before insertion."""
-    item_data = data.copy()
+    """Derive expiration and status, then fill in a missing purchase date."""
+    item_data = {**data, **derive_item_dates_and_status(data, db)}
     if item_data.get("purchase_date") is None:
         item_data["purchase_date"] = household_today(db).isoformat()
-    item_data["current_expiration_date"] = calculate_current_expiration_date(item_data)
-    item_data["status"] = calculate_item_status(
-        item_data["quantity_value"],
-        item_data["current_expiration_date"],
-        db,
-    )
     return item_data
 
 
@@ -294,7 +325,7 @@ def delete_items_by_statuses(db: Session, statuses: list[str]) -> int:
     if not statuses:
         return 0
 
-    refresh_item_statuses(db)
+    ensure_fresh_statuses(db)
 
     items = db.query(Item).filter(Item.status.in_(statuses)).all()
     item_ids = [item.id for item in items]
@@ -514,5 +545,8 @@ def update_settings(db: Session, settings: dict[str, str]) -> dict[str, str]:
         else:
             db.add(Setting(key=key, value=str(value), updated_at=now))
 
+    if {"expiration_reminder_days", "default_timezone"} & settings.keys():
+        db.flush()
+        refresh_item_statuses(db, commit=False)
     db.commit()
     return get_settings(db)
