@@ -290,7 +290,7 @@ def create_recipe(db: Session, data: RecipeCreate, source_type: str = "user") ->
         servings=data.servings,
         cook_time_minutes=data.cook_time_minutes,
         raw_markdown=data.raw_markdown,
-        is_user_created=(source_type == "user"),
+        is_user_created=source_type in ("user", "ai_saved"),
     )
     db.add(recipe)
     db.flush()

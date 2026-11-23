@@ -5,6 +5,8 @@ from hashlib import sha256
 
 import pytest
 
+from stock_manager.api.models import Recipe
+
 
 @pytest.fixture
 def expanded_draft(client, fake_ai):
@@ -37,11 +39,33 @@ def test_expand_hashes_canonical_content_and_unchanged_save_is_ai_saved(client, 
     recipe = _save(client, expanded_draft)
 
     assert (recipe["source_type"], recipe["source_name"], recipe["is_user_created"]) == (
-        "ai_saved", "AI", False,
+        "ai_saved", "AI", True,
     )
     listing = client.get("/api/recipes", params={"source_type": "ai_saved"})
     assert listing.status_code == 200
     assert [result["id"] for result in listing.json()] == [recipe["id"]]
+
+
+def test_unfiltered_list_ranks_ai_saved_and_user_recipes_before_howtocook(
+    client, db_session, expanded_draft,
+):
+    imported = Recipe(
+        title="Imported soup", category="soup", source_type="howtocook", source_name="HowToCook",
+    )
+    db_session.add(imported)
+    db_session.commit()
+    imported_id = imported.id
+    ai_saved = _save(client, expanded_draft)
+    user = _save(client, expanded_draft, title="My soup")
+
+    response = client.get("/api/recipes")
+
+    assert response.status_code == 200, response.text
+    assert [(recipe["id"], recipe["source_type"]) for recipe in response.json()] == [
+        (ai_saved["id"], "ai_saved"),
+        (user["id"], "user"),
+        (imported_id, "howtocook"),
+    ]
 
 
 @pytest.mark.parametrize(("field", "value"), [

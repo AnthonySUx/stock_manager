@@ -28,6 +28,11 @@ Recipes come from:
 - **User-created** (created via the API or frontend)
 - **AI-saved** (saved from Explore Recipes drafts)
 
+`is_user_created` indicates that a recipe belongs to the household and can be
+edited or deleted. It is true for both `user` and `ai_saved` recipes.
+Use `source_type` to distinguish their origins. Both sources receive the same
+household-recipe priority in lists and search.
+
 ### Favorites
 
 Users can favorite/unfavorite recipes. Favorites are prioritized in search results and recommendations.
