@@ -70,8 +70,19 @@ Validation (returns `422`):
 
 ### Consume and Delete
 
-- **Consume**: Partial or full consumption. Status set to `consumed` when quantity reaches zero. Optionally add to restock list.
-- **Delete**: Remove stock items. Optionally add to restock list.
+- **Consume** with `POST /api/items/{id}/consume`. Each request deducts the full
+  requested quantity or returns an error. A request above the available stock
+  returns `422 consume_exceeds_stock` with `params.available`. An already
+  consumed item returns `409 item_already_consumed`. Stock and restock quantities
+  stay unchanged on either error.
+- Set `add_to_restock: true` in the consume body to queue the amount deducted
+  for either a partial or full consume. The operation saves the stock change
+  and restock entry together. The response retains the stock fields at the top
+  level and includes `restock_item` with the created entry or `null`.
+- **Delete** with `DELETE /api/items/{id}`. Add `?add_to_restock=true` to queue
+  a pending entry for the stock item's remaining quantity when it is above
+  zero. The entry has `source_item_id: null`, and the delete and restock insert
+  commit together.
 
 ---
 

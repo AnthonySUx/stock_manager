@@ -343,7 +343,9 @@ def consume_preview_endpoint(
     return result
 
 
-@router.post("/{recipe_id}/cook", response_model=CookRecipeResponse)
+@router.post(
+    "/{recipe_id}/cook", response_model=CookRecipeResponse, response_model_exclude_unset=True,
+)
 def cook_recipe_endpoint(
     recipe_id: int,
     data: CookRecipeRequest,
@@ -362,7 +364,8 @@ def cook_recipe_endpoint(
         message="Recipe marked as cooked" + (" and inventory consumed" if consume_dicts else ""),
         recipe_id=result["recipe_id"],
         title=result["title"],
-        consumed_items=result.get("consumed_items", []),
+        consumed_items=result["consumed_items"],
+        lines=result["lines"],
         notes=result.get("notes"),
     )
 

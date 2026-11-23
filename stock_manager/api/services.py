@@ -1,14 +1,16 @@
 """Business logic layer for the Stock Manager API."""
 
 from datetime import date, timedelta
+from math import isfinite
 from typing import Optional
 
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
+from stock_manager.api.category_services import RECIPE_USAGE_NEVER
 from stock_manager.api.errors import APIError
 from stock_manager.api.localization import today as household_today
-from stock_manager.api.models import Item, RestockItem, Setting, utcnow
+from stock_manager.api.models import Category, Item, RestockItem, Setting, utcnow
 
 
 # ─── Status Calculation ──────────────────────────────────────────
@@ -258,65 +260,101 @@ def update_item(db: Session, item_id: int, item_data: dict) -> Optional[Item]:
     return item
 
 
+def deduct_item_quantity(
+    db: Session, item_id: int, quantity: float, *, recipe_only: bool = False,
+) -> tuple[Item | None, bool]:
+    """Attempt a guarded deduction and read the current row in the caller's transaction."""
+    if not isfinite(quantity) or quantity <= 0:
+        raise ValueError("Consumption quantity must be positive and finite")
+
+    stock = db.query(Item).filter(
+        Item.id == item_id,
+        Item.quantity_value >= quantity,
+        Item.status != "consumed",
+    )
+    if recipe_only:
+        stock = stock.filter(Item.category.has(Category.recipe_usage != RECIPE_USAGE_NEVER))
+    deducted = stock.update(
+        {Item.quantity_value: Item.quantity_value - quantity}, synchronize_session=False,
+    ) == 1
+
+    # Read the current row even if the session already held a stale snapshot.
+    item = db.query(Item).filter(Item.id == item_id).populate_existing().with_for_update().first()
+    if deducted:
+        item.status = calculate_item_status(item.quantity_value, item.current_expiration_date, db)
+    return item, deducted
+
+
+def _add_stock_to_restock(
+    db: Session, item: Item, quantity: float, *, source_item_id: int | None,
+) -> RestockItem:
+    """Queue a restock row for the caller to commit."""
+    restock = RestockItem(
+        name=item.name,
+        category_id=item.category_id,
+        quantity_value=quantity,
+        quantity_unit=item.quantity_unit,
+        source_item_id=source_item_id,
+        status="pending",
+        notes=item.notes,
+    )
+    db.add(restock)
+    return restock
+
+
 def consume_item(
     db: Session,
     item_id: int,
     quantity: float,
     add_to_restock: bool = False,
 ) -> Optional[dict]:
-    """Consume a portion of a stock item, updating quantity and status."""
-    item = db.query(Item).filter(Item.id == item_id).first()
-    if item is None:
-        return None
+    """Deduct stock and optionally queue the consumed amount for restock."""
+    try:
+        item, deducted = deduct_item_quantity(db, item_id, quantity)
+        if item is None:
+            db.rollback()
+            return None
+        if not deducted:
+            if item.status == "consumed" or item.quantity_value <= 0:
+                raise APIError(409, "item_already_consumed", "Item is already consumed")
+            raise APIError(
+                422, "consume_exceeds_stock", "Consumption quantity exceeds available stock",
+                available=item.quantity_value,
+            )
 
-    original_quantity = item.quantity_value
-    new_quantity = max(0.0, original_quantity - quantity)
-    item.quantity_value = new_quantity
-
-    today = household_today(db)
-    warning_days = _get_expiration_warning_days(db)
-    new_status = _calculate_status(
-        new_quantity,
-        item.current_expiration_date,
-        warning_days,
-        today,
-    )
-    item.status = new_status
-    db.commit()
-    db.refresh(item)
-
-    result = {"item": item, "restock_item": None}
-
-    if new_quantity <= 0 and add_to_restock:
-        restock = RestockItem(
-            name=item.name,
-            category_id=item.category_id,
-            quantity_value=original_quantity,
-            quantity_unit=item.quantity_unit,
-            source_item_id=item.id,
-            status="pending",
-            notes=item.notes,
+        restock = (
+            _add_stock_to_restock(db, item, quantity, source_item_id=item.id)
+            if add_to_restock else None
         )
-        db.add(restock)
         db.commit()
-        db.refresh(restock)
-        result["restock_item"] = restock
+    except Exception:
+        db.rollback()
+        raise
 
-    return result
+    return {"item": item, "restock_item": restock}
 
 
-def delete_item(db: Session, item_id: int) -> bool:
-    """Delete a stock item and clear restock references."""
-    item = db.query(Item).filter(Item.id == item_id).first()
-    if item is None:
-        return False
+def delete_item(db: Session, item_id: int, *, add_to_restock: bool = False) -> bool:
+    """Delete stock, clear references, and optionally queue restock atomically."""
+    try:
+        stock = db.query(Item).filter(Item.id == item_id)
+        item = stock.populate_existing().with_for_update().first()
+        if item is None:
+            db.rollback()
+            return False
 
-    # Clear foreign key references in restock_items
-    db.query(RestockItem).filter(RestockItem.source_item_id == item_id).update(
-        {RestockItem.source_item_id: None}
-    )
-    db.delete(item)
-    db.commit()
+        db.query(RestockItem).filter(RestockItem.source_item_id == item_id).update(
+            {RestockItem.source_item_id: None}
+        )
+        if stock.delete(synchronize_session="fetch") != 1:
+            db.rollback()
+            return False
+        if add_to_restock and item.quantity_value > 0:
+            _add_stock_to_restock(db, item, item.quantity_value, source_item_id=None)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     return True
 
 

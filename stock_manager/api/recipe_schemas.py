@@ -202,12 +202,25 @@ class CookConsumedItem(BaseModel):
     status: ItemStatus
 
 
+class CookLine(BaseModel):
+    """Outcome for one requested stock deduction."""
+
+    item_id: int
+    ingredient_name: str
+    result: Literal["consumed", "skipped", "insufficient"]
+    consumed_quantity: float | None = None
+    requested: float | None = None
+    available: float | None = None
+    reason: Literal["item_not_found", "not_recipe_usable"] | None = None
+
+
 class CookRecipeResponse(BaseModel):
     """Response after cooking a recipe and consuming inventory."""
     message: str
     recipe_id: int
     title: str
     consumed_items: list[CookConsumedItem] = []
+    lines: list[CookLine] = []
     notes: Optional[str] = None
 
 # ─── Explore Recipes ─────────────────────────────────────────────

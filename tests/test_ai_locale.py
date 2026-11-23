@@ -175,7 +175,7 @@ class TestToday:
             assert item["purchase_date"] == datetime.now(ZoneInfo(tz)).date().isoformat()
 
     def test_cooking_status_uses_household_today(self, client, db_session, monkeypatch):
-        from stock_manager.api import recipe_services
+        from stock_manager.api import services
 
         item = _create_item(client, db_session, "番茄", days=1, quantity_value=5)
         recipe = client.post("/api/recipes", json={
@@ -183,7 +183,7 @@ class TestToday:
             "ingredients": [{"ingredient_name": "番茄", "quantity": "1", "unit": "瓶"}],
             "steps": [{"step_number": 1, "instruction": "煮"}],
         }).json()
-        monkeypatch.setattr(recipe_services, "household_today", lambda db: date.today() + timedelta(days=2))
+        monkeypatch.setattr(services, "household_today", lambda db: date.today() + timedelta(days=2))
         response = client.post(f"/api/recipes/{recipe['id']}/cook", json={"consume_items": [
             {"item_id": item["id"], "quantity": 1, "ingredient_name": "番茄"}]})
         assert response.status_code == 200, response.text

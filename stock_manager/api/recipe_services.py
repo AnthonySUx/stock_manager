@@ -1,22 +1,24 @@
 """Business logic for recipe features."""
+import json
 from datetime import timedelta
 from typing import Optional
 
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
+from stock_manager.api.category_services import RECIPE_USAGE_NEVER
+from stock_manager.api.errors import APIError
 from stock_manager.api.models import (
     Recipe,
     RecipeFavorite,
     RecipeIngredient,
     RecipeStep,
     RecipeUsageHistory,
-    Item,
     utcnow,
 )
 from stock_manager.api.recipe_schemas import RecipeCreate, RecipeUpdate
 from stock_manager.api.quantity import parse_quantity, same_unit
-from stock_manager.api.localization import today as household_today
+from stock_manager.api.services import deduct_item_quantity
 from stock_manager.api.text_search import contains_ci
 
 
@@ -790,74 +792,81 @@ def get_consume_preview(db: Session, recipe_id: int) -> Optional[dict]:
     }
 
 
+def _cook_line(db: Session, entry: dict) -> tuple[dict, dict | None]:
+    item_id = entry["item_id"]
+    quantity = entry["quantity"]
+    item, deducted = deduct_item_quantity(db, item_id, quantity, recipe_only=True)
+    line = {"item_id": item_id, "ingredient_name": entry.get("ingredient_name", "")}
+    if deducted:
+        return (
+            {**line, "result": "consumed", "consumed_quantity": quantity},
+            {
+                "item_id": item_id,
+                "item_name": item.name,
+                "consumed_quantity": quantity,
+                "remaining_quantity": item.quantity_value,
+                "status": item.status,
+            },
+        )
+    if item is None:
+        return {**line, "result": "skipped", "reason": "item_not_found"}, None
+    if item.category.recipe_usage == RECIPE_USAGE_NEVER:
+        return {**line, "result": "skipped", "reason": "not_recipe_usable"}, None
+
+    return {
+        **line, "result": "insufficient", "requested": quantity,
+        "available": item.quantity_value,
+    }, None
+
+
 def cook_recipe_and_consume(
     db: Session,
     recipe_id: int,
     consume_items: list[dict],
     notes: Optional[str] = None,
 ) -> Optional[dict]:
-    """Mark a recipe as cooked and consume specified inventory items.
+    """Record a cook and its successful deductions in a single transaction."""
+    entries = {}
+    for entry in consume_items:
+        item_id = entry["item_id"]
+        if item_id in entries:
+            raise APIError(422, "duplicate_item", "Duplicate stock item", item_id=item_id)
+        entries[item_id] = entry
 
-    consume_items format: [{"item_id": int, "quantity": float, "ingredient_name": str}]
-    """
     recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
     if recipe is None:
         return None
 
-    consumed = []
-    for ci in consume_items:
-        item = db.query(Item).filter(Item.id == ci["item_id"]).first()
-        if item is None:
-            continue
-        if item.category.recipe_usage == "never":
-            continue  # never allow non-recipe items to be consumed via recipe
+    try:
+        # Acquire stock locks in the same order across requests.
+        outcomes = {item_id: _cook_line(db, entries[item_id]) for item_id in sorted(entries)}
+        lines = []
+        consumed = []
+        for item_id in entries:
+            line, deduction = outcomes[item_id]
+            lines.append(line)
+            if deduction is not None:
+                consumed.append(deduction)
+        if lines and not consumed:
+            raise APIError(
+                409, "cook_nothing_consumed", "No stock was consumed", lines=lines,
+            )
 
-        qty = ci["quantity"]
-        if qty <= 0:
-            continue
-        if qty > item.quantity_value:
-            qty = item.quantity_value
+        db.add(RecipeUsageHistory(
+            recipe_id=recipe_id,
+            event_type="cooked",
+            metadata_json=json.dumps({"consumed_items": consumed, "notes": notes}, ensure_ascii=False),
+        ))
+        result = {
+            "recipe_id": recipe_id,
+            "title": recipe.title,
+            "consumed_items": consumed,
+            "notes": notes,
+            "lines": lines,
+        }
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
-        original_qty = item.quantity_value
-        new_qty = max(0.0, original_qty - qty)
-        item.quantity_value = new_qty
-
-        today = household_today(db)
-        from stock_manager.api.services import _calculate_status, _get_expiration_warning_days
-        warning_days = _get_expiration_warning_days(db)
-        new_status = _calculate_status(
-            new_qty,
-            item.current_expiration_date,
-            warning_days,
-            today,
-        )
-        item.status = new_status
-
-        consumed.append({
-            "item_id": item.id,
-            "item_name": item.name,
-            "consumed_quantity": qty,
-            "remaining_quantity": item.quantity_value,
-            "status": item.status,
-        })
-
-    # Record cooked event
-    import json as _json
-    metadata = {
-        "consumed_items": consumed,
-        "notes": notes,
-    }
-    db.add(RecipeUsageHistory(
-        recipe_id=recipe_id,
-        event_type="cooked",
-        metadata_json=_json.dumps(metadata, ensure_ascii=False),
-    ))
-
-    db.commit()
-
-    return {
-        "recipe_id": recipe.id,
-        "title": recipe.title,
-        "consumed_items": consumed,
-        "notes": notes,
-    }
+    return result

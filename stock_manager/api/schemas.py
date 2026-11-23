@@ -246,6 +246,10 @@ class RestockItemResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ConsumeResponse(ItemResponse):
+    restock_item: RestockItemResponse | None = None
+
+
 # ─── Settings ────────────────────────────────────────────────────
 
 
