@@ -604,6 +604,46 @@ def _match_recipe_ingredients(
     return matched, missing
 
 
+def _recommendation_candidates(db: Session, inventory_names: set[str], normalized_names: set[str]):
+    required = (
+        select(RecipeIngredient.recipe_id, func.count().label("total"))
+        .where(RecipeIngredient.is_seasoning.is_(False), RecipeIngredient.is_optional.is_(False))
+        .group_by(RecipeIngredient.recipe_id)
+        .subquery()
+    )
+    short_recipes = (
+        select(Recipe.id)
+        .outerjoin(required, required.c.recipe_id == Recipe.id)
+        .where(required.c.total.is_(None) | (required.c.total <= 1))
+    )
+    sources = [select(RecipeFavorite.recipe_id)]
+    if inventory_names:
+        # Expand current aliases back to raw names. Imported rows may lack a
+        # stored normalized name, and older rows may use a previous synonym map.
+        names = set(inventory_names)
+        seen = set()
+        for canonical, aliases in SYNONYM_MAP.items():
+            raw_names = {name.lower() for name in (canonical, *aliases)}
+            if canonical.lower() in normalized_names:
+                names.update(raw_names - seen)
+            # Like _normalize_name, take the first mapping for a shared alias.
+            seen.update(raw_names)
+
+        ingredient_name = RecipeIngredient.ingredient_name
+        if db.get_bind().dialect.name == "sqlite":
+            # SQLite's built-in lower() handles ASCII only.
+            db.connection().connection.driver_connection.create_function(
+                "recipe_name_key", 1, lambda name: name.strip().lower(), deterministic=True,
+            )
+            name_key = func.recipe_name_key(ingredient_name)
+        else:
+            # Trim surrounding whitespace before applying the database's Unicode lower().
+            name_key = func.lower(func.regexp_replace(ingredient_name, r"^[[:space:]]+|[[:space:]]+$", ""))
+        sources.append(select(RecipeIngredient.recipe_id).where(name_key.in_(sorted(names))))
+
+    return short_recipes.union(*sources).cte("recommendation_candidates")
+
+
 def get_recommendations(
     db: Session,
     limit: int = 10,
@@ -612,7 +652,12 @@ def get_recommendations(
     """Generate rule-based recipe recommendations from inventory.
 
     Refresh stored inventory statuses before scoring with the current
-    inventory and cooking history.
+    inventory and cooking history. The SQL candidates are the union of recipes
+    with a matching stock ingredient (including optional items or seasoning),
+    favorites, and recipes with at most one required ingredient. Favorites can
+    overcome missing ingredients with their bonus. Other unmatched recipes
+    with two or more required ingredients always score below zero. Revisit
+    these candidate rules when changing the scoring rules.
 
     Scoring:
     - Matched ingredient: +10 (conditional category: +6)
@@ -655,8 +700,13 @@ def get_recommendations(
         raw = ingredient_name.strip().lower()
         return raw in always_names or _normalize_name(ingredient_name).lower() in always_norm
 
-    # Get all recipes in this scene
-    recipes = [r for r in db.query(Recipe).order_by(Recipe.id).all() if is_recommendable(r) and recipe_matches_scene(r, scene)]
+    candidates = _recommendation_candidates(db, inventory_names, inv_norm)
+    recipes = [
+        recipe for recipe in db.query(Recipe)
+        .join(candidates, candidates.c.id == Recipe.id)
+        .order_by(Recipe.id)
+        if is_recommendable(recipe) and recipe_matches_scene(recipe, scene)
+    ]
 
     # Recipes actually cooked recently (written by POST /recipes/{id}/cook)
     cooked_since = utcnow() - timedelta(days=RECENT_COOKED_DAYS)

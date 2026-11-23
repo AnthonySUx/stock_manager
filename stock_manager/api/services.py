@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Optional
 
 from sqlalchemy import case, func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from stock_manager.api.category_services import RECIPE_USAGE_NEVER
 from stock_manager.api.errors import APIError
@@ -112,11 +112,13 @@ def get_items(
     owner: Optional[str] = None,
     location: Optional[str] = None,
     status: Optional[str] = None,
+    limit: Optional[int] = None,
+    offset: int = 0,
 ) -> list[Item]:
     """Return stock items that match the optional filters."""
     ensure_fresh_statuses(db)
 
-    query = db.query(Item)
+    query = db.query(Item).options(selectinload(Item.category))
     if category is not None:
         query = query.filter(Item.category_id == category)
     if owner is not None:
@@ -126,7 +128,12 @@ def get_items(
     if status is not None:
         query = query.filter(Item.status == status)
 
-    return query.order_by(Item.id).all()
+    query = query.order_by(Item.id)
+    if limit is not None:
+        query = query.limit(limit)
+    if offset:
+        query = query.offset(offset)
+    return query.all()
 
 
 # Reminders list "expiring soon" first, then "expired"; each by id.
@@ -401,15 +408,20 @@ def get_restock_items(
     db: Session,
     *,
     status: Optional[str] = None,
+    limit: Optional[int] = None,
+    offset: int = 0,
 ) -> list[RestockItem]:
     """Return restock items that match the optional status filter."""
-    query = db.query(RestockItem)
+    query = db.query(RestockItem).options(selectinload(RestockItem.category))
     if status is not None:
         query = query.filter(RestockItem.status == status)
 
-    return query.order_by(
-        RestockItem.status == "done", RestockItem.id
-    ).all()
+    query = query.order_by(RestockItem.status == "done", RestockItem.id)
+    if limit is not None:
+        query = query.limit(limit)
+    if offset:
+        query = query.offset(offset)
+    return query.all()
 
 
 def get_restock_item(db: Session, item_id: int) -> Optional[RestockItem]:

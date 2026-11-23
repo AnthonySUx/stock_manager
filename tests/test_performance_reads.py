@@ -8,16 +8,20 @@ from sqlalchemy import event, func
 
 from stock_manager.api.category_services import get_category_by_slug
 from stock_manager.api.models import (
+    Category,
     Item,
     Recipe,
     RecipeFavorite,
     RecipeIngredient,
     RecipeUsageHistory,
+    RestockItem,
 )
+from stock_manager.api.recipe_schemas import RecipeRecommendation
 from stock_manager.api.recipe_services import get_recipes
 from stock_manager.api.text_search import contains_ci
 from tests.conftest import test_engine
 from tests.helpers import make_item_create_payload, make_item_model_data
+from tests.recommendations_reference import get_recommendations as reference_recommendations
 
 
 @contextmanager
@@ -126,17 +130,24 @@ class TestRefreshWritesOnlyWhenNeeded:
         assert commits == [1]
 
 
+def _distinct_category_ids(db, count):
+    categories = [Category(name=f"Category {i}", slug=f"category-{i}") for i in range(count)]
+    db.add_all(categories)
+    db.flush()
+    return [category.id for category in categories]
+
+
 def test_item_list_query_count_does_not_grow_with_item_count(client, db_session):
-    category_ids = [get_category_by_slug(db_session, slug).id for slug in ("vegetables", "dairy")]
+    category_ids = _distinct_category_ids(db_session, 22)
     counts = []
     for added, total in ((2, 2), (20, 22)):
         db_session.add_all(
             Item(**make_item_model_data(
-                category_id=category_ids[index % len(category_ids)],
+                category_id=category_ids[index],
                 current_expiration_date="infinite",
                 status="expired",
             ))
-            for index in range(added)
+            for index in range(total - added, total)
         )
         db_session.commit()
 
@@ -146,6 +157,26 @@ def test_item_list_query_count_does_not_grow_with_item_count(client, db_session)
         assert response.status_code == 200
         assert len(response.json()) == total
         assert len(_selects_from(statements, "items")) == 1
+        counts.append(len(statements))
+
+    assert counts[0] == counts[1]
+
+
+def test_restock_list_query_count_does_not_grow_with_distinct_categories(client, db_session):
+    category_ids = _distinct_category_ids(db_session, 20)
+    counts = []
+    for start, end in ((0, 2), (2, 20)):
+        db_session.add_all(
+            RestockItem(name=f"Stock {i}", category_id=category_ids[i])
+            for i in range(start, end)
+        )
+        db_session.commit()
+        with count_sql() as statements:
+            response = client.get("/api/restock")
+
+        assert response.status_code == 200
+        assert len({item["category"]["id"] for item in response.json()}) == end
+        assert len(_selects_from(statements, "categories")) == 1
         counts.append(len(statements))
 
     assert counts[0] == counts[1]
@@ -317,3 +348,42 @@ def test_recommendations_with_no_recipes(client, db_session):
 def test_flags_helper_handles_empty_page(db_session):
     from stock_manager.api.recipe_services import get_recipe_flags
     assert get_recipe_flags(db_session, []) == (set(), set())
+
+
+def test_recommendations_query_budget_and_result_parity_for_1000_recipes(client, db_session):
+    recipes = [
+        Recipe(title=f"Recipe {index}", source_type="user", source_name="User", category="soup")
+        for index in range(1000)
+    ]
+    db_session.add_all(recipes)
+    db_session.flush()
+    candidate_ids = [recipe.id for recipe in recipes[:10]]
+    all_ids = [recipe.id for recipe in recipes]
+    db_session.add_all(
+        RecipeIngredient(recipe_id=recipe_id, ingredient_name=f"Missing {line}")
+        for recipe_id in all_ids[10:]
+        for line in range(2)
+    )
+    db_session.commit()
+
+    expected = reference_recommendations(db_session, limit=20)
+    db_session.expunge_all()
+    loaded_ids = []
+
+    def track_recipe_load(recipe, _context):
+        loaded_ids.append(recipe.id)
+
+    event.listen(Recipe, "load", track_recipe_load)
+    try:
+        with count_sql() as statements:
+            response = client.get("/api/recipes/recommendations", params={"limit": 20})
+    finally:
+        event.remove(Recipe, "load", track_recipe_load)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["recommendations"] == [
+        RecipeRecommendation(**row).model_dump(mode="json") for row in expected
+    ]
+    assert [recipe["recipe_id"] for recipe in expected] == candidate_ids
+    assert loaded_ids == candidate_ids
+    assert len(statements) <= 11

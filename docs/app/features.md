@@ -38,6 +38,15 @@ Displays current stock with:
 - Status (`active`, `consumed`, `expiring soon`, `expired`)
 - Whether notes exist
 
+### List pagination
+
+`GET /api/items` and `GET /api/restock` accept optional `limit` (1–100) and
+`offset` (0 or greater). The response is a JSON array. Omit `limit` to return
+all rows starting at `offset`. An offset past the last row returns an empty array.
+
+Stock items are ordered by ID. Restock lists show pending entries before done
+entries and order each group by ID.
+
 ### Search and Filter
 
 - **Search**: by name, category, owner, location, notes. Case-insensitive, and the keyword
