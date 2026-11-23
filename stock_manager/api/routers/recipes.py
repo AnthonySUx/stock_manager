@@ -22,6 +22,7 @@ from stock_manager.api.recipe_schemas import (
     ExploreResponse,
     ExpandRequest,
     ExpandResponse,
+    MissingToRestockResponse,
     RecipeCreate,
     RecipeRecommendation,
     RecipeRecommendationResponse,
@@ -32,6 +33,7 @@ from stock_manager.api.recipe_schemas import (
 )
 from stock_manager.api.recipe_services import (
     add_favorite,
+    add_recipe_gaps_to_restock,
     create_recipe,
     delete_recipe,
     fork_recipe,
@@ -343,6 +345,15 @@ def consume_preview_endpoint(
     return result
 
 
+@router.post("/{recipe_id}/missing-to-restock", response_model=MissingToRestockResponse)
+def missing_to_restock_endpoint(recipe_id: int, db: Session = Depends(get_session)):
+    """Queue missing ingredients that are not already pending."""
+    result = add_recipe_gaps_to_restock(db, recipe_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    return result
+
+
 @router.post(
     "/{recipe_id}/cook", response_model=CookRecipeResponse, response_model_exclude_unset=True,
 )
@@ -357,7 +368,10 @@ def cook_recipe_endpoint(
         {"item_id": ci.item_id, "quantity": ci.quantity, "ingredient_name": ci.ingredient_name}
         for ci in data.consume_items
     ]
-    result = _cook(db, recipe_id, consume_dicts, notes=data.notes)
+    result = _cook(
+        db, recipe_id, consume_dicts, notes=data.notes,
+        add_depleted_to_restock=data.add_depleted_to_restock,
+    )
     if result is None:
         raise HTTPException(status_code=404, detail="Recipe not found")
     return CookRecipeResponse(

@@ -4,7 +4,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from stock_manager.api.schemas import ItemStatus, PositiveQuantity
+from stock_manager.api.schemas import ItemStatus, PositiveQuantity, RestockItemResponse
 
 # Dish categories = HowToCook `dishes/<dir>` names (template excluded), so user
 # recipes and imported ones share one vocabulary (#46).
@@ -153,8 +153,13 @@ class SourceResponse(BaseModel):
     notice: str
 
 
+class ConsumeAllocation(BaseModel):
+    item_id: int
+    quantity: float
+
+
 class ConsumePreviewItem(BaseModel):
-    """A single inventory item suggested for consumption."""
+    """Suggested stock allocations for one recipe ingredient."""
     ingredient_name: str
     item_id: int
     item_name: str
@@ -162,10 +167,10 @@ class ConsumePreviewItem(BaseModel):
     available_unit: str
     # The recipe amount as written ("500克"); shown to help the user decide.
     recipe_quantity: Optional[str] = None
-    # Set only when the recipe unit matches the stock unit (#47); null means
-    # the user must enter the amount (needs_user_input is then true).
+    # Amount to deduct from the first matching batch, for existing clients.
     suggested_quantity: Optional[float] = None
     unit: str = ""  # stock unit, the unit the amount is deducted in
+    allocations: list[ConsumeAllocation] = Field(default_factory=list)
     needs_user_input: bool = False
     status: ItemStatus = "active"
     current_expiration_date: Optional[str] = None
@@ -190,6 +195,7 @@ class CookConsumeItem(BaseModel):
 class CookRecipeRequest(BaseModel):
     """Request body for marking a recipe as cooked and consuming inventory."""
     consume_items: list[CookConsumeItem] = []
+    add_depleted_to_restock: bool = False
     notes: Optional[str] = None
 
 
@@ -222,6 +228,16 @@ class CookRecipeResponse(BaseModel):
     consumed_items: list[CookConsumedItem] = []
     lines: list[CookLine] = []
     notes: Optional[str] = None
+
+class SkippedRestockIngredient(BaseModel):
+    name: str
+    reason: Literal["already_pending"]
+
+
+class MissingToRestockResponse(BaseModel):
+    created: list[RestockItemResponse]
+    skipped: list[SkippedRestockIngredient]
+
 
 # ─── Explore Recipes ─────────────────────────────────────────────
 
