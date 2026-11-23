@@ -7,6 +7,7 @@ private enum InventoryPresentation: Identifiable {
 }
 
 struct InventoryListView: View {
+    @Environment(AppTheme.self) private var theme
     @Environment(InventoryStore.self) private var inventory
     @Environment(CategoryStore.self) private var categories
     @Environment(IntakeStore.self) private var intake
@@ -26,7 +27,7 @@ struct InventoryListView: View {
                 else {
                     List(store.items) { item in
                         NavigationLink { ItemDetailView(itemID: item.id) } label: { ItemRow(item: item) }
-                            .swipeActions(edge: .leading) { Button("消耗") { presentation = .consume(item) }.tint(.orange) }
+                            .swipeActions(edge: .leading) { Button("消耗") { presentation = .consume(item) }.tint(theme.statusExpiring) }
                     }.listStyle(.insetGrouped)
                 }
             }
@@ -81,11 +82,11 @@ struct InventoryListView: View {
 private struct ItemRow: View {
     let item: StockItem
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: AppSpacing.small) {
             HStack { Text(item.name).font(.headline); Spacer(); StatusBadge(status: item.status) }
             HStack { Label(item.quantityText, systemImage: "scalemass"); Label(item.location, systemImage: "mappin") }.font(.subheadline).foregroundStyle(.secondary)
             HStack { Text(item.category.name); Spacer(); Text(item.expirationText) }.font(.caption).foregroundStyle(.secondary)
-        }.padding(.vertical, 4)
+        }.padding(.vertical, AppSpacing.xSmall)
     }
 }
 
@@ -163,6 +164,7 @@ private enum ItemDetailPresentation: Identifiable {
 }
 
 struct ItemEditorView: View {
+    @Environment(AppTheme.self) private var theme
     let item: StockItem?
     @Environment(\.dismiss) private var dismiss
     @Environment(InventoryStore.self) private var inventory
@@ -247,6 +249,7 @@ struct ItemEditorView: View {
 }
 
 struct ConsumeItemView: View {
+    @Environment(AppTheme.self) private var theme
     let item: StockItem
     @Environment(\.dismiss) private var dismiss
     @Environment(InventoryStore.self) private var inventory
@@ -264,10 +267,10 @@ struct ConsumeItemView: View {
                     .accessibilityIdentifier("inventory.consume.quantity")
                 if !quantity.trimmed.isEmpty && parsedQuantity == nil {
                     Text("请输入有效数字，可使用小数点或本地小数分隔符。")
-                        .font(.caption).foregroundStyle(.red)
+                        .font(.caption).foregroundStyle(theme.statusExpired)
                 } else if let value = parsedQuantity, value > item.quantityValue {
                     Text("不能超过当前库存 \(item.quantityText)。")
-                        .font(.caption).foregroundStyle(.red)
+                        .font(.caption).foregroundStyle(theme.statusExpired)
                 }
                 Toggle("加入补货清单", isOn: $addToRestock)
             }
@@ -283,7 +286,7 @@ struct ConsumeItemView: View {
                         Button("完成") { quantityFocused = false }
                             .fontWeight(.semibold)
                     }
-                    .padding(.horizontal)
+                    .padding(.horizontal, AppSpacing.page)
                     .frame(minHeight: 44)
                     .background(.bar)
                 }

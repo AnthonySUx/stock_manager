@@ -7,6 +7,7 @@ private enum RestockPresentation: Identifiable {
 }
 
 struct RestockListView: View {
+    @Environment(AppTheme.self) private var theme
     @Environment(RestockStore.self) private var restock
     @Environment(CategoryStore.self) private var categories
     @State private var presentation: RestockPresentation?
@@ -15,7 +16,7 @@ struct RestockListView: View {
         @Bindable var store = restock
         VStack(spacing: 0) {
             Picker("状态", selection: $store.selection) { ForEach(RestockFilter.allCases) { Text($0.title).tag($0) } }
-                .pickerStyle(.segmented).padding()
+                .pickerStyle(.segmented).padding(AppSpacing.large)
             Group {
                 switch store.state {
                 case .idle where store.items.isEmpty, .loading where store.items.isEmpty: LoadingView()
@@ -41,15 +42,15 @@ struct RestockListView: View {
     }
 
     private func row(_ item: RestockItem) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack { Text(item.name).font(.headline); Spacer(); Text(item.status.title).font(.caption.weight(.semibold)).foregroundStyle(item.status == .pending ? .orange : .green) }
+        VStack(alignment: .leading, spacing: AppSpacing.small) {
+            HStack { Text(item.name).font(.headline); Spacer(); Text(item.status.title).font(.caption.weight(.semibold)).foregroundStyle(item.status == .pending ? theme.statusExpiring : theme.statusActive) }
             HStack { Text(item.quantityText); if let name = item.category?.name { Text("· \(name)") } }.font(.subheadline).foregroundStyle(.secondary)
             if let notes = item.notes { Text(notes).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
-        }.padding(.vertical, 4)
+        }.padding(.vertical, AppSpacing.xSmall)
         .contentShape(Rectangle()).swipeActions {
             Button("删除", role: .destructive) { presentation = .confirmDelete(item) }
-            Button("编辑") { presentation = .edit(item) }.tint(.blue)
-        }.swipeActions(edge: .leading) { if item.status == .pending { Button("已购买") { presentation = .complete(item) }.tint(.green) } }
+            Button("编辑") { presentation = .edit(item) }.tint(theme.accent)
+        }.swipeActions(edge: .leading) { if item.status == .pending { Button("已购买") { presentation = .complete(item) }.tint(theme.statusActive) } }
         .contextMenu { if item.status == .pending { Button("标记购买完成") { presentation = .complete(item) } }; Button("编辑") { presentation = .edit(item) }; Button("删除", role: .destructive) { presentation = .confirmDelete(item) } }
     }
 

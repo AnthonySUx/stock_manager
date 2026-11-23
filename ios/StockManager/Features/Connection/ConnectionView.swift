@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct ConnectionView: View {
+    @Environment(AppTheme.self) private var theme
     @Environment(AppSession.self) private var session
     @State private var urlText: String
     @State private var token = ""
@@ -28,7 +29,7 @@ struct ConnectionView: View {
                         .accessibilityIdentifier("connection.submit")
                 }
                 if let existing = session.connectionError {
-                    Section("上次连接") { Label(existing, systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
+                    Section("上次连接") { Label(existing, systemImage: "exclamationmark.triangle").foregroundStyle(theme.statusExpiring) }
                 }
             }
             .navigationTitle("欢迎")

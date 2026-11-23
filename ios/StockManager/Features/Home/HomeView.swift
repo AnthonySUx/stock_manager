@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct HomeView: View {
+    @Environment(AppTheme.self) private var theme
     @Binding var selectedTab: AppTab
     @Environment(InventoryStore.self) private var inventory
     @Environment(RestockStore.self) private var restock
@@ -9,17 +10,17 @@ struct HomeView: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 20) {
+            LazyVStack(alignment: .leading, spacing: AppSpacing.xLarge) {
                 Text("今天的家庭库存").font(.largeTitle.bold())
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 145))], spacing: 12) {
-                    metric("有效库存", count: inventory.items.filter { $0.status == .active }.count, icon: "shippingbox", color: .blue) { selectedTab = .inventory }
-                    metric("即将过期", count: inventory.items.filter { $0.status == .expiringSoon }.count, icon: "clock.badge.exclamationmark", color: .orange) { }
-                    metric("已经过期", count: inventory.items.filter { $0.status == .expired }.count, icon: "exclamationmark.triangle", color: .red) { }
-                    metric("待补货", count: restock.items.filter { $0.status == .pending }.count, icon: "cart", color: .green) { selectedTab = .restock }
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 145))], spacing: AppSpacing.medium) {
+                    metric("有效库存", count: inventory.items.filter { $0.status == .active }.count, icon: "shippingbox", color: theme.statusActive) { selectedTab = .inventory }
+                    metric("即将过期", count: inventory.items.filter { $0.status == .expiringSoon }.count, icon: "clock.badge.exclamationmark", color: theme.statusExpiring) { }
+                    metric("已经过期", count: inventory.items.filter { $0.status == .expired }.count, icon: "exclamationmark.triangle", color: theme.statusExpired) { }
+                    metric("待补货", count: restock.items.filter { $0.status == .pending }.count, icon: "cart", color: theme.accent) { selectedTab = .restock }
                 }
                 NavigationLink { ReminderView() } label: {
                     Label("查看过期提醒", systemImage: "bell.badge").frame(maxWidth: .infinity, alignment: .leading)
-                        .padding().background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                        .padding(AppSpacing.large).background(.thinMaterial, in: RoundedRectangle(cornerRadius: AppRadius.card))
                 }.buttonStyle(.plain)
 
                 HStack { Text("今日推荐").font(.title2.bold()); Spacer(); Button("全部菜谱") { selectedTab = .recipes } }
@@ -32,16 +33,16 @@ struct HomeView: View {
                 case .loaded(let snapshot):
                     ForEach(snapshot.recommendations.prefix(5)) { item in
                         NavigationLink { RecipeDetailView(recipeID: item.recipeId) } label: {
-                            VStack(alignment: .leading, spacing: 6) {
+                            VStack(alignment: .leading, spacing: AppSpacing.small) {
                                 Text(item.title).font(.headline)
                                 if let reason = item.reason { Text(reason).font(.subheadline).foregroundStyle(.secondary).lineLimit(2) }
-                                HStack { if !item.expiringInventoryItems.isEmpty { Label("优先消耗", systemImage: "clock").foregroundStyle(.orange) }; Spacer(); Text("匹配 \(item.matchedInventoryItems.count)") }
+                                HStack { if !item.expiringInventoryItems.isEmpty { Label("优先消耗", systemImage: "clock").foregroundStyle(theme.statusExpiring) }; Spacer(); Text("匹配 \(item.matchedInventoryItems.count)") }
                                     .font(.caption)
-                            }.padding().background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+                            }.padding(AppSpacing.large).background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: AppRadius.card))
                         }.buttonStyle(.plain)
                     }
                 }
-            }.padding()
+            }.padding(AppSpacing.page)
         }
         .navigationTitle("首页").navigationBarTitleDisplayMode(.inline)
         .toolbar { Button { Task { await reload() } } label: { Image(systemName: "arrow.clockwise") } }
@@ -50,11 +51,11 @@ struct HomeView: View {
 
     private func metric(_ title: String, count: Int, icon: String, color: Color, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: AppSpacing.medium) {
                 Image(systemName: icon).font(.title2).foregroundStyle(color)
-                Text(count.formatted()).font(.system(.largeTitle, design: .rounded).bold())
+                Text(count.formatted()).font(.largeTitle.bold())
                 Text(title).foregroundStyle(.secondary)
-            }.frame(maxWidth: .infinity, alignment: .leading).padding().background(color.opacity(0.1), in: RoundedRectangle(cornerRadius: 16))
+            }.frame(maxWidth: .infinity, alignment: .leading).padding(AppSpacing.large).background(color.opacity(0.1), in: RoundedRectangle(cornerRadius: AppRadius.card))
         }.buttonStyle(.plain)
     }
 

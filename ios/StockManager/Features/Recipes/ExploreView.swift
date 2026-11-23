@@ -8,6 +8,7 @@ private enum ExploreInputMode: String, CaseIterable, Identifiable {
 }
 
 struct ExploreView: View {
+    @Environment(AppTheme.self) private var theme
     @Environment(InventoryStore.self) private var inventory
     private let client: any APIClientProtocol
     private let capabilities: CapabilitiesStore
@@ -79,7 +80,7 @@ struct ExploreView: View {
             }
             if case .failed(_, let message, let retry) = store.state {
                 Section {
-                    Label(message, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+                    Label(message, systemImage: "exclamationmark.triangle").foregroundStyle(theme.statusExpiring)
                     if let retry {
                         Button("重试") { start(retry) }.disabled(!store.isAvailable || voice.action.isRunning)
                     }
@@ -122,13 +123,13 @@ struct ExploreView: View {
             NavigationLink {
                 RecipeDetailView(recipeID: id)
             } label: {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: AppSpacing.small) {
                     ExploreIdeaSummary(idea: idea)
                     Label("菜谱库已有", systemImage: "book").font(.caption.weight(.semibold))
                 }
             }
         case .expand:
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: AppSpacing.small) {
                 ExploreIdeaSummary(idea: idea)
                 Button("展开为菜谱草稿") { start(.expand(idea)) }
                     .disabled(store.state.isLoading || !store.isAvailable || voice.action.isRunning)
@@ -190,7 +191,7 @@ private struct ExploreIdeaSummary: View {
     let idea: ExploreIdea
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: AppSpacing.small) {
             Text(idea.title).font(.headline)
             if let description = idea.description { Text(description).foregroundStyle(.secondary) }
             if let reason = idea.reason { Text(reason).font(.caption).foregroundStyle(.secondary) }

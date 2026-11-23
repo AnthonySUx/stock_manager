@@ -33,6 +33,7 @@ private enum SettingsPresentation: Identifiable, Equatable {
 }
 
 struct SettingsView: View {
+    @Environment(AppTheme.self) private var theme
     @Environment(AppSession.self) private var session
     @Environment(InventoryStore.self) private var inventory
     @State private var state: LoadState<SettingsSnapshot> = .idle
@@ -81,10 +82,33 @@ struct SettingsView: View {
             .disabled(loadedSettings == nil)
             Section("库存结构") { NavigationLink { CategoryManagementView() } label: { Label("分类管理", systemImage: "folder") } }
             if !loadedSources.isEmpty {
-                Section("菜谱来源") { ForEach(loadedSources) { source in VStack(alignment: .leading, spacing: 5) { Text(source.name).font(.headline); Text(source.license).font(.caption).foregroundStyle(.secondary); Text(source.notice).font(.footnote).foregroundStyle(.secondary); if let url = URL(string: source.url) { Link("查看来源", destination: url) } } } }
+                Section("菜谱来源") { ForEach(loadedSources) { source in VStack(alignment: .leading, spacing: AppSpacing.xSmall) { Text(source.name).font(.headline); Text(source.license).font(.caption).foregroundStyle(.secondary); Text(source.notice).font(.footnote).foregroundStyle(.secondary); if let url = URL(string: source.url) { Link("查看来源", destination: url) } } } }
             }
             if case .failed(let message) = state { Section { FailureView(message: message) { Task { await load() } } } }
             Section("关于") { Text("Stock Manager 是连接家庭自托管后端的原生客户端。令牌仅保存在本机 Keychain。") }
+            Section("外观") {
+                ForEach(ThemePalette.allCases) { palette in
+                    Button {
+                        theme.palette = palette
+                    } label: {
+                        HStack {
+                            HStack(spacing: AppSpacing.xSmall) {
+                                ForEach(Array(palette.auxiliary.prefix(4).enumerated()), id: \.offset) { _, color in
+                                    Circle().fill(color).frame(width: AppSpacing.medium, height: AppSpacing.medium)
+                                }
+                            }
+                            Text(palette.name).foregroundStyle(.primary)
+                            Spacer()
+                            if theme.palette == palette {
+                                Image(systemName: "checkmark").foregroundStyle(theme.accent).accessibilityLabel("已选择")
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("settings.theme.\(palette.rawValue)")
+                }
+            }
         }
         .navigationTitle("设置").task { if loadedSettings == nil { await load() } }
         .sheet(item: connectionPresentation) { _ in ConnectionSettingsView() }
@@ -200,6 +224,7 @@ private struct ConnectionSettingsView: View {
 private enum CategoryPresentation: Identifiable { case add(parent: Int?), edit(Category), confirmDelete(Category); var id: String { switch self { case .add(let id): "add-\(id ?? 0)"; case .edit(let c): "edit-\(c.id)"; case .confirmDelete(let c): "delete-\(c.id)" } }; var isSheet: Bool { if case .confirmDelete = self { false } else { true } } }
 
 struct CategoryManagementView: View {
+    @Environment(AppTheme.self) private var theme
     @Environment(CategoryStore.self) private var categories
     @State private var presentation: CategoryPresentation?
     @State private var action: ActionState = .idle
@@ -216,7 +241,7 @@ struct CategoryManagementView: View {
                         Section {
                             categoryRow(parent)
                             ForEach(parent.children ?? []) { child in
-                                categoryRow(child).padding(.leading, 16)
+                                categoryRow(child).padding(.leading, AppSpacing.large)
                             }
                         } header: {
                             HStack {
@@ -258,7 +283,7 @@ struct CategoryManagementView: View {
         .swipeActions {
             if !category.isSystem {
                 Button("删除", role: .destructive) { presentation = .confirmDelete(category) }
-                Button("编辑") { presentation = .edit(category) }.tint(.blue)
+                Button("编辑") { presentation = .edit(category) }.tint(theme.accent)
             }
         }
     }
@@ -269,6 +294,7 @@ struct CategoryManagementView: View {
 }
 
 private struct CategoryEditorView: View {
+    @Environment(AppTheme.self) private var theme
     let category: Category?
     @Environment(\.dismiss) private var dismiss
     @Environment(CategoryStore.self) private var store
@@ -310,7 +336,7 @@ private struct CategoryEditorView: View {
                     .keyboardType(.numberPad)
                     .accessibilityIdentifier("category.defaultShelfLife")
                 if !validShelfLife {
-                    Text("请输入 1 到 3650 的整数，或留空。").font(.caption).foregroundStyle(.red)
+                    Text("请输入 1 到 3650 的整数，或留空。").font(.caption).foregroundStyle(theme.statusExpired)
                 }
             } header: {
                 Text("默认保质期（天）")
