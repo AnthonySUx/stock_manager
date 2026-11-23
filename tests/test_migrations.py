@@ -11,6 +11,7 @@ from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.exc import IntegrityError
 
 from stock_manager.api import schema_version
 from stock_manager.api.models import Base
@@ -393,3 +394,90 @@ def test_0005_receipt_alias_schema_upgrades_and_downgrades(fresh_db):
     assert {"receipt_alias_names", "receipt_item_aliases"}.isdisjoint(inspect(engine).get_table_names())
     with engine.connect() as connection:
         assert connection.execute(text("SELECT name FROM categories WHERE slug = 'existing'")).scalar_one() == "Existing"
+
+
+# ─── 0006 (status constraints) ───────────────────────────────────
+
+
+def _seed_status_rows(engine):
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO categories (id, name, slug) VALUES (1, 'Food', 'food')"))
+        connection.execute(text(
+            "INSERT INTO items (id, name, category_id, owner, purchase_date, quantity_value, "
+            "quantity_unit, location, unopened_expiration_date, current_expiration_date, status) "
+            "VALUES (1, 'Tomato', 1, 'Alex', '2026-11-24', 2, 'pcs', 'Fridge', "
+            "'infinite', 'infinite', 'active')"
+        ))
+        connection.execute(text(
+            "INSERT INTO restock_items (id, name, category_id, source_item_id, status) VALUES "
+            "(1, 'Tomato', 1, 1, 'pending'), (2, 'Milk', NULL, NULL, 'done')"
+        ))
+
+
+def _status_constraint_names(engine, table):
+    return {check["name"] for check in inspect(engine).get_check_constraints(table)}
+
+
+def test_0006_rejects_invalid_rows_before_changing_either_table(fresh_db):
+    url, engine = fresh_db
+    config = _alembic(url)
+    command.upgrade(config, "0005")
+    _seed_status_rows(engine)
+    with engine.begin() as connection:
+        connection.execute(text("UPDATE items SET status = 'Active'"))
+        connection.execute(text("UPDATE restock_items SET status = 'banana'"))
+
+    with pytest.raises(RuntimeError, match=r"invalid status rows \(items: 1, restock_items: 2\)"):
+        command.upgrade(config, "0006")
+
+    assert _revision(engine) == "0005"
+    assert "ck_items_status" not in _status_constraint_names(engine, "items")
+    assert "ck_restock_items_status" not in _status_constraint_names(engine, "restock_items")
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT status FROM items")).scalars().all() == ["Active"]
+        assert connection.execute(text("SELECT status FROM restock_items")).scalars().all() == [
+            "banana", "banana",
+        ]
+
+
+def test_0006_status_checks_upgrade_and_downgrade_preserve_rows(fresh_db):
+    url, engine = fresh_db
+    config = _alembic(url)
+    command.upgrade(config, "0005")
+    _seed_status_rows(engine)
+
+    command.upgrade(config, "0006")
+    assert _revision(engine) == "0006"
+    for table, valid_values in (
+        ("items", ("active", "expiring soon", "expired", "consumed")),
+        ("restock_items", ("pending", "done")),
+    ):
+        assert f"ck_{table}_status" in _status_constraint_names(engine, table)
+        update = text(f"UPDATE {table} SET status = :status WHERE id = 1")
+        with engine.begin() as connection:
+            for status in reversed(valid_values):
+                connection.execute(update, {"status": status})
+        for status in ("banana", valid_values[0].upper(), f"{valid_values[0]} "):
+            with pytest.raises(IntegrityError), engine.begin() as connection:
+                connection.execute(update, {"status": status})
+
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT status, category_id FROM items")).one() == (
+            "active", 1,
+        )
+        assert connection.execute(text(
+            "SELECT status, category_id, source_item_id FROM restock_items ORDER BY id"
+        )).all() == [("pending", 1, 1), ("done", None, None)]
+
+    command.downgrade(config, "0005")
+    assert _revision(engine) == "0005"
+    with engine.begin() as connection:
+        for table in ("items", "restock_items"):
+            assert f"ck_{table}_status" not in _status_constraint_names(engine, table)
+            connection.execute(text(f"UPDATE {table} SET status = 'legacy' WHERE id = 1"))
+            assert connection.execute(text(
+                f"SELECT status, category_id FROM {table} WHERE id = 1"
+            )).one() == ("legacy", 1)
+        assert connection.execute(text(
+            "SELECT source_item_id FROM restock_items WHERE id = 1"
+        )).scalar_one() == 1

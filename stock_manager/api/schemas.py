@@ -3,7 +3,28 @@
 from datetime import date, datetime
 from typing import Annotated, Literal, Optional
 
-from pydantic import AfterValidator, BaseModel, Field, field_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    BeforeValidator,
+    Field,
+    field_validator,
+    model_validator,
+)
+
+from stock_manager.api.errors import APIError
+
+
+ItemStatus = Literal["active", "expiring soon", "expired", "consumed"]
+RestockStatus = Literal["pending", "done"]
+PositiveQuantity = Annotated[float, Field(gt=0, allow_inf_nan=False)]
+
+
+def _strip_text(value):
+    return value.strip() if isinstance(value, str) else value
+
+
+StrippedNonEmpty = Annotated[str, BeforeValidator(_strip_text), Field(min_length=1)]
 
 
 # ─── Date fields (issue #43) ──────────────────────────────────────
@@ -83,44 +104,50 @@ class CategoryTreeResponse(CategoryResponse):
 
 
 class ItemCreate(BaseModel):
-    name: str = Field(..., min_length=1, max_length=255)
+    name: StrippedNonEmpty = Field(..., max_length=255)
     category_id: int = Field(..., gt=0)
-    owner: str = Field(..., min_length=1, max_length=100)
+    owner: StrippedNonEmpty = Field(..., max_length=100)
     # Defaults to today in the household timezone; filled in by the router
     # because a schema default cannot read settings (#65).
     purchase_date: Optional[DateStr] = None
-    quantity_value: float = Field(..., gt=0)
+    quantity_value: PositiveQuantity
     quantity_unit: str = Field(..., min_length=1, max_length=50)
-    location: str = Field(..., min_length=1, max_length=100)
+    location: StrippedNonEmpty = Field(..., max_length=100)
     unopened_expiration_date: ExpirationStr = Field(..., min_length=1)
-    opened_expiration_date: Optional[ExpirationStr] = None
-    opened_date: Optional[DateStr] = None
-    current_expiration_date: ExpirationStr = Field(...)
-    status: str = Field(default="active")
-    notes: Optional[str] = None
-
-
-class ItemUpdate(BaseModel):
-    name: Optional[str] = Field(None, min_length=1, max_length=255)
-    category_id: Optional[int] = Field(None, gt=0)
-    owner: Optional[str] = Field(None, min_length=1, max_length=100)
-    purchase_date: Optional[DateStr] = None
-    quantity_value: Optional[float] = Field(None, gt=0)
-    quantity_unit: Optional[str] = Field(None, min_length=1, max_length=50)
-    location: Optional[str] = Field(None, min_length=1, max_length=100)
-    unopened_expiration_date: Optional[ExpirationStr] = None
     opened_expiration_date: Optional[ExpirationStr] = None
     opened_date: Optional[DateStr] = None
     current_expiration_date: Optional[ExpirationStr] = None
     status: Optional[str] = None
     notes: Optional[str] = None
 
+
+class ItemUpdate(BaseModel):
+    name: Optional[StrippedNonEmpty] = Field(None, max_length=255)
+    category_id: Optional[int] = Field(None, gt=0)
+    owner: Optional[StrippedNonEmpty] = Field(None, max_length=100)
+    purchase_date: Optional[DateStr] = None
+    quantity_value: Optional[PositiveQuantity] = None
+    quantity_unit: Optional[str] = Field(None, min_length=1, max_length=50)
+    location: Optional[StrippedNonEmpty] = Field(None, max_length=100)
+    unopened_expiration_date: Optional[ExpirationStr] = None
+    opened_expiration_date: Optional[ExpirationStr] = None
+    opened_date: Optional[DateStr] = None
+    current_expiration_date: Optional[ExpirationStr] = None
+    notes: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_status(cls, data):
+        if isinstance(data, dict) and "status" in data:
+            raise APIError(422, "item_status_readonly", "Item status is read-only")
+        return data
+
     # Omitting a field leaves it unchanged; sending null for a NOT NULL
     # column is rejected with 422 instead of failing in the database.
     @field_validator(
         "name", "category_id", "owner", "purchase_date", "quantity_value",
         "quantity_unit", "location", "unopened_expiration_date",
-        "current_expiration_date", "status",
+        "current_expiration_date",
         mode="before",
     )
     @classmethod
@@ -131,7 +158,7 @@ class ItemUpdate(BaseModel):
 
 
 class ConsumeRequest(BaseModel):
-    quantity: float = Field(..., gt=0)
+    quantity: PositiveQuantity
     add_to_restock: bool = False
 
 
@@ -149,7 +176,7 @@ class ItemResponse(BaseModel):
     opened_expiration_date: Optional[str] = None
     opened_date: Optional[str] = None
     current_expiration_date: str
-    status: str
+    status: ItemStatus
     notes: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -161,25 +188,38 @@ class ItemResponse(BaseModel):
 
 
 class RestockItemCreate(BaseModel):
-    name: str = Field(..., min_length=1, max_length=255)
+    name: StrippedNonEmpty = Field(..., max_length=255)
     category_id: Optional[int] = Field(None, gt=0)
-    quantity_value: Optional[float] = Field(None, gt=0)
+    quantity_value: Optional[PositiveQuantity] = None
     quantity_unit: Optional[str] = Field(None, max_length=50)
     source_item_id: Optional[int] = Field(None, gt=0)
     notes: Optional[str] = None
 
 
 class RestockItemUpdate(BaseModel):
-    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    name: Optional[StrippedNonEmpty] = Field(None, max_length=255)
     category_id: Optional[int] = Field(None, gt=0)
-    quantity_value: Optional[float] = Field(None, gt=0)
+    quantity_value: Optional[PositiveQuantity] = None
     quantity_unit: Optional[str] = Field(None, max_length=50)
-    status: Optional[str] = None
     notes: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_status(cls, data):
+        if isinstance(data, dict) and "status" in data:
+            raise APIError(422, "restock_status_readonly", "Restock status is read-only")
+        return data
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def reject_null_name(cls, value):
+        if value is None:
+            raise ValueError("name cannot be null")
+        return value
 
 
 class RestockDoneRequest(BaseModel):
-    purchased_quantity: float = Field(..., gt=0)
+    purchased_quantity: PositiveQuantity
     # Fields for adding to stock
     category_id: Optional[int] = Field(None, gt=0)
     owner: Optional[str] = None
@@ -198,7 +238,7 @@ class RestockItemResponse(BaseModel):
     quantity_value: Optional[float] = None
     quantity_unit: Optional[str] = None
     source_item_id: Optional[int] = None
-    status: str
+    status: RestockStatus
     notes: Optional[str] = None
     created_at: Optional[datetime] = None
     done_at: Optional[datetime] = None

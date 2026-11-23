@@ -107,6 +107,8 @@ After choosing a recipe:
 
 - **Consume Preview** (`GET /api/recipes/{id}/consume-preview`): Suggests which inventory items match the recipe's ingredients and could be consumed. Nothing is changed. Names are matched through the synonym map, like Today Recommendations: stock named 西红柿 matches a recipe that says 番茄 (also 土豆 / 马铃薯, Tomato / 番茄). A name with a qualifier (土鸡蛋 vs 鸡蛋) does not match.
 - **Cook** (`POST /api/recipes/{id}/cook`): Marks the recipe as cooked. The user confirms which items to consume, and inventory quantities are updated accordingly.
+  Each `consume_items[].quantity` must be positive and finite. NaN and Infinity return `422`.
+  The response can report a `remaining_quantity` of zero when cooking uses up an item.
 
 #### Suggested amounts and units
 

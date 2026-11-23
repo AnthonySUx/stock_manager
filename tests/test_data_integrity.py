@@ -119,7 +119,7 @@ class TestItemPatchNull:
         "field",
         ["name", "category_id", "owner", "purchase_date", "quantity_value",
          "quantity_unit", "location", "unopened_expiration_date",
-         "current_expiration_date", "status"],
+         "current_expiration_date"],
     )
     def test_null_for_required_field_is_422(self, client, db_session, field):
         item = _create_item(client, db_session)

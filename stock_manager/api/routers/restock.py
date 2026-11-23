@@ -83,7 +83,7 @@ def edit_restock(
     db: Session = Depends(get_session),
 ):
     """Update one or more fields of a restock item."""
-    item_data = {k: v for k, v in payload.model_dump().items() if v is not None}
+    item_data = payload.model_dump(exclude_unset=True)
 
     if not item_data:
         raise HTTPException(status_code=400, detail="No fields to update")
