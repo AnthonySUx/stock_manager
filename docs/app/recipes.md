@@ -104,10 +104,12 @@ Ties in score are ordered by recipe id, so the list order is stable.
 
 After choosing a recipe:
 
-- **Consume Preview** (`GET /api/recipes/{id}/consume-preview`): Suggests which inventory items match the recipe's ingredients and could be consumed. Nothing is changed. Names are matched through the synonym map, like Today Recommendations: stock named 西红柿 matches a recipe that says 番茄 (also 土豆 / 马铃薯, Tomato / 番茄). A name with a qualifier (土鸡蛋 vs 鸡蛋) does not match.
+- **Consume Preview** (`GET /api/recipes/{id}/consume-preview`): Suggests which inventory items match the recipe's ingredients and could be consumed. The preview refreshes statuses without deducting stock. Names are matched through the synonym map, like Today Recommendations: stock named 西红柿 matches a recipe that says 番茄 (also 土豆 / 马铃薯, Tomato / 番茄). A name with a qualifier (土鸡蛋 vs 鸡蛋) does not match.
 - **Cook** (`POST /api/recipes/{id}/cook`): Marks the recipe as cooked. The user confirms which items to consume, and inventory quantities are updated accordingly.
   Each `consume_items[].quantity` must be positive and finite. NaN and Infinity return `422`.
   The response can report a `remaining_quantity` of zero when cooking uses up an item.
+  Set `add_depleted_to_restock: true` to queue the amount deducted from each batch that reaches
+  zero. These pending restock entries reference the original batches and commit with the cook.
 
 Cook rejects a repeated `item_id` with `422 duplicate_item` and `params.item_id`.
 Each request line has one outcome in `lines`, in request order:
@@ -126,20 +128,35 @@ list to record a cook without deducting any stock.
 
 #### Suggested amounts and units
 
-Each suggestion carries the amount in the **stock item's unit** (`unit`), because that is what
-Cook deducts. Units are compared, never converted:
+Each suggestion includes `allocations`, a list of `{item_id, quantity}` entries for matching
+batches. The preview uses expiring-soon stock first, then the earliest expiration date.
+It allocates only from batches with compatible units. Existing single-item fields, including
+`suggested_quantity`, describe the first batch. Amounts use the corresponding stock unit.
 
 | Recipe amount | Stock unit | `suggested_quantity` | `needs_user_input` |
 | --- | --- | --- | --- |
 | `2 个` | `个` | `2` | `false` |
 | `500克` | `g` | `500` (aliases: 克/g, 千克/公斤/kg, 毫升/ml, 升/l, 个/pcs) | `false` |
-| `3 个` | `个`, only 1 in stock | `1` (capped at stock) | `false` |
+| `3 个` | `个`, only 1 in stock | `1` (capped at stock) | `true` |
+| `4 个` | Two batches of 2 `个` | `2` (first batch) | `false` |
 | `500 g` | `个` | `null` | `true` |
 | `适量`, `1/2`, `2` (no unit), none | any | `null` | `true` |
 
 When `needs_user_input` is `true`, the app must ask the user how much to deduct (in `unit`).
 `recipe_quantity` is the recipe amount as written (e.g. `500克`), for display; `confidence` is
 `high` when an amount is suggested and `low` otherwise.
+
+
+#### Add missing ingredients to restock
+
+`POST /api/recipes/{id}/missing-to-restock` returns `{created, skipped}`. It uses the same
+missing-ingredient rules as recommendations, based on ingredient names in eligible stock.
+Each missing required ingredient becomes a pending restock item. The recipe supplies the
+name and unit and, when it specifies a positive numeric quantity, the amount. The source
+item and category are unset. Choose a category when completing the purchase.
+
+If a pending entry already matches the name after synonym normalization, the response
+lists `{name, reason: "already_pending"}` in `skipped`. A missing recipe returns `404`.
 
 ---
 

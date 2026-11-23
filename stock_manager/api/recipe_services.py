@@ -1,6 +1,8 @@
 """Business logic for recipe features."""
 import json
 from datetime import timedelta
+from decimal import Decimal
+from math import isfinite
 from typing import Optional
 
 from sqlalchemy import case, func, select
@@ -14,11 +16,12 @@ from stock_manager.api.models import (
     RecipeIngredient,
     RecipeStep,
     RecipeUsageHistory,
+    RestockItem,
     utcnow,
 )
 from stock_manager.api.recipe_schemas import RecipeCreate, RecipeUpdate
 from stock_manager.api.quantity import parse_quantity, same_unit
-from stock_manager.api.services import deduct_item_quantity
+from stock_manager.api.services import _add_stock_to_restock, deduct_item_quantity
 from stock_manager.api.text_search import contains_ci
 
 
@@ -554,6 +557,20 @@ def recipe_matches_scene(recipe: Recipe, scene: str) -> bool:
 
 
 
+def _match_recipe_ingredients(
+    ingredients: list[RecipeIngredient], names: set[str], normalized_names: set[str],
+) -> tuple[list[RecipeIngredient], list[RecipeIngredient]]:
+    """Separate matched ingredients from required ingredients missing from stock."""
+    matched, missing = [], []
+    for ingredient in ingredients:
+        name = ingredient.ingredient_name
+        if name.strip().lower() in names or _normalize_name(name).lower() in normalized_names:
+            matched.append(ingredient)
+        elif not (ingredient.is_seasoning or ingredient.is_optional):
+            missing.append(ingredient)
+    return matched, missing
+
+
 def get_recommendations(
     db: Session,
     limit: int = 10,
@@ -637,24 +654,15 @@ def get_recommendations(
     for recipe in recipes:
         ingredients = ingredients_by_recipe[recipe.id]
 
-        matched = []
-        expiring_used = []
-        missing = []
-
-        for ing in ingredients:
-            ing_norm = _normalize_name(ing.ingredient_name).lower()
-            ing_raw = ing.ingredient_name.strip().lower()
-
-            if ing_norm in inv_norm or ing_raw in inventory_names:
-                matched.append(ing.ingredient_name)
-                if ing_norm in exp_norm or ing_raw in expiring_names:
-                    expiring_used.append(ing.ingredient_name)
-            elif ing.is_seasoning:
-                pass  # skip seasoning for missing detection
-            elif ing.is_optional:
-                pass  # optional ingredients can be omitted
-            else:
-                missing.append(ing.ingredient_name)
+        matched_rows, missing_rows = _match_recipe_ingredients(
+            ingredients, inventory_names, inv_norm,
+        )
+        matched = [ingredient.ingredient_name for ingredient in matched_rows]
+        missing = [ingredient.ingredient_name for ingredient in missing_rows]
+        expiring_used = [
+            name for name in matched
+            if name.strip().lower() in expiring_names or _normalize_name(name).lower() in exp_norm
+        ]
 
         score = len(matched) * 10 + len(expiring_used) * 40
         # Reduce score for conditional (non-always) matched items
@@ -693,6 +701,59 @@ def get_recommendations(
     return scored[:limit]
 
 
+def _restock_recipe_ingredient(db: Session, ingredient: RecipeIngredient) -> RestockItem:
+    quantity, parsed_unit = parse_quantity(ingredient.quantity, ingredient.unit)
+    entry = RestockItem(
+        name=ingredient.ingredient_name,
+        quantity_value=quantity if quantity is not None and isfinite(quantity) and quantity > 0 else None,
+        quantity_unit=ingredient.unit or parsed_unit,
+        category_id=None,
+        source_item_id=None,
+        status="pending",
+        notes=None,
+    )
+    db.add(entry)
+    return entry
+
+
+def add_recipe_gaps_to_restock(db: Session, recipe_id: int) -> dict | None:
+    """Queue missing required ingredients using the recommendation match rules."""
+    from stock_manager.api.category_services import query_recipe_candidate_items
+
+    recipe = get_recipe(db, recipe_id)
+    if recipe is None:
+        return None
+
+    # This query may commit a status refresh. Finish it before staging any restock rows.
+    inventory = query_recipe_candidate_items(db).all()
+    names = {item.name.strip().lower() for item in inventory}
+    normalized_names = {name.lower() for name in _build_normalized_set(list(names))}
+    _, missing = _match_recipe_ingredients(recipe.ingredients, names, normalized_names)
+
+    created, skipped = [], []
+    if not missing:
+        return {"created": created, "skipped": skipped}
+
+    try:
+        pending = (
+            db.query(RestockItem.name).filter(RestockItem.status == "pending").with_for_update()
+        )
+        pending_names = {_normalize_name(name).lower() for (name,) in pending}
+        for ingredient in missing:
+            name = _normalize_name(ingredient.ingredient_name).lower()
+            if name in pending_names:
+                skipped.append({"name": ingredient.ingredient_name, "reason": "already_pending"})
+                continue
+            created.append(_restock_recipe_ingredient(db, ingredient))
+            pending_names.add(name)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    return {"created": created, "skipped": skipped}
+
+
 # ─── Consume Preview and Cook ─────────────────────────────────────
 
 
@@ -725,64 +786,60 @@ def get_consume_preview(db: Session, recipe_id: int) -> Optional[dict]:
         return None
 
     ingredients = db.query(RecipeIngredient).filter(
-        RecipeIngredient.recipe_id == recipe_id
-    ).all()
+        RecipeIngredient.recipe_id == recipe_id,
+    ).order_by(RecipeIngredient.id)
 
-    # Get active inventory - exclude never recipe_usage
     from stock_manager.api.category_services import query_recipe_candidate_items
-    items = query_recipe_candidate_items(db).all()
 
-    suggestions = []
-    unmatched = []
+    batches = sorted(query_recipe_candidate_items(db).all(), key=lambda item: (
+        item.status != "expiring soon", item.current_expiration_date, item.id,
+    ))
+    available = {item.id: _name_keys(item.name) for item in batches}
+    suggestions, unmatched = [], []
 
-    for ing in ingredients:
-        if ing.is_seasoning or ing.is_optional:
+    for ingredient in ingredients:
+        if ingredient.is_seasoning or ingredient.is_optional:
             continue
-        # Both sides go through the synonym map, so stock named 西红柿 matches a
-        # recipe that says 番茄 (and the other way round), like recommendations.
-        # (normalized_name is always _normalize_name(ingredient_name), so it
-        # adds nothing here.)
-        ing_keys = _name_keys(ing.ingredient_name)
+        names = _name_keys(ingredient.ingredient_name)
+        matches = [item for item in batches if item.id in available and names & available[item.id]]
+        if not matches:
+            unmatched.append(ingredient.ingredient_name)
+            continue
 
-        # Find best matching inventory item
-        best_match = None
-        for item in items:
-            if _name_keys(item.name) & ing_keys:
-                if best_match is None:
-                    best_match = item
-                # Prefer expiring soon
-                elif item.status == "expiring soon" and best_match.status != "expiring soon":
-                    best_match = item
-                elif item.status == best_match.status and item.current_expiration_date < best_match.current_expiration_date:
-                    best_match = item
-
-        if best_match is not None:
-            # Suggest only when the recipe amount is in the stock's own unit;
-            # otherwise the user decides how much to deduct (#47).
-            number, recipe_unit = parse_quantity(ing.quantity, ing.unit)
-            if number is not None and number > 0 and same_unit(recipe_unit, best_match.quantity_unit):
-                suggested_qty = min(number, best_match.quantity_value)
-            else:
-                suggested_qty = None
-
-            suggestions.append({
-                "ingredient_name": ing.ingredient_name,
-                "item_id": best_match.id,
-                "item_name": best_match.name,
-                "available_quantity": best_match.quantity_value,
-                "available_unit": best_match.quantity_unit,
-                "recipe_quantity": _recipe_quantity_text(ing.quantity, ing.unit),
-                "suggested_quantity": suggested_qty,
-                # Amounts are deducted in the stock unit.
-                "unit": best_match.quantity_unit,
-                "needs_user_input": suggested_qty is None,
-                "status": best_match.status,
-                "current_expiration_date": best_match.current_expiration_date,
-                "confidence": "high" if suggested_qty is not None else "low",
-            })
-            items.remove(best_match)
+        number, recipe_unit = parse_quantity(ingredient.quantity, ingredient.unit)
+        compatible = [item for item in matches if same_unit(recipe_unit, item.quantity_unit)]
+        allocations = []
+        first = matches[0]
+        needs_user_input = True
+        if number is not None and isfinite(number) and number > 0 and compatible:
+            remaining = Decimal(str(number))
+            first = compatible[0]
+            for item in compatible:
+                quantity = min(remaining, Decimal(str(item.quantity_value)))
+                allocations.append({"item_id": item.id, "quantity": float(quantity)})
+                del available[item.id]
+                remaining -= quantity
+                if not remaining:
+                    break
+            needs_user_input = remaining > 0
         else:
-            unmatched.append(ing.ingredient_name)
+            del available[first.id]
+
+        suggestions.append({
+            "ingredient_name": ingredient.ingredient_name,
+            "item_id": first.id,
+            "item_name": first.name,
+            "available_quantity": first.quantity_value,
+            "available_unit": first.quantity_unit,
+            "recipe_quantity": _recipe_quantity_text(ingredient.quantity, ingredient.unit),
+            "suggested_quantity": allocations[0]["quantity"] if allocations else None,
+            "unit": first.quantity_unit,
+            "allocations": allocations,
+            "needs_user_input": needs_user_input,
+            "status": first.status,
+            "current_expiration_date": first.current_expiration_date,
+            "confidence": "high" if allocations else "low",
+        })
 
     return {
         "recipe_id": recipe.id,
@@ -792,12 +849,14 @@ def get_consume_preview(db: Session, recipe_id: int) -> Optional[dict]:
     }
 
 
-def _cook_line(db: Session, entry: dict) -> tuple[dict, dict | None]:
+def _cook_line(db: Session, entry: dict, *, add_depleted_to_restock: bool) -> tuple[dict, dict | None]:
     item_id = entry["item_id"]
     quantity = entry["quantity"]
     item, deducted = deduct_item_quantity(db, item_id, quantity, recipe_only=True)
     line = {"item_id": item_id, "ingredient_name": entry.get("ingredient_name", "")}
     if deducted:
+        if add_depleted_to_restock and item.quantity_value == 0:
+            _add_stock_to_restock(db, item, quantity, source_item_id=item.id)
         return (
             {**line, "result": "consumed", "consumed_quantity": quantity},
             {
@@ -824,6 +883,8 @@ def cook_recipe_and_consume(
     recipe_id: int,
     consume_items: list[dict],
     notes: Optional[str] = None,
+    *,
+    add_depleted_to_restock: bool = False,
 ) -> Optional[dict]:
     """Record a cook and its successful deductions in a single transaction."""
     entries = {}
@@ -839,7 +900,10 @@ def cook_recipe_and_consume(
 
     try:
         # Acquire stock locks in the same order across requests.
-        outcomes = {item_id: _cook_line(db, entries[item_id]) for item_id in sorted(entries)}
+        outcomes = {
+            item_id: _cook_line(db, entries[item_id], add_depleted_to_restock=add_depleted_to_restock)
+            for item_id in sorted(entries)
+        }
         lines = []
         consumed = []
         for item_id in entries:
