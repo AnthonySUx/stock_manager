@@ -427,13 +427,15 @@ class TestParse:
     def test_disabled_ai(self, client):
         response = client.post(PARSE, json=_parse_body())
         assert response.status_code == 503
-        assert response.json() == {"code": "ai_unavailable"}
+        assert response.json()["code"] == "ai_unavailable"
+        assert {"params", "detail"} <= response.json().keys()
 
     def test_bad_ai_reply(self, client, fake_ai):
         fake_ai.reply = '{"unparsed_fragments": []}'
         response = client.post(PARSE, json=_parse_body())
         assert response.status_code == 502
-        assert response.json() == {"code": "ai_upstream_error"}
+        assert response.json()["code"] == "ai_upstream_error"
+        assert {"params", "detail"} <= response.json().keys()
 
     def test_dropped_ops_and_fields_have_warnings(self, client, fake_ai):
         result = _parse(client, fake_ai, [

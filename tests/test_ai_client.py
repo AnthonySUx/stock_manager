@@ -367,11 +367,11 @@ class TestCapabilities:
         assert response.status_code == 401
 
 
-# ─── ai_saved is gone ─────────────────────────────────────────────
+# ─── ai_saved filtering ─────────────────────────────────────────────
 
 
-def test_ai_saved_filter_is_rejected(client):
-    assert client.get("/api/recipes", params={"source_type": "ai_saved"}).status_code == 422
+def test_ai_saved_filter_is_accepted(client):
+    assert client.get("/api/recipes", params={"source_type": "ai_saved"}).status_code == 200
     assert client.get("/api/recipes", params={"source_type": "user"}).status_code == 200
 
 
@@ -411,12 +411,13 @@ class TestErrorDetails:
         assert str(info.value) == f"AI returned HTTP {status} (check AI_API_KEY)"
         assert "sk-secret" not in str(info.value)
 
-    def test_handler_logs_the_reason_and_returns_only_the_code(self, client, fake_ai, caplog):
+    def test_handler_logs_the_reason_and_returns_error_envelope(self, client, fake_ai, caplog):
         fake_ai.responses = [httpx.Response(400, json={"error": {"message": "Model Not Exist"}})]
         with caplog.at_level(logging.WARNING, logger="stock_manager.api.main"):
             response = client.post("/api/recipes/explore", json={"mode": "natural_language", "natural_language": "晚饭"})
         assert response.status_code == 502
-        assert response.json() == {"code": "ai_upstream_error"}
+        assert response.json()["code"] == "ai_upstream_error"
+        assert {"params", "detail"} <= response.json().keys()
         assert "POST /api/recipes/explore -> ai_upstream_error [http_error]: AI returned HTTP 400: Model Not Exist" in caplog.text
 
     def test_no_usable_ideas_logs_the_problems(self, client, fake_ai, caplog):

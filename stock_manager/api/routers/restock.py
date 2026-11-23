@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from stock_manager.api import schemas
@@ -37,10 +37,10 @@ def _validate_references(
         try:
             validate_category_exists(db, category_id)
         except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+            raise APIError(400, "invalid_category", str(e))
     if source_item_id is not None and get_item(db, source_item_id) is None:
-        raise HTTPException(
-            status_code=400, detail=f"Source item id={source_item_id} not found"
+        raise APIError(
+            400, "source_item_not_found", f"Source item id={source_item_id} not found"
         )
 
 
@@ -61,7 +61,7 @@ def get_restock_endpoint(
     """Get a single restock item by ID."""
     item = get_restock_item(db, item_id)
     if item is None:
-        raise HTTPException(status_code=404, detail="Restock item not found")
+        raise APIError(404, "restock_not_found", "Restock item not found")
     return item
 
 
@@ -87,12 +87,12 @@ def edit_restock(
     item_data = payload.model_dump(exclude_unset=True)
 
     if not item_data:
-        raise HTTPException(status_code=400, detail="No fields to update")
+        raise APIError(400, "no_fields_to_update", "No fields to update")
 
     _validate_references(db, item_data.get("category_id"))
     result = update_restock_item(db, item_id, item_data)
     if result is None:
-        raise HTTPException(status_code=404, detail="Restock item not found")
+        raise APIError(404, "restock_not_found", "Restock item not found")
     return result
 
 
@@ -112,21 +112,21 @@ def done_restock(
     """
     item = get_restock_item(db, item_id)
     if item is None:
-        raise HTTPException(status_code=404, detail="Restock item not found")
+        raise APIError(404, "restock_not_found", "Restock item not found")
     if item.status == "done":
-        raise HTTPException(status_code=409, detail=RESTOCK_ALREADY_DONE_DETAIL)
+        raise APIError(409, "restock_already_done", RESTOCK_ALREADY_DONE_DETAIL)
 
     purchased_qty = payload.purchased_quantity
 
     # Add the purchased item(s) to stock
     final_category_id = payload.category_id or item.category_id
     if final_category_id is None:
-        raise HTTPException(status_code=400, detail="Category is required when restocking into inventory")
+        raise APIError(400, "category_required", "Category is required when restocking into inventory")
     from stock_manager.api.category_services import validate_category_exists
     try:
         validate_category_exists(db, final_category_id)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise APIError(400, "invalid_category", str(e))
 
     source = get_item(db, item.source_item_id) if item.source_item_id is not None else None
     stock_context = {}
@@ -154,7 +154,7 @@ def done_restock(
     try:
         complete_restock_purchase(db, item, purchased_qty, stock_data)
     except RestockAlreadyDoneError:
-        raise HTTPException(status_code=409, detail=RESTOCK_ALREADY_DONE_DETAIL)
+        raise APIError(409, "restock_already_done", RESTOCK_ALREADY_DONE_DETAIL)
 
     return {"message": f"Added {purchased_qty} {unit} to stock"}
 
@@ -166,7 +166,7 @@ def delete_restock_endpoint(
 ):
     """Delete a restock item."""
     if not delete_restock_item(db, item_id):
-        raise HTTPException(status_code=404, detail="Restock item not found")
+        raise APIError(404, "restock_not_found", "Restock item not found")
     return {"message": "Restock item deleted"}
 
 
@@ -180,9 +180,9 @@ def clean_restock(
     Only `done` items can be cleaned; pending items must be deleted one by one.
     """
     if status != "done":
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot clean restock items with status '{status}'. Allowed: ['done']",
+        raise APIError(
+            400, "invalid_restock_clean_status",
+            f"Cannot clean restock items with status '{status}'. Allowed: ['done']",
         )
     count = delete_restock_items_by_status(db, status)
     return {"message": f"{count} restock item(s) deleted"}

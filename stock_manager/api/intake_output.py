@@ -22,6 +22,7 @@ from stock_manager.api.intake_schemas import (
     ExpirationSource,
     ImageKind,
     IntakeCandidate,
+    OPENED_DATE_FIELDS,
     QuestionCode,
 )
 from stock_manager.api.quantity import same_unit
@@ -500,10 +501,14 @@ def clean_parse_output(
     for index, operation in prepared:
         match operation["op"]:
             case "add":
+                raw_candidate = operation["candidate"]
+                for field in OPENED_DATE_FIELDS:
+                    if field in raw_candidate:
+                        warnings.append(warning("op_field_dropped", index=index, field=field))
                 source = operation.get("source") if image_count else None
                 receipt = (receipts or {}).get(index)
                 candidate = _add_candidate(
-                    operation["candidate"], context, used_ids, source, receipt=receipt, image_count=image_count,
+                    raw_candidate, context, used_ids, source, receipt=receipt, image_count=image_count,
                 )
                 if candidate is None:
                     warnings.append(warning("op_invalid", index=index))

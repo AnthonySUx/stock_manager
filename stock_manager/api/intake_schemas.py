@@ -12,6 +12,7 @@ MAX_DRAFT_ITEMS = 100
 MAX_TEXT_LENGTH = 4000
 MAX_IMAGES = 8
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
+OPENED_DATE_FIELDS = ("opened_date", "opened_expiration_date")
 
 ExpirationSource = Literal["printed", "stated", "estimated", "none"]
 ImageKind = Literal["receipt", "product_closeup", "product_overview"]
@@ -45,6 +46,8 @@ class IntakeCandidate(ReceiptCandidateFields):
     location: str | None = Field(None, max_length=100)
     purchase_date: DateStr | None = None
     unopened_expiration_date: ExpirationStr | None = None
+    opened_date: DateStr | None = None
+    opened_expiration_date: ExpirationStr | None = None
     suggested_unopened_expiration_date: DateStr | None = None
     expiration_source: ExpirationSource = "none"
     confidence: Confidence
@@ -56,8 +59,11 @@ class IntakeCandidate(ReceiptCandidateFields):
     notes: str | None = None
 
     @model_serializer(mode="wrap")
-    def serialize_receipt_fields(self, serialize):
+    def serialize_optional_fields(self, serialize):
         result = serialize(self)
+        for field in OPENED_DATE_FIELDS:
+            if getattr(self, field) is None:
+                result.pop(field, None)
         if self.source.input_kind != "receipt":
             for field in ReceiptCandidateFields.model_fields:
                 if getattr(self, field) is None:

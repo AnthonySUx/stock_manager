@@ -1,5 +1,7 @@
 # Features
 
+See [API errors](errors.md) for the HTTP error format and codes.
+
 Core App features for inventory management.
 
 ---

@@ -1,5 +1,7 @@
 # Troubleshooting
 
+See [API errors](errors.md) for the HTTP error format and codes.
+
 Common issues and solutions.
 
 ---
