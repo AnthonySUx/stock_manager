@@ -4,7 +4,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from stock_manager.api.schemas import ItemStatus, PositiveQuantity, RestockItemResponse
+from stock_manager.api.schemas import ItemStatus, PositiveStockQuantity, RestockItemResponse
 
 # Dish categories = HowToCook `dishes/<dir>` names (template excluded), so user
 # recipes and imported ones share one vocabulary (#46).
@@ -190,7 +190,7 @@ class ConsumePreviewResponse(BaseModel):
 class CookConsumeItem(BaseModel):
     """User-confirmed inventory consumption for a cooked recipe."""
     item_id: int
-    quantity: PositiveQuantity
+    quantity: PositiveStockQuantity
     ingredient_name: str = ""
 
 

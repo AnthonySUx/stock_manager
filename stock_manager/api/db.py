@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -46,6 +46,19 @@ DATABASE_URL = require_database_url(
 )
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+
+
+def _set_mysql_utc(dbapi_connection, _connection_record):
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("SET time_zone = '+00:00'")
+    finally:
+        cursor.close()
+
+
+if engine.dialect.name == "mysql":
+    event.listen(engine, "connect", _set_mysql_utc)
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 

@@ -6,6 +6,7 @@ units (with a few spelling aliases); there is deliberately no conversion
 table, so 500 g never turns into 0.5 kg and 500 g never matches "3 个".
 """
 import re
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Optional
 
 # Spelling aliases only. Different units stay different (g != kg).
@@ -62,3 +63,25 @@ def same_unit(a: Optional[str], b: Optional[str]) -> bool:
     """True when both units are present and mean the same spelling."""
     na, nb = normalize_unit(a), normalize_unit(b)
     return bool(na) and na == nb
+
+
+_STOCK_QUANTITY_SCALE = Decimal("0.001")
+_STOCK_QUANTITY_LIMIT = Decimal("1000000000")
+
+
+def round_stock_quantity(value: Decimal) -> Decimal:
+    """Round recipe amounts to stock precision without imposing a per-batch limit."""
+    if value.as_tuple().exponent < -3:
+        return value.quantize(_STOCK_QUANTITY_SCALE, rounding=ROUND_HALF_UP)
+    return value
+
+
+def quantize_stock_quantity(value: Decimal | float | int) -> Decimal:
+    """Normalize a quantity to the precision stored in the inventory tables."""
+    quantity = value if isinstance(value, Decimal) else Decimal(str(value))
+    if not quantity.is_finite() or abs(quantity) >= _STOCK_QUANTITY_LIMIT:
+        raise ValueError("Quantity must fit in Numeric(12, 3)")
+    result = round_stock_quantity(quantity)
+    if abs(result) >= _STOCK_QUANTITY_LIMIT:
+        raise ValueError("Quantity must fit in Numeric(12, 3)")
+    return result

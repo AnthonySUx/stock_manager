@@ -10,7 +10,7 @@ from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import Float, Numeric, create_engine, inspect, text
 from sqlalchemy.exc import IntegrityError
 
 from stock_manager.api import schema_version
@@ -44,9 +44,18 @@ def _alembic(url):
     return config
 
 
-def _schema_diff(engine):
+def _schema_diff(engine, tables=None):
+    def include_object(obj, name, type_, reflected, compare_to):
+        if tables is None:
+            return True
+        return (name if type_ == "table" else obj.table.name) in tables
+
     with engine.connect() as connection:
-        context = MigrationContext.configure(connection, opts={"compare_type": True, "compare_server_default": True})
+        context = MigrationContext.configure(connection, opts={
+            "compare_type": True,
+            "compare_server_default": True,
+            "include_object": include_object,
+        })
         return compare_metadata(context, Base.metadata)
 
 
@@ -378,7 +387,7 @@ def test_0005_receipt_alias_schema_upgrades_and_downgrades(fresh_db):
     command.upgrade(config, "0005")
     inspector = inspect(engine)
     assert _revision(engine) == "0005"
-    assert _schema_diff(engine) == []
+    assert _schema_diff(engine, tables={"receipt_item_aliases", "receipt_alias_names"}) == []
     assert "family_id" not in {column["name"] for column in inspector.get_columns("receipt_item_aliases")}
     assert {tuple(constraint["column_names"]) for constraint in inspector.get_unique_constraints("receipt_item_aliases")} == {
         ("store_key", "raw_name_normalized"),
@@ -481,3 +490,83 @@ def test_0006_status_checks_upgrade_and_downgrade_preserve_rows(fresh_db):
         assert connection.execute(text(
             "SELECT source_item_id FROM restock_items WHERE id = 1"
         )).scalar_one() == 1
+
+
+def test_0007_upgrade_and_downgrade_preserve_status_checks_and_rows(fresh_db):
+    url, engine = fresh_db
+    config = _alembic(url)
+    command.upgrade(config, "0006")
+    _seed_status_rows(engine)
+    with engine.begin() as connection:
+        connection.execute(text("UPDATE items SET quantity_value = 1.23456 WHERE id = 1"))
+        connection.execute(text(
+            "UPDATE restock_items SET quantity_value = 2.34567, "
+            "created_at = '2026-11-20 10:00:00' WHERE id = 1"
+        ))
+        connection.execute(text(
+            "INSERT INTO recipes (id, source_type, source_name, title, is_user_created) "
+            "VALUES (1, 'user', 'User', 'Soup', 1)"
+        ))
+        connection.execute(text(
+            "INSERT INTO recipe_favorites (id, recipe_id, note) VALUES "
+            "(1, 1, 'First'), (2, 1, 'Duplicate')"
+        ))
+
+    command.upgrade(config, "0007")
+
+    for revision in ("0007", "0006"):
+        assert _revision(engine) == revision
+        inspector = inspect(engine)
+        for table, index, column in (
+            ("items", "ix_items_status", "status"),
+            ("restock_items", "ix_restock_items_status", "status"),
+            ("recipes", "ix_recipes_source_type", "source_type"),
+        ):
+            indexes = {entry["name"]: entry["column_names"] for entry in inspector.get_indexes(table)}
+            assert indexes == ({index: [column]} if revision == "0007" else {})
+        for table in ("items", "restock_items"):
+            assert f"ck_{table}_status" in _status_constraint_names(engine, table)
+            quantity_type = next(
+                column["type"] for column in inspector.get_columns(table)
+                if column["name"] == "quantity_value"
+            )
+            if revision == "0007":
+                assert isinstance(quantity_type, Numeric)
+                assert (quantity_type.precision, quantity_type.scale) == (12, 3)
+            else:
+                assert isinstance(quantity_type, Float)
+            with pytest.raises(IntegrityError), engine.begin() as connection:
+                connection.execute(text(f"UPDATE {table} SET status = 'banana' WHERE id = 1"))
+
+        favorite_keys = inspector.get_unique_constraints("recipe_favorites")
+        restock_columns = {col["name"]: col for col in inspector.get_columns("restock_items")}
+        with engine.connect() as connection:
+            assert connection.execute(text(
+                "SELECT quantity_value, status FROM items WHERE id = 1"
+            )).one() == (1.235, "active")
+            assert connection.execute(text(
+                "SELECT quantity_value, status, source_item_id FROM restock_items ORDER BY id"
+            )).all() == [(2.346, "pending", 1), (None, "done", None)]
+            assert connection.execute(text(
+                "SELECT id, note FROM recipe_favorites"
+            )).all() == [(1, "First")]
+            if revision == "0007":
+                assert restock_columns["updated_at"]["nullable"] is False
+                assert connection.execute(text(
+                    "SELECT updated_at = created_at FROM restock_items WHERE id = 1"
+                )).scalar_one()
+                assert {key["name"]: key["column_names"] for key in favorite_keys} == {
+                    "uq_recipe_favorites_recipe_id": ["recipe_id"],
+                }
+            else:
+                assert "updated_at" not in restock_columns
+                assert favorite_keys == []
+
+        if revision == "0007":
+            with pytest.raises(IntegrityError), engine.begin() as connection:
+                connection.execute(text("INSERT INTO recipe_favorites (recipe_id) VALUES (1)"))
+            command.downgrade(config, "0006")
+
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO recipe_favorites (recipe_id) VALUES (1)"))
+        assert connection.execute(text("SELECT COUNT(*) FROM recipe_favorites")).scalar_one() == 2

@@ -1,6 +1,7 @@
 """Pydantic schemas for request/response validation."""
 
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Annotated, Literal, Optional
 
 from pydantic import (
@@ -13,11 +14,24 @@ from pydantic import (
 )
 
 from stock_manager.api.errors import APIError
+from stock_manager.api.quantity import quantize_stock_quantity
 
 
 ItemStatus = Literal["active", "expiring soon", "expired", "consumed"]
 RestockStatus = Literal["pending", "done"]
 PositiveQuantity = Annotated[float, Field(gt=0, allow_inf_nan=False)]
+
+
+def _validate_stock_quantity(value: Decimal) -> Decimal:
+    quantity = quantize_stock_quantity(value)
+    if quantity <= 0:
+        raise ValueError("Quantity must be positive after rounding to three decimal places")
+    return quantity
+
+
+PositiveStockQuantity = Annotated[
+    Decimal, Field(gt=0, allow_inf_nan=False), AfterValidator(_validate_stock_quantity)
+]
 
 
 def _strip_text(value):
@@ -110,7 +124,7 @@ class ItemCreate(BaseModel):
     # Defaults to today in the household timezone; filled in by the router
     # because a schema default cannot read settings (#65).
     purchase_date: Optional[DateStr] = None
-    quantity_value: PositiveQuantity
+    quantity_value: PositiveStockQuantity
     quantity_unit: str = Field(..., min_length=1, max_length=50)
     location: StrippedNonEmpty = Field(..., max_length=100)
     unopened_expiration_date: ExpirationStr = Field(..., min_length=1)
@@ -126,7 +140,7 @@ class ItemUpdate(BaseModel):
     category_id: Optional[int] = Field(None, gt=0)
     owner: Optional[StrippedNonEmpty] = Field(None, max_length=100)
     purchase_date: Optional[DateStr] = None
-    quantity_value: Optional[PositiveQuantity] = None
+    quantity_value: Optional[PositiveStockQuantity] = None
     quantity_unit: Optional[str] = Field(None, min_length=1, max_length=50)
     location: Optional[StrippedNonEmpty] = Field(None, max_length=100)
     unopened_expiration_date: Optional[ExpirationStr] = None
@@ -158,7 +172,7 @@ class ItemUpdate(BaseModel):
 
 
 class ConsumeRequest(BaseModel):
-    quantity: PositiveQuantity
+    quantity: PositiveStockQuantity
     add_to_restock: bool = False
 
 
@@ -190,7 +204,7 @@ class ItemResponse(BaseModel):
 class RestockItemCreate(BaseModel):
     name: StrippedNonEmpty = Field(..., max_length=255)
     category_id: Optional[int] = Field(None, gt=0)
-    quantity_value: Optional[PositiveQuantity] = None
+    quantity_value: Optional[PositiveStockQuantity] = None
     quantity_unit: Optional[str] = Field(None, max_length=50)
     source_item_id: Optional[int] = Field(None, gt=0)
     notes: Optional[str] = None
@@ -199,7 +213,7 @@ class RestockItemCreate(BaseModel):
 class RestockItemUpdate(BaseModel):
     name: Optional[StrippedNonEmpty] = Field(None, max_length=255)
     category_id: Optional[int] = Field(None, gt=0)
-    quantity_value: Optional[PositiveQuantity] = None
+    quantity_value: Optional[PositiveStockQuantity] = None
     quantity_unit: Optional[str] = Field(None, max_length=50)
     notes: Optional[str] = None
 
@@ -219,7 +233,7 @@ class RestockItemUpdate(BaseModel):
 
 
 class RestockDoneRequest(BaseModel):
-    purchased_quantity: PositiveQuantity
+    purchased_quantity: PositiveStockQuantity
     # Fields for adding to stock
     category_id: Optional[int] = Field(None, gt=0)
     owner: Optional[str] = None

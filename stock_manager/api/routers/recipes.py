@@ -306,7 +306,7 @@ def _load_explore_inventory(
     found = {i.id for i in items}
     bad_ids = [i for i in wanted if i not in found]
     inv_dicts = [
-        {"name": i.name, "quantity": i.quantity_value, "unit": i.quantity_unit,
+        {"name": i.name, "quantity": float(i.quantity_value), "unit": i.quantity_unit,
          "status": i.status, "recipe_usage": i.category.recipe_usage}
         for i in items
     ]
