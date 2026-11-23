@@ -257,7 +257,8 @@ def test_image_http_error_logs_provider_reason(client, fake_vision, caplog):
     response = client.post(PARSE, files=_multipart(JPEG))
 
     assert response.status_code == 502
-    assert response.json() == {"code": "ai_upstream_error"}
+    assert response.json()["code"] == "ai_upstream_error"
+    assert {"params", "detail"} <= response.json().keys()
     assert "AI returned HTTP 400: image_url is not supported" in caplog.text
 
 
@@ -468,7 +469,8 @@ def test_image_reply_without_operations_is_502(client, fake_vision):
     fake_vision.reply = '{"unparsed_fragments":[]}'
     response = client.post(PARSE, files=_multipart(JPEG))
     assert response.status_code == 502
-    assert response.json() == {"code": "ai_upstream_error"}
+    assert response.json()["code"] == "ai_upstream_error"
+    assert {"params", "detail"} <= response.json().keys()
 
 
 def test_large_image_never_creates_temp_files_or_writes_db(client, db_session, fake_vision, monkeypatch, caplog):
@@ -531,7 +533,8 @@ def _part_header(name, filename=None):
 def test_vision_off_does_not_read_the_body(client, fake_ai):
     response, seen = _stream_post(client, [b"unread body"])
     assert response.status_code == 503
-    assert response.json() == {"code": "ai_vision_unavailable"}
+    assert response.json()["code"] == "ai_vision_unavailable"
+    assert {"params", "detail"} <= response.json().keys()
     assert not seen and not fake_ai.requests
 
 

@@ -1,10 +1,11 @@
 """Categories REST API router."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from stock_manager.api import schemas
 from stock_manager.api.db import get_session
+from stock_manager.api.errors import APIError
 from stock_manager.api.category_services import (
     create_category,
     delete_category,
@@ -31,7 +32,7 @@ def list_categories_flat(db: Session = Depends(get_session)):
 def get_category_endpoint(category_id: int, db: Session = Depends(get_session)):
     cat = get_category(db, category_id)
     if cat is None:
-        raise HTTPException(status_code=404, detail='Category not found')
+        raise APIError(404, "category_not_found", "Category not found")
     return cat
 
 
@@ -43,7 +44,7 @@ def create_category_endpoint(
     try:
         return create_category(db, payload.model_dump())
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise APIError(400, "invalid_category", str(e))
 
 
 @router.patch('/{category_id}', response_model=schemas.CategoryResponse)
@@ -55,9 +56,9 @@ def update_category_endpoint(
     try:
         result = update_category(db, category_id, payload.model_dump(exclude_unset=True))
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise APIError(400, "invalid_category", str(e))
     if result is None:
-        raise HTTPException(status_code=404, detail='Category not found')
+        raise APIError(404, "category_not_found", "Category not found")
     return result
 
 
@@ -69,7 +70,7 @@ def delete_category_endpoint(
     try:
         ok = delete_category(db, category_id)
     except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        raise APIError(409, "category_delete_conflict", str(e))
     if not ok:
-        raise HTTPException(status_code=404, detail='Category not found')
+        raise APIError(404, "category_not_found", "Category not found")
     return {'message': 'Category deleted'}

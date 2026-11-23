@@ -449,7 +449,8 @@ class TestExploreStreamEndpoint:
     def test_ai_off_is_503_before_the_stream(self, client):
         response = _stream(client)
         assert response.status_code == 503
-        assert response.json() == {"code": "ai_unavailable"}
+        assert response.json()["code"] == "ai_unavailable"
+        assert {"params", "detail"} <= response.json().keys()
 
     def test_bad_inventory_ids_are_400(self, client, fake_ai):
         response = _stream(client, mode="structured", natural_language=None,

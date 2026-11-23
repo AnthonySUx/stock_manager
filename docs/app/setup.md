@@ -1,5 +1,7 @@
 # Setup
 
+See [API errors](errors.md) for the HTTP error format and codes.
+
 Prerequisites, database configuration, and steps to run the backend and native iOS app.
 
 ---

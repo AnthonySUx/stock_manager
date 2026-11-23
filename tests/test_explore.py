@@ -63,7 +63,8 @@ class TestResponseShapes:
         fake_ai.reply = reply
         response = _explore_nl(client)
         assert response.status_code == 502
-        assert response.json() == {"code": "ai_upstream_error"}
+        assert response.json()["code"] == "ai_upstream_error"
+        assert {"params", "detail"} <= response.json().keys()
 
     def test_malformed_idea_is_skipped(self, client, fake_ai):
         bad = {"title": "坏数据", "matched_ingredients": "番茄"}  # should be a list
@@ -76,7 +77,8 @@ class TestResponseShapes:
         fake_ai.reply = json.dumps([{"title": "x"}])
         response = client.post("/api/recipes/explore/expand", json={"idea": IDEA})
         assert response.status_code == 502
-        assert response.json() == {"code": "ai_upstream_error"}
+        assert response.json()["code"] == "ai_upstream_error"
+        assert {"params", "detail"} <= response.json().keys()
 
     def test_expand_normalizes_common_ai_field_variants(self, client, fake_ai):
         fake_ai.reply = json.dumps(
@@ -247,7 +249,8 @@ class TestAIErrors:
 
         for response in (explore, expand):
             assert response.status_code == 503
-            assert response.json() == {"code": "ai_unavailable"}
+            assert response.json()["code"] == "ai_unavailable"
+            assert {"params", "detail"} <= response.json().keys()
 
     def test_provider_failure_is_502(self, client, fake_ai):
         import httpx
@@ -255,7 +258,8 @@ class TestAIErrors:
         fake_ai.responses = [httpx.Response(500), httpx.Response(503)]
         response = _explore_nl(client)
         assert response.status_code == 502
-        assert response.json() == {"code": "ai_upstream_error"}
+        assert response.json()["code"] == "ai_upstream_error"
+        assert {"params", "detail"} <= response.json().keys()
         assert len(fake_ai.requests) == 2  # one retry
 
     def test_expand_success_still_returns_a_draft(self, client, fake_ai):

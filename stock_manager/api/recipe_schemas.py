@@ -64,6 +64,8 @@ class RecipeCreate(BaseModel):
     ingredients: list[IngredientSchema] = []
     steps: list[StepSchema] = []
 
+    ai_draft_hash: Optional[str] = Field(None, pattern="^[0-9a-f]{64}$")
+
 
 class RecipeUpdate(BaseModel):
     title: Optional[str] = Field(None, min_length=1, max_length=255)
@@ -343,6 +345,7 @@ class RecipeDraft(BaseModel):
 class ExpandResponse(BaseModel):
     """Response from expanding an idea into a recipe draft."""
     recipe_draft: RecipeDraft
+    draft_hash: str
     locale: str
     warnings: list[AIWarning] = []
 

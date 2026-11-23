@@ -2,6 +2,7 @@
 import json
 from datetime import timedelta
 from decimal import Decimal
+from hashlib import sha256
 from math import isfinite
 from typing import Optional
 
@@ -19,7 +20,7 @@ from stock_manager.api.models import (
     RestockItem,
     utcnow,
 )
-from stock_manager.api.recipe_schemas import RecipeCreate, RecipeUpdate
+from stock_manager.api.recipe_schemas import RecipeCreate, RecipeDraft, RecipeUpdate
 from stock_manager.api.quantity import parse_quantity, same_unit
 from stock_manager.api.services import _add_stock_to_restock, deduct_item_quantity
 from stock_manager.api.text_search import contains_ci
@@ -265,6 +266,18 @@ def get_recipe(db: Session, recipe_id: int) -> Optional[Recipe]:
     return db.query(Recipe).filter(Recipe.id == recipe_id).first()
 
 
+def recipe_draft_hash(data: RecipeDraft | RecipeCreate) -> str:
+    """Hash the full draft content apart from the user-selected category."""
+    fields = RecipeDraft.model_fields.keys() - {"category"}
+    content = data.model_dump(mode="json", include=fields)
+    canonical = json.dumps(content, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def is_user_editable(recipe: Recipe) -> bool:
+    return recipe.source_type in ("user", "ai_saved")
+
+
 def create_recipe(db: Session, data: RecipeCreate, source_type: str = "user") -> Recipe:
     """Create a new recipe (user-created or AI-saved)."""
     recipe = Recipe(
@@ -277,7 +290,7 @@ def create_recipe(db: Session, data: RecipeCreate, source_type: str = "user") ->
         servings=data.servings,
         cook_time_minutes=data.cook_time_minutes,
         raw_markdown=data.raw_markdown,
-        is_user_created=(source_type == "user"),
+        is_user_created=source_type in ("user", "ai_saved"),
     )
     db.add(recipe)
     db.flush()
@@ -308,11 +321,11 @@ def create_recipe(db: Session, data: RecipeCreate, source_type: str = "user") ->
 
 
 def update_recipe(db: Session, recipe_id: int, data: RecipeUpdate) -> Optional[Recipe]:
-    """Update a user-created recipe (saved AI drafts are user recipes, #66)."""
+    """Update an editable recipe and mark edited AI drafts as user recipes."""
     recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
     if recipe is None:
         return None
-    if recipe.source_type != "user":
+    if not is_user_editable(recipe):
         return None  # cannot edit HowToCook recipes directly
 
     update_data = data.model_dump(exclude_unset=True, exclude={"ingredients", "steps"})
@@ -343,6 +356,13 @@ def update_recipe(db: Session, recipe_id: int, data: RecipeUpdate) -> Optional[R
                 instruction=step.instruction,
             ))
 
+    if recipe.source_type == "ai_saved" and (
+        update_data or data.ingredients is not None or data.steps is not None
+    ):
+        recipe.source_type = "user"
+        recipe.source_name = "User"
+        recipe.is_user_created = True
+
     db.commit()
     db.refresh(recipe)
     return recipe
@@ -353,7 +373,7 @@ def delete_recipe(db: Session, recipe_id: int) -> bool:
     recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
     if recipe is None:
         return False
-    if recipe.source_type != "user":
+    if not is_user_editable(recipe):
         return False
     # Remove rows that reference this recipe so the delete does not violate
     # foreign keys (issue #43). Forks are kept: the `forks` backref sets their
@@ -374,7 +394,7 @@ def fork_recipe(db: Session, recipe_id: int) -> Optional[Recipe]:
     original = db.query(Recipe).filter(Recipe.id == recipe_id).first()
     if original is None:
         return None
-    if original.source_type == "user" and original.is_user_created:
+    if is_user_editable(original):
         return original  # already user-owned
 
     recipe = Recipe(

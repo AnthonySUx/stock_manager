@@ -11,14 +11,14 @@ Users can:
 - Browse recipes sorted by relevance
 - Search recipes by title or description
 - View recipe details (categories, difficulty, servings, cook time, ingredients, steps)
-- Filter by source type (`howtocook`, `user`). Saved AI drafts are `user` recipes.
+- Filter by source type (`howtocook`, `user`, `ai_saved`).
 - Filter by category
 - Show only favorites
 - Create personal recipes
-- Fork existing recipes as personal editable copies
-- Edit user-created recipes
-- Delete user-created recipes (its favorite and cooking history are removed with it;
-  recipes forked from it are kept)
+- Fork imported recipes as personal editable copies
+- Edit personal and AI-saved recipes
+- Delete personal and AI-saved recipes. This removes their favorites and cooking history.
+  Forks remain available.
 
 ### Sources
 
@@ -27,6 +27,11 @@ Recipes come from:
 - **HowToCook** (imported from [Anduin2017/HowToCook](https://github.com/Anduin2017/HowToCook), The Unlicense)
 - **User-created** (created via the API or frontend)
 - **AI-saved** (saved from Explore Recipes drafts)
+
+`is_user_created` indicates that a recipe belongs to the household and can be
+edited or deleted. It is true for both `user` and `ai_saved` recipes.
+Use `source_type` to distinguish their origins. Both sources receive the same
+household-recipe priority in lists and search.
 
 ### Favorites
 
@@ -401,17 +406,15 @@ ping keeps an idle-based client timeout (such as `URLRequest.timeoutInterval`) f
 The AI may answer Explore with `{"ideas": [...]}` or a bare list of ideas; both work. As long
 as one idea passes validation the response is `200`.
 
-Errors (Explore and Expand), with a JSON body `{"code": "..."}`:
+Explore and Expand HTTP errors use the standard envelope. See [API errors](errors.md).
 
 | Status | `code` | When | What the app should do |
 |---|---|---|---|
 | `503` | `ai_unavailable` | AI is not configured or is disabled | Hide or disable AI features (see `GET /api/capabilities`); retrying does not help |
 | `502` | `ai_upstream_error` | The provider timed out, failed, or returned nothing usable | Offer "retry" |
 
-Never a `500`.
-
-The client only gets the code. The reason is in the backend log: one line per AI call, and one
-per failed request:
+The client receives a public detail message. The backend keeps provider diagnostics in its
+log, with one line per AI call and one per failed request.
 
 ```
 INFO:     stock_manager.api.ai_client: AI explore/first ok model=deepseek-flash stream 12.4s first_data=1.1s reasoning=3.2s chars=1830 tokens=812/1430 finish=stop
@@ -451,6 +454,7 @@ Response:
 ```json
 {
   "locale": "zh-CN",
+  "draft_hash": "b0fa3b67f65723b9a747c484e95727c8894a7b6d487ffb1b41892006b2b24e4d",
   "recipe_draft": {
     "title": "番茄炒蛋", "category": "vegetable_dish", "description": "…",
     "difficulty": "easy", "servings": "2", "cook_time_minutes": 15, "raw_markdown": null,
@@ -472,6 +476,12 @@ Response:
 When the AI fails, Expand returns `502` / `503` like Explore. There is no fallback draft (it used
 to return just the title with no ingredients or steps); the user can retry or create the recipe
 by hand.
+
+To save an Expand draft, send its `draft_hash` as `ai_draft_hash` in `POST /api/recipes`.
+The hash covers every draft field apart from `category`. An unchanged draft saves as
+`ai_saved` with source name `AI`. Missing or mismatched hashes save as `user`.
+An edit converts an `ai_saved` recipe to `user`. Favoriting preserves its source.
+Earlier saved recipes keep their existing source.
 
 ### AI Boundary
 

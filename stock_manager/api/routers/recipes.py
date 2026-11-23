@@ -5,13 +5,14 @@ import json
 import logging
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from stock_manager.api import ai_client
 
 from stock_manager.api.db import get_session
+from stock_manager.api.errors import APIError
 from stock_manager.api.recipe_schemas import (
     AIWarning,
     ConsumePreviewResponse,
@@ -24,6 +25,7 @@ from stock_manager.api.recipe_schemas import (
     ExpandResponse,
     MissingToRestockResponse,
     RecipeCreate,
+    RecipeDraft,
     RecipeRecommendation,
     RecipeRecommendationResponse,
     RecipeResponse,
@@ -43,6 +45,7 @@ from stock_manager.api.recipe_services import (
     get_recommendations,
     has_been_cooked,
     is_favorite,
+    recipe_draft_hash,
     remove_favorite,
     update_recipe,
 )
@@ -114,7 +117,7 @@ def list_sources():
 
 @router.get("", response_model=list[RecipeSummary])
 def list_recipes(
-    source_type: Optional[str] = Query(None, pattern="^(howtocook|user)$"),
+    source_type: Optional[str] = Query(None, pattern="^(howtocook|user|ai_saved)$"),
     category: Optional[str] = None, query: Optional[str] = None,
     favorite_only: bool = False, limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0), db: Session = Depends(get_session),
@@ -153,9 +156,9 @@ async def _prepare_explore(db: Session, data: ExploreRequest, accept_language: O
     )
     recipes = await run_in_threadpool(_load_recipe_titles, db)
     if bad_ids:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Inventory items not found or not usable for recipes: {bad_ids}",
+        raise APIError(
+            400, "recipe_inventory_invalid",
+            f"Inventory items not found or not usable for recipes: {bad_ids}",
         )
     locale, warnings = resolve_locale(data.locale, accept_language, setting_locale)
     # ExploreRequest guarantees exactly one of structured / natural_language is set.
@@ -327,9 +330,11 @@ async def explore_expand_endpoint(
 
     inv_dicts, _, setting_locale = await run_in_threadpool(_load_explore_inventory, db, [])
     locale, warnings = resolve_locale(data.locale, accept_language, setting_locale)
-    return await expand_to_recipe_draft(
+    result = await expand_to_recipe_draft(
         data.idea.model_dump(), inventory_items=inv_dicts, locale=locale, warnings=warnings
     )
+    draft = RecipeDraft.model_validate(result["recipe_draft"])
+    return {**result, "recipe_draft": draft, "draft_hash": recipe_draft_hash(draft)}
 
 
 @router.get("/{recipe_id}/consume-preview", response_model=ConsumePreviewResponse)
@@ -341,7 +346,7 @@ def consume_preview_endpoint(
     from stock_manager.api.recipe_services import get_consume_preview as _preview
     result = _preview(db, recipe_id)
     if result is None:
-        raise HTTPException(status_code=404, detail="Recipe not found")
+        raise APIError(404, "recipe_not_found", "Recipe not found")
     return result
 
 
@@ -350,7 +355,7 @@ def missing_to_restock_endpoint(recipe_id: int, db: Session = Depends(get_sessio
     """Queue missing ingredients that are not already pending."""
     result = add_recipe_gaps_to_restock(db, recipe_id)
     if result is None:
-        raise HTTPException(status_code=404, detail="Recipe not found")
+        raise APIError(404, "recipe_not_found", "Recipe not found")
     return result
 
 
@@ -373,7 +378,7 @@ def cook_recipe_endpoint(
         add_depleted_to_restock=data.add_depleted_to_restock,
     )
     if result is None:
-        raise HTTPException(status_code=404, detail="Recipe not found")
+        raise APIError(404, "recipe_not_found", "Recipe not found")
     return CookRecipeResponse(
         message="Recipe marked as cooked" + (" and inventory consumed" if consume_dicts else ""),
         recipe_id=result["recipe_id"],
@@ -388,27 +393,30 @@ def cook_recipe_endpoint(
 def get_recipe_endpoint(recipe_id: int, db: Session = Depends(get_session)):
     recipe = get_recipe(db, recipe_id)
     if recipe is None:
-        raise HTTPException(status_code=404, detail="Recipe not found")
+        raise APIError(404, "recipe_not_found", "Recipe not found")
     return _recipe_to_response(recipe, db)
 
 
 @router.post("", response_model=RecipeResponse, status_code=201)
 def create_recipe_endpoint(data: RecipeCreate, db: Session = Depends(get_session)):
-    return _recipe_to_response(create_recipe(db, data, source_type="user"), db)
+    source_type = "user"
+    if data.ai_draft_hash is not None and data.ai_draft_hash == recipe_draft_hash(data):
+        source_type = "ai_saved"
+    return _recipe_to_response(create_recipe(db, data, source_type=source_type), db)
 
 
 @router.patch("/{recipe_id}", response_model=RecipeResponse)
 def update_recipe_endpoint(recipe_id: int, data: RecipeUpdate, db: Session = Depends(get_session)):
     recipe = update_recipe(db, recipe_id, data)
     if recipe is None:
-        raise HTTPException(status_code=404, detail="Recipe not found or not editable")
+        raise APIError(404, "recipe_not_editable", "Recipe not found or not editable")
     return _recipe_to_response(recipe, db)
 
 
 @router.delete("/{recipe_id}")
 def delete_recipe_endpoint(recipe_id: int, db: Session = Depends(get_session)):
     if not delete_recipe(db, recipe_id):
-        raise HTTPException(status_code=404, detail="Recipe not found or not deletable")
+        raise APIError(404, "recipe_not_deletable", "Recipe not found or not deletable")
     return {"message": "Recipe deleted"}
 
 
@@ -416,19 +424,19 @@ def delete_recipe_endpoint(recipe_id: int, db: Session = Depends(get_session)):
 def fork_recipe_endpoint(recipe_id: int, db: Session = Depends(get_session)):
     recipe = fork_recipe(db, recipe_id)
     if recipe is None:
-        raise HTTPException(status_code=404, detail="Recipe not found")
+        raise APIError(404, "recipe_not_found", "Recipe not found")
     return _recipe_to_response(recipe, db)
 
 
 @router.post("/{recipe_id}/favorite")
 def add_favorite_endpoint(recipe_id: int, db: Session = Depends(get_session)):
     if not add_favorite(db, recipe_id):
-        raise HTTPException(status_code=404, detail="Recipe not found")
+        raise APIError(404, "recipe_not_found", "Recipe not found")
     return {"message": "Recipe favorited"}
 
 
 @router.delete("/{recipe_id}/favorite")
 def remove_favorite_endpoint(recipe_id: int, db: Session = Depends(get_session)):
     if not remove_favorite(db, recipe_id):
-        raise HTTPException(status_code=404, detail="Favorite not found")
+        raise APIError(404, "favorite_not_found", "Favorite not found")
     return {"message": "Favorite removed"}

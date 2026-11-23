@@ -34,7 +34,7 @@ at 120 seconds. Stereo WAV includes
 only the left channel.
 
 Use `GET /api/capabilities` and check `ai.asr` before offering recording.
-Transcription errors use the API's standard `code` and `params` fields.
+Transcription errors use the standard error envelope. See [API errors](errors.md).
 
 | Code | HTTP | Meaning |
 | --- | --- | --- |
@@ -70,6 +70,9 @@ the server's local date. The purchase date defaults to that date.
 
 The response contains `operations`, `unparsed_fragments`, `locale`, and
 `warnings`. Apply operations to the current draft in the app.
+The request draft accepts user-entered `opened_date` and `opened_expiration_date`.
+Invalid dates return 422. AI-supplied opening dates in add or update operations
+are discarded with an `op_field_dropped` warning.
 
 ```json
 {
@@ -289,9 +292,7 @@ concurrently, or already acted on in the same request produces
 
 ## Errors and warnings
 
-Intake errors use `code`, `params`, and English `detail`. AI errors use the
-shared AI API response with `code`. Invalid request shapes use FastAPI's
-standard validation response.
+Intake and AI errors include `code`, `params`, and `detail`. See [API errors](errors.md).
 
 | HTTP | Error code | Parameters |
 | --- | --- | --- |

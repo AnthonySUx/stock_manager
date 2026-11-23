@@ -309,7 +309,9 @@ class TestExploreValidation:
     def test_all_wrong_language_is_502(self, client, fake_ai):
         fake_ai.reply = json.dumps({"ideas": [{"title": "Tomato Egg"}]})
         response = _explore(client)
-        assert response.status_code == 502 and response.json() == {"code": "ai_upstream_error"}
+        assert response.status_code == 502
+        assert response.json()["code"] == "ai_upstream_error"
+        assert {"params", "detail"} <= response.json().keys()
 
     def test_enums_are_validated(self, client, fake_ai):
         fake_ai.reply = json.dumps({"ideas": [{
@@ -502,7 +504,9 @@ class TestExpand:
     def test_unusable_twice_is_502(self, client, fake_ai, bad):
         fake_ai.reply = bad
         response = _expand(client)
-        assert response.status_code == 502 and response.json() == {"code": "ai_upstream_error"}
+        assert response.status_code == 502
+        assert response.json()["code"] == "ai_upstream_error"
+        assert {"params", "detail"} <= response.json().keys()
         assert len(fake_ai.requests) == 2
 
     def test_english_draft(self, client, fake_ai):

@@ -8,7 +8,9 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
+from fastapi.utils import is_body_allowed_for_status_code
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from stock_manager import __version__
 from stock_manager.api import ai_client
@@ -101,32 +103,65 @@ app.include_router(intake.router, prefix="/api/intake", tags=["Intake"], depende
 app.include_router(speech.router, prefix="/api/speech", tags=["Speech"], dependencies=_auth)
 
 
+HTTP_ERROR_CODES = {
+    400: "bad_request",
+    401: "unauthorized",
+    403: "forbidden",
+    404: "not_found",
+    405: "method_not_allowed",
+    409: "conflict",
+    413: "payload_too_large",
+    415: "unsupported_media_type",
+    422: "unprocessable_entity",
+    429: "too_many_requests",
+    500: "internal_error",
+    502: "bad_gateway",
+    503: "service_unavailable",
+}
+
+AI_ERROR_DETAILS = {
+    "ai_unavailable": "AI is not configured",
+    "ai_vision_unavailable": "AI vision is not configured",
+    "ai_upstream_error": "AI provider request failed",
+}
+
+
+def _error_response(status_code, code, params, detail, *, headers=None):
+    return JSONResponse(
+        status_code=status_code,
+        content={"code": code, "params": params, "detail": detail},
+        headers=headers,
+    )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_error_handler(request: Request, exc: StarletteHTTPException):
+    if not is_body_allowed_for_status_code(exc.status_code):
+        return Response(status_code=exc.status_code, headers=exc.headers)
+    code = HTTP_ERROR_CODES.get(exc.status_code, "http_error")
+    return _error_response(exc.status_code, code, {}, exc.detail, headers=exc.headers)
+
+
 @app.exception_handler(RequestValidationError)
 async def request_validation_error_handler(request: Request, exc: RequestValidationError):
     # Invalid numeric input may contain a non-finite float that JSON cannot echo.
-    detail = jsonable_encoder(
+    errors = jsonable_encoder(
         exc.errors(), custom_encoder={float: lambda value: value if isfinite(value) else str(value)}
     )
-    return JSONResponse(status_code=422, content={"detail": detail})
+    return _error_response(422, "validation_error", {"errors": errors}, errors)
 
 
 @app.exception_handler(APIError)
 async def api_error_handler(request: Request, exc: APIError):
-    body = {"code": exc.code, "params": exc.params}
-    if exc.detail:
-        body["detail"] = exc.detail
-    return JSONResponse(status_code=exc.status_code, content=body)
+    return _error_response(exc.status_code, exc.code, exc.params, exc.detail)
 
 
 @app.exception_handler(ai_client.AIError)
 async def ai_error_handler(request: Request, exc: ai_client.AIError):
-    """AI failures: 503 `ai_unavailable` (not configured) or 502
-    `ai_upstream_error` (provider failed; the client may retry) (#66).
-
-    The reason goes to the server log only; the client gets the code."""
+    """Return a public message while keeping the provider diagnostic in the server log."""
     ai_client.log_ai_error(request.method, request.url.path, exc)
-    return JSONResponse(status_code=exc.status_code, content={"code": exc.code})
-
+    detail = AI_ERROR_DETAILS.get(exc.code, "AI request failed")
+    return _error_response(exc.status_code, exc.code, {}, detail)
 
 
 @app.get("/api/health", tags=["Health"])

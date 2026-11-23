@@ -2,11 +2,12 @@
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from stock_manager.api import schemas
 from stock_manager.api.db import get_session
+from stock_manager.api.errors import APIError
 from stock_manager.api.services import (
     consume_item,
     create_item,
@@ -81,7 +82,7 @@ def get_item_endpoint(
     """Get a single stock item by ID."""
     item = get_item(db, item_id)
     if item is None:
-        raise HTTPException(status_code=404, detail="Item not found")
+        raise APIError(404, "item_not_found", "Item not found")
     return item
 
 
@@ -95,7 +96,7 @@ def create_item_endpoint(
     try:
         validate_category_exists(db, payload.category_id)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise APIError(400, "invalid_category", str(e))
 
     item_data = prepare_item_data(db, payload.model_dump())
     return create_item(db, item_data)
@@ -111,18 +112,18 @@ def update_item_endpoint(
     item_data = payload.model_dump(exclude_unset=True)
 
     if not item_data:
-        raise HTTPException(status_code=400, detail="No fields to update")
+        raise APIError(400, "no_fields_to_update", "No fields to update")
 
     from stock_manager.api.category_services import validate_category_exists
     if "category_id" in item_data:
         try:
             validate_category_exists(db, item_data["category_id"])
         except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+            raise APIError(400, "invalid_category", str(e))
 
     existing = get_item(db, item_id)
     if existing is None:
-        raise HTTPException(status_code=404, detail="Item not found")
+        raise APIError(404, "item_not_found", "Item not found")
 
     if "opened_date" in item_data and item_data["opened_date"] is None:
         item_data["opened_expiration_date"] = None
@@ -139,7 +140,7 @@ def update_item_endpoint(
 
     result = update_item(db, item_id, item_data)
     if result is None:
-        raise HTTPException(status_code=404, detail="Item not found")
+        raise APIError(404, "item_not_found", "Item not found")
     return result
 
 
@@ -157,7 +158,7 @@ def consume_item_endpoint(
         add_to_restock=payload.add_to_restock,
     )
     if result is None:
-        raise HTTPException(status_code=404, detail="Item not found")
+        raise APIError(404, "item_not_found", "Item not found")
     data = schemas.ItemResponse.model_validate(result["item"]).model_dump()
     return schemas.ConsumeResponse(**data, restock_item=result["restock_item"])
 
@@ -170,7 +171,7 @@ def delete_item_endpoint(
 ):
     """Delete a stock item and optionally queue its remaining amount for restock."""
     if not delete_item(db, item_id, add_to_restock=add_to_restock):
-        raise HTTPException(status_code=404, detail="Item not found")
+        raise APIError(404, "item_not_found", "Item not found")
     return {"message": "Item deleted"}
 
 
@@ -186,9 +187,9 @@ def clean_items(
     """
     disallowed = sorted(set(statuses) - CLEANABLE_ITEM_STATUSES)
     if disallowed:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot clean items with status {disallowed}. Allowed: {sorted(CLEANABLE_ITEM_STATUSES)}",
+        raise APIError(
+            400, "invalid_item_clean_status",
+            f"Cannot clean items with status {disallowed}. Allowed: {sorted(CLEANABLE_ITEM_STATUSES)}",
         )
     count = delete_items_by_statuses(db, statuses)
     return {"message": f"{count} item(s) deleted"}
