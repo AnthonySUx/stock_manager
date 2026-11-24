@@ -47,10 +47,12 @@ def _validate_references(
 @router.get("", response_model=list[schemas.RestockItemResponse])
 def list_restock(
     status: Optional[str] = Query(None),
+    limit: Optional[int] = Query(None, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     db: Session = Depends(get_session),
 ):
     """List restock items, optionally filtered by status."""
-    return get_restock_items(db, status=status)
+    return get_restock_items(db, status=status, limit=limit, offset=offset)
 
 
 @router.get("/{item_id}", response_model=schemas.RestockItemResponse)

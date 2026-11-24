@@ -73,7 +73,7 @@ many recipes are nested one level deeper (`dishes/meat_dish/口水鸡/口水鸡.
 
 1. Gathers all `active` and `expiring soon` inventory items whose category is recipe-eligible (`recipe_usage` is `always` or `conditional`; see [Categories](features.md#categories))
 2. Normalizes item names using the [ingredient synonym table](#ingredient-matching) for matching
-3. Scores each recipe using local rules
+3. Scores recipes with a matching ingredient, favorites, and recipes with at most one required ingredient
 4. Returns the top-ranked recipes
 
 ### Scoring Rules

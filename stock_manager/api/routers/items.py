@@ -34,6 +34,8 @@ def list_items(
     owner: Optional[str] = Query(None),
     location: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
+    limit: Optional[int] = Query(None, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     db: Session = Depends(get_session),
 ):
     """List stock items with optional filters."""
@@ -43,6 +45,8 @@ def list_items(
         owner=owner,
         location=location,
         status=status,
+        limit=limit,
+        offset=offset,
     )
 
 
