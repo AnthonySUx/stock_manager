@@ -14,6 +14,7 @@ from stock_manager.api.services import (
     create_restock_item,
     delete_restock_item,
     delete_restock_items_by_status,
+    find_restock_duplicates,
     get_item,
     get_restock_item,
     get_restock_items,
@@ -53,6 +54,25 @@ def list_restock(
 ):
     """List restock items, optionally filtered by status."""
     return get_restock_items(db, status=status, limit=limit, offset=offset)
+
+
+@router.get("/duplicates", response_model=schemas.RestockDuplicatesResponse)
+def restock_duplicates(
+    name: str = Query(..., min_length=1, max_length=255, pattern=r"\S"),
+    db: Session = Depends(get_session),
+):
+    """Find pending restock items that look like the same thing as `name`.
+
+    Read-only. Done items are ignored, so buying something again is never blocked.
+    """
+    result = find_restock_duplicates(db, name)
+    return {
+        **result,
+        "candidates": [
+            {**schemas.RestockItemResponse.model_validate(c["item"]).model_dump(), "match_reason": c["match_reason"]}
+            for c in result["candidates"]
+        ],
+    }
 
 
 @router.get("/{item_id}", response_model=schemas.RestockItemResponse)

@@ -260,6 +260,17 @@ class RestockItemResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class RestockDuplicateCandidate(RestockItemResponse):
+    # same_name: equal after trimming and case folding; synonym: same synonym group.
+    match_reason: Literal["same_name", "synonym"]
+
+
+class RestockDuplicatesResponse(BaseModel):
+    query: str
+    normalized_name: str
+    candidates: list[RestockDuplicateCandidate]
+
+
 class ConsumeResponse(ItemResponse):
     restock_item: RestockItemResponse | None = None
 
