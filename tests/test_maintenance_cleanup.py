@@ -16,6 +16,7 @@ class TestSettings:
     def test_response_has_no_default_database(self, client):
         assert client.get("/api/settings").json() == {
             "expiration_reminder_days": "2", "default_locale": None, "default_timezone": None,
+            "kitchen_equipment": [], "kitchen_equipment_configured": False,
         }
 
     def test_old_default_database_row_is_ignored(self, client, db_session):

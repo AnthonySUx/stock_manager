@@ -1,5 +1,11 @@
 """Kitchen equipment catalog shared by the API and HowToCook importer."""
 
+from collections.abc import Iterable
+from enum import Enum
+
+from stock_manager.api.errors import APIError
+
+
 EQUIPMENT_TERMS = {
     "oven": ("烤箱",),
     "air_fryer": ("空气炸锅",),
@@ -16,6 +22,7 @@ EQUIPMENT_TERMS = {
     "kitchen_scale": ("电子秤", "厨房秤"),
 }
 EQUIPMENT_CODES = tuple(EQUIPMENT_TERMS)
+EquipmentCode = Enum("EquipmentCode", {code: code for code in EQUIPMENT_CODES}, type=str)
 
 BASIC_TOOL_TERMS = frozenset(
     "锅 炒锅 平底锅 不粘锅 煎锅 汤锅 深锅 煮锅 奶锅 铁锅 铝锅 油锅 粥锅 炖锅 "
@@ -30,7 +37,13 @@ TOOL_SUFFIXES = tuple(
 INGREDIENT_EXCEPTIONS = frozenset({"昆布", "糯米纸"})
 
 
-def catalog_order(codes) -> list[str]:
+def catalog_order(codes: Iterable[str]) -> list[str]:
     """Return known codes once each, in catalog order."""
     wanted = set(codes)
     return [code for code in EQUIPMENT_CODES if code in wanted]
+
+
+def validate_equipment_codes(codes: Iterable[str]) -> None:
+    unknown = sorted(set(codes) - EQUIPMENT_TERMS.keys())
+    if unknown:
+        raise APIError(422, "equipment_unknown", "Unknown kitchen equipment codes", codes=unknown)

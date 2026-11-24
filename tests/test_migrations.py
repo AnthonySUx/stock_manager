@@ -715,3 +715,54 @@ def test_0009_recipe_photos_upgrade_constraints_and_downgrade(fresh_db):
     assert not sa.inspect(engine).has_table(table)
     with engine.connect() as conn:
         assert conn.execute(sa.text("SELECT id, title FROM recipes")).all() == [(1, "Dinner")]
+
+
+def test_0010_kitchen_equipment_upgrade_constraints_and_downgrade(fresh_db):
+    url, engine = fresh_db
+    config = _alembic(url)
+    command.upgrade(config, "0009")
+    recipe_select = text("SELECT id, title, cook_time_minutes FROM recipes ORDER BY id")
+    with engine.begin() as conn:
+        conn.execute(text(
+            "INSERT INTO recipes (id, title, source_type, source_name, is_user_created, cook_time_minutes) "
+            "VALUES (1, 'Dinner', 'user', 'User', 1, 30)"
+        ))
+        before = [_numbers(row) for row in conn.execute(recipe_select)]
+    assert not inspect(engine).has_table("household_equipment")
+    assert not inspect(engine).has_table("recipe_equipment")
+
+    command.upgrade(config, "0010")
+    command.upgrade(config, "0010")
+    engine.dispose()
+    inspector = inspect(engine)
+    assert inspector.get_pk_constraint("household_equipment")["constrained_columns"] == ["code"]
+    assert _named_indexes(inspector, "household_equipment") == {}
+    assert _named_indexes(inspector, "recipe_equipment") == {
+        "ix_recipe_equipment_recipe_id": ["recipe_id"],
+    }
+    assert {
+        constraint["name"]: constraint["column_names"]
+        for constraint in inspector.get_unique_constraints("recipe_equipment")
+    } == {"uq_recipe_equipment_group_code": ["recipe_id", "group_index", "equipment_code"]}
+    assert {
+        (tuple(fk["constrained_columns"]), fk["referred_table"], tuple(fk["referred_columns"]))
+        for fk in inspector.get_foreign_keys("recipe_equipment")
+    } == {(("recipe_id",), "recipes", ("id",))}
+
+    insert_option = text(
+        "INSERT INTO recipe_equipment (recipe_id, group_index, equipment_code) VALUES (1, :idx, :code)"
+    )
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO household_equipment (code) VALUES ('oven')"))
+        assert conn.execute(text("SELECT created_at FROM household_equipment")).scalar_one() is not None
+        conn.execute(insert_option, dict(idx=0, code="oven"))
+        conn.execute(insert_option, dict(idx=0, code="rice_cooker"))
+        conn.execute(insert_option, dict(idx=1, code="oven"))
+        with _rejected(), conn.begin_nested():
+            conn.execute(insert_option, dict(idx=0, code="oven"))
+
+    command.downgrade(config, "0009")
+    assert not inspect(engine).has_table("recipe_equipment")
+    assert not inspect(engine).has_table("household_equipment")
+    with engine.connect() as conn:
+        assert [_numbers(row) for row in conn.execute(recipe_select)] == before

@@ -4,13 +4,15 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import case, func
+from sqlalchemy import case, delete, func
 from sqlalchemy.orm import Session, selectinload
 
 from stock_manager.api.category_services import RECIPE_USAGE_NEVER
+from stock_manager.api.equipment import catalog_order, validate_equipment_codes
+from stock_manager.api.equipment_services import EQUIPMENT_CONFIGURED_KEY
 from stock_manager.api.errors import APIError
 from stock_manager.api.localization import today as household_today
-from stock_manager.api.models import Category, Item, RestockItem, Setting, utcnow
+from stock_manager.api.models import Category, HouseholdEquipment, Item, RestockItem, Setting, utcnow
 from stock_manager.api.quantity import quantize_stock_quantity
 
 
@@ -644,8 +646,16 @@ def get_settings(db: Session) -> dict[str, str]:
     return settings
 
 
-def update_settings(db: Session, settings: dict[str, str]) -> dict[str, str]:
+def update_settings(
+    db: Session, settings: dict[str, str], *, kitchen_equipment: list[str] | None = None,
+) -> dict[str, str]:
     """Update settings and return the current state."""
+    if kitchen_equipment is not None:
+        validate_equipment_codes(kitchen_equipment)
+        settings = {**settings, EQUIPMENT_CONFIGURED_KEY: "1"}
+        db.execute(delete(HouseholdEquipment))
+        db.add_all(HouseholdEquipment(code=code) for code in catalog_order(kitchen_equipment))
+
     now = utcnow()
 
     for key, value in settings.items():

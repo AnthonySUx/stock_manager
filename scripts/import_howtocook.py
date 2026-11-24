@@ -288,6 +288,8 @@ def _basic_note_alternative(note: str) -> bool:
     # Remove appliance names before testing standalone basic-tool mentions.
     # In particular, the 锅 in 电饭锅 or 锅胆 is not an alternative.
     text = _SPECIAL_RE.sub(" ", note)
+    if any(len(term) > 1 and term in text for term in BASIC_TOOL_TERMS):
+        return True
     for phrase in re.split(r"[，,。；;、\s]|可替代|代替|即可|也行|也可以|没有的话", text):
         phrase = re.sub(r"^(?:可以用|改用|就用|用)", "", phrase)
         subject, _ = _tool_subject(phrase)
@@ -325,9 +327,10 @@ def _step_equipment(text: str) -> list[list[str]]:
         heading = re.match(r"^#{3,6}\s+(.+)", line.strip())
         if heading:
             in_notes = bool(re.search(r"附加|小贴士|技巧", heading[1]))
-        if in_notes:
+        step = _clean_line(line)
+        if in_notes or re.match(r"^(?:小贴士|附加内容)\s*[：:]", step):
             continue
-        for sentence in re.split(r"[。！？!?；;]", _clean_line(line)):
+        for sentence in re.split(r"[。！？!?；;]", step):
             if not _STEP_ALTERNATIVE_RE.search(sentence):
                 groups.extend([code] for code in _special_codes(sentence))
     return groups
@@ -572,6 +575,8 @@ def import_howtocook(
     print(f"Found {len(md_files)} recipe files")
 
     from stock_manager.api import media
+    from stock_manager.api.equipment import EQUIPMENT_CODES
+    from stock_manager.api.equipment_services import replace_recipe_equipment
     from stock_manager.api.models import Recipe, RecipeIngredient, RecipeStep
 
     if with_photos or prune_non_recipes:
@@ -596,6 +601,9 @@ def import_howtocook(
     titles_synced_count = 0
 
     photo_stats = Counter()
+    equipment_counts = Counter()
+    recipes_with_equipment = group_count = 0
+    unclassified_tools = []
     for md_file in sorted(md_files):
         rel_path = str(md_file.relative_to(howtocook_dir))
         with media.file_transaction(enabled=with_photos):
@@ -648,6 +656,7 @@ def import_howtocook(
                     if steps_changed:
                         messages.append(f"  ↻ {rel_path}: steps re-parsed")
 
+                replace_recipe_equipment(session, recipe.id, recipe_data["equipment"])
                 if with_photos:
                     stats = _sync_photos(
                         session, recipe, recipe_data, md_file, root, stored_hashes, old_hashes,
@@ -668,6 +677,11 @@ def import_howtocook(
                     media.delete_files_if_unused(session, sha256)
                 if old_hashes:
                     session.rollback()
+        groups = recipe_data["equipment"]
+        recipes_with_equipment += bool(groups)
+        group_count += len(groups)
+        equipment_counts.update(code for group in groups for code in group)
+        unclassified_tools.extend((rel_path, term) for term in recipe_data["unclassified_tools"])
         if new_recipe:
             imported_count += 1
             print(f"  ✓ {rel_path} → {recipe_data['title']}")
@@ -698,6 +712,13 @@ def import_howtocook(
         print("photos: " + ", ".join(f"{key} {photo_stats[key]}" for key in _PHOTO_STATS))
         if photo_stats["missing"]:
             print(f"Images are missing. Run: git -C {howtocook_path} sparse-checkout disable")
+    per_code = ", ".join(f"{code} {equipment_counts[code]}" for code in EQUIPMENT_CODES)
+    print(
+        f"equipment: recipes {recipes_with_equipment}, groups {group_count}; "
+        f"per code: {per_code}; unclassified tool lines {len(unclassified_tools)}"
+    )
+    for path, term in unclassified_tools:
+        print(f"  ? {path}: {term}")
     return result
 
 
@@ -766,9 +787,11 @@ def _handle_non_recipe_rows(session, prune: bool) -> tuple[int, int]:
         return len(rows), 0
 
     from stock_manager.api import media
+    from stock_manager.api.equipment_services import delete_recipe_equipment
     from stock_manager.api.photo_services import delete_recipe_photos
 
     ids = [r.id for r in rows]
+    delete_recipe_equipment(session, ids)
     hashes = delete_recipe_photos(session, ids)
     session.query(RecipeFavorite).filter(RecipeFavorite.recipe_id.in_(ids)).delete(synchronize_session=False)
     session.query(RecipeUsageHistory).filter(RecipeUsageHistory.recipe_id.in_(ids)).delete(synchronize_session=False)

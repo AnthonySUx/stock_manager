@@ -19,7 +19,9 @@ from stock_manager.api.schema_version import check_schema_current
 from stock_manager.api.db import engine
 from stock_manager.api.errors import APIError
 from stock_manager.api.rate_limit import AIRateLimiter
-from stock_manager.api.routers import capabilities, categories, intake, items, photos, recipes, restock, settings, speech
+from stock_manager.api.routers import (
+    capabilities, categories, equipment, intake, items, photos, recipes, restock, settings, speech,
+)
 
 
 def configure_logging() -> None:
@@ -163,6 +165,7 @@ def create_app() -> FastAPI:
     app.include_router(items.router, prefix="/api/items", tags=["Stock Items"], dependencies=_auth)
     app.include_router(restock.router, prefix="/api/restock", tags=["Restock Items"], dependencies=_auth)
     app.include_router(settings.router, prefix="/api/settings", tags=["Settings"], dependencies=_auth)
+    app.include_router(equipment.router, prefix="/api/equipment", tags=["Equipment"], dependencies=_auth)
     app.include_router(photos.router, prefix="/api", dependencies=_auth)
     app.include_router(recipes.router, prefix="/api/recipes", tags=["Recipes"], dependencies=_auth)
     app.include_router(categories.router, prefix="/api/categories", tags=["Categories"], dependencies=_auth)

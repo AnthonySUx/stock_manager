@@ -296,9 +296,13 @@ class SettingResponse(BaseModel):
     # "today" uses the server's local date (#65).
     default_locale: Optional[str] = None
     default_timezone: Optional[str] = None
+    kitchen_equipment: list[str] = []
+    kitchen_equipment_configured: bool = False
 
 
 class SettingUpdate(BaseModel):
+    kitchen_equipment: list[str] | None = None
+
     # Whole days, 0-365, as a number or a numeric string. Stored and returned
     # as a string. Invalid values are a 422 (they used to become 2 silently).
     expiration_reminder_days: Optional[str] = None

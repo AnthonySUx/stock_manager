@@ -558,6 +558,7 @@ def test_image_and_link_targets_may_contain_parentheses(importer):
     ('昆布', ['昆布'], []),
     ('调味料：火锅底料、花生酱、全脂牛奶', ['调味料：火锅底料、花生酱、全脂牛奶'], []),
     ('油 + 锅 + 菜刀 + 铲子', ['油'], []),
+    ('烤箱（普通的炒锅也行）', [], []),
 ])
 def test_kitchen_equipment_ingredient_lines(importer, line, names, groups):
     rows, equipment, _ = importer._parse_ingredient_section(line)
@@ -569,6 +570,7 @@ def test_kitchen_equipment_ingredient_lines(importer, line, names, groups):
     ("放入预热好的烤箱，200 度烤 15 分钟", [["oven"]]),
     ("也可以用高压锅压 20 分钟", []),
     ("放入蒸锅大火蒸 8 分钟", [["steamer"]]),
+    ("小贴士：隔夜可用烤箱回温", []),
 ])
 def test_kitchen_equipment_step_lines(importer, step, groups):
     assert importer._step_equipment(step) == groups
@@ -590,3 +592,38 @@ def test_optional_equipment_is_still_classified_as_tool(importer):
     assert importer._parse_ingredient_section(
         "可选：空气炸锅烤架（用烤架油比较少）"
     ) == ([], [], ["空气炸锅烤架"])
+
+
+def test_import_replaces_equipment_and_preserves_fork(importer, tmp_path, db, capsys):
+    from stock_manager.api.equipment_services import load_recipe_equipment
+    from stock_manager.api.recipe_services import fork_recipe
+
+    url, session = db
+    recipe_path = tmp_path / "dishes" / "soup" / "recipe.md"
+    recipe_path.parent.mkdir(parents=True)
+    markdown = (
+        "# Soup\n\n## 必备原料和工具\n"
+        "- 烤箱或电饭锅\n- 2 个大碗\n- 盐（出锅调味）\n"
+        "\n## 操作步骤\n- 加水\n"
+    )
+    recipe_path.write_text(markdown, encoding="utf-8")
+    assert importer.import_howtocook(str(tmp_path), url) == _counts(imported=1)
+    recipe = session.query(Recipe).filter_by(source_type="howtocook").one()
+    assert load_recipe_equipment(session, [recipe.id]) == {recipe.id: [["oven", "rice_cooker"]]}
+    assert [row.ingredient_name for row in recipe.ingredients] == ["盐"]
+    output = capsys.readouterr().out
+    assert (
+        "equipment: recipes 1, groups 1; per code: oven 1, air_fryer 0, microwave 0, "
+        "pressure_cooker 0, rice_cooker 1, steamer 0, blender 0, electric_mixer 0, "
+        "bread_machine 0, clay_pot 0, grill 0, thermometer 0, kitchen_scale 0; "
+        "unclassified tool lines 1"
+    ) in output
+    assert "  ? dishes/soup/recipe.md: 大碗" in output
+
+    fork_id = fork_recipe(session, recipe.id).id
+    recipe_path.write_text(markdown.replace("烤箱或电饭锅", "砂锅"), encoding="utf-8")
+    assert importer.import_howtocook(str(tmp_path), url) == _counts(existing=1)
+    assert load_recipe_equipment(session, [recipe.id, fork_id]) == {
+        recipe.id: [["clay_pot"]],
+        fork_id: [["oven", "rice_cooker"]],
+    }
