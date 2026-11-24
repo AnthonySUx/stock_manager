@@ -189,8 +189,11 @@ def _strip_bracket_notes(name: str) -> str:
 # marker is removed, so "1. 2 个鸡蛋打散" keeps its "2".
 _LIST_MARKER_RE = re.compile(r"^(?:[-*+]|\d+[.)、](?!\d))\s*")
 _HORIZONTAL_RULE_RE = re.compile(r"^(?:-{3,}|\*{3,}|_{3,})$")
-_IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
-_LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+# A link or image target may contain one level of balanced parentheses, as in
+# "./血浆鸭(特辣).jpg"; stopping at the first ")" would cut the path short.
+_TARGET = r"(?:[^()]|\([^()]*\))*"
+_IMAGE_RE = re.compile(rf"!\[[^\]]*\]\({_TARGET}\)")
+_LINK_RE = re.compile(rf"\[([^\]]*)\]\({_TARGET}\)")
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 
@@ -280,7 +283,7 @@ def _parse_steps(text: str) -> list[dict]:
     return results
 
 
-_PHOTO_REF = re.compile(r"!\[([^\]]*)\]\(([^)]*)\)")
+_PHOTO_REF = re.compile(rf"!\[([^\]]*)\]\(({_TARGET})\)")
 _PHOTO_STATS = ("added", "updated", "removed", "missing", "remote_skipped")
 
 

@@ -491,3 +491,20 @@ def test_prune_non_recipe_deletes_photo_files(importer, repo, db, tmp_path, monk
     assert session.query(RecipePhoto).count() == 0
     assert not media.image_path(stored.sha256).exists()
     assert not media.image_path(stored.sha256, "thumb").exists()
+
+
+def test_image_and_link_targets_may_contain_parentheses(importer):
+    markdown = (
+        "# 血浆鸭的做法\n\n![血浆鸭(特辣)](./血浆鸭(特辣).jpg)\n\n"
+        "## 操作\n\n- 下锅翻炒 ![翻炒](./步骤(1).jpg)\n- 见[说明(详细)](./说明(详细).md)出锅\n"
+    )
+    assert importer._photo_steps(markdown, [1, 2]) == [
+        ("血浆鸭(特辣)", "./血浆鸭(特辣).jpg", None),
+        ("翻炒", "./步骤(1).jpg", 1),
+    ]
+    assert importer._clean_line("- 下锅翻炒 ![翻炒](./步骤(1).jpg)") == "下锅翻炒"
+    assert importer._clean_line("- 见[说明(详细)](./说明(详细).md)出锅") == "见说明(详细)出锅"
+    # Two references on one line stay separate.
+    assert [ref for _, ref, _ in importer._photo_steps("![a](a(1).jpg) 和 ![b](b.jpg)", [])] == [
+        "a(1).jpg", "b.jpg",
+    ]
