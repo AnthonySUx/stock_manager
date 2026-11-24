@@ -239,6 +239,13 @@ remain separate. Repeated rows on one receipt after the first include
 `low_confidence` (below 0.6), `multi_mapped_alias`, `inferred_fields`, and
 `alias_suggestion`.
 
+First-seen labels (no confirmed alias yet) are never named by guesswork. The
+model fills `name` only when the label clearly identifies the product. When it
+returns `specificity: unknown` for a first-seen label with a `raw_name`, the
+candidate has `name: null`, like a generic label, and keeps `raw_name` and any
+`generic_name` for display. The confidence of every first-seen label is capped
+at 0.5. Labels that match an `auto` alias still use the learned name.
+
 `RECEIPT_PRODUCT_LOOKUP_PROVIDER=none` is the available lookup mode. First-seen
 labels use `match_method=ai_knowledge`. Future providers plug into
 `receipt_lookup.lookup_products(raw_names, store)`, whose inputs are limited

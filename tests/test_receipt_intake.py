@@ -444,3 +444,50 @@ def test_mysql_alias_upsert_compiles_atomic_increment_without_a_connection():
     )
     statement = db.execute.call_args.args[0].compile(dialect=mysql.dialect())
     assert "ON DUPLICATE KEY UPDATE confirmed_count = (receipt_item_aliases.confirmed_count + %s)" in str(statement)
+
+
+# ─── Unfamiliar first-seen labels (#84) ─────────────────────────
+
+
+def test_first_seen_unknown_label_gets_no_guessed_name_and_capped_confidence(client, fake_ai):
+    found = _candidate(
+        client, fake_ai, raw_name="TJ BRND ZX 12", name="Zesty Crackers", generic_name=None,
+        specificity="unknown", confidence=0.95,
+    )
+    assert found["name"] is None
+    assert found["raw_name"] == "TJ BRND ZX 12" and found["generic_name"] is None
+    assert found["specificity"] == "unknown"
+    assert found["confidence"] <= 0.5
+    assert found["requires_user_review"] and found["review_reason"] == "first_seen"
+
+
+def test_first_seen_unknown_label_without_raw_name_keeps_model_name(client, fake_ai):
+    found = _candidate(client, fake_ai, raw_name=None, specificity="unknown", confidence=0.95)
+    assert found["name"] == "Milk" and found["confidence"] <= 0.5
+
+
+def test_first_seen_specific_product_keeps_name_with_capped_confidence(client, fake_ai):
+    found = _candidate(client, fake_ai, name="Organic Milk", specificity="specific_product", confidence=0.95)
+    assert found["name"] == "Organic Milk"
+    assert found["confidence"] == 0.5
+    assert found["review_reason"] == "first_seen"
+
+
+def test_auto_alias_still_overrides_model_guess(client, db_session, fake_ai):
+    assert _confirm(client, *[_confirmed(db_session, i) for i in (1, 2, 3)]).status_code == 201
+    found = _candidate(client, fake_ai, name="Some Guess", confidence=0.3)
+    assert found["name"] == DAIRY_NAME and found["confidence"] == 0.9
+    assert found["auto_apply_allowed"] is True
+
+
+def test_seen_label_keeps_model_confidence(client, db_session, fake_ai):
+    assert _confirm(client, _confirmed(db_session)).status_code == 201
+    found = _candidate(client, fake_ai, confidence=0.8)
+    assert found["confidence"] == 0.8 and found["review_reason"] == "alias_suggestion"
+
+
+def test_receipt_prompt_forbids_guessing_unfamiliar_labels(client, fake_ai):
+    _parse(client, fake_ai, _line())
+    prompt = fake_ai.system_prompts[0]
+    assert "Fill name only when the label clearly identifies the product" in prompt
+    assert "If unsure, set name to null and specificity" in prompt
