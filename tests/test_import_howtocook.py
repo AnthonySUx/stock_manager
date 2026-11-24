@@ -559,6 +559,20 @@ def test_image_and_link_targets_may_contain_parentheses(importer):
     ('调味料：火锅底料、花生酱、全脂牛奶', ['调味料：火锅底料、花生酱、全脂牛奶'], []),
     ('油 + 锅 + 菜刀 + 铲子', ['油'], []),
     ('烤箱（普通的炒锅也行）', [], []),
+    ("清水 720g + 600g（720 克用于蒸饭，后 500g 用于发酵）", ["清水"], []),
+    ("混合馅（猪肉 + 虾滑，猪肉 + 螺肉等自由组合）", ["混合馅"], []),
+    ("生抽 + 老抽 + 蚝油", ["生抽", "老抽", "蚝油"], []),
+    (
+        "普通无涂层炒锅可以使用木质、不锈钢或耐高温硬质硅胶炒勺；"
+        "不粘锅建议使用耐高温硬质硅胶炒勺，避免损伤涂层。",
+        [], [],
+    ),
+    ("炒糖色过程火不要太大！！！电磁炉温度不够，火候过了发苦，不够发甜", [], []),
+    ("火锅底料：某宝小龙坎传统清油火锅底料味道最佳，29.8元一包，可以做20份", [], []),
+    (
+        "调味料：火锅底料、花生酱、全脂牛奶、生抽、辣椒油、醋、花椒油",
+        ["调味料：火锅底料、花生酱、全脂牛奶、生抽、辣椒油、醋、花椒油"], [],
+    ),
 ])
 def test_kitchen_equipment_ingredient_lines(importer, line, names, groups):
     rows, equipment, _ = importer._parse_ingredient_section(line)
@@ -566,11 +580,36 @@ def test_kitchen_equipment_ingredient_lines(importer, line, names, groups):
     assert equipment == groups
 
 
+@pytest.mark.parametrize("line,subject,unclassified", [
+    ("蒸鱼盘子（能平放下一条鱼即可）", "蒸鱼盘子", ["蒸鱼盘子"]),
+    ("家庭铁勺子", "家庭铁勺子", ["家庭铁勺子"]),
+    ("砵或者有一定深度的碗", "砵", []),
+    ("工具：`锅`（砂锅为宜，铝锅其次，高压锅也可以，最好不要铁锅、铜锅）", "锅", []),
+    ("工具：**铁锅**", "铁锅", []),
+])
+def test_kitchen_equipment_tool_subjects(importer, line, subject, unclassified):
+    assert importer._tool_subject(line) == (subject, False)
+    assert importer._parse_ingredient_section(line) == ([], [], unclassified)
+
+
+@pytest.mark.parametrize("line,name,optional", [
+    ("必备：东北米（金龙鱼 30 元 5kg 的就行）", "东北米", False),
+    ("可选：香菜", "香菜", True),
+    ("④可选: 香菜", "香菜", True),
+])
+def test_kitchen_equipment_ingredient_prefixes(importer, line, name, optional):
+    rows, equipment, unclassified = importer._parse_ingredient_section(line)
+    assert [(row["ingredient_name"], row["is_optional"]) for row in rows] == [(name, optional)]
+    assert equipment == unclassified == []
+
+
 @pytest.mark.parametrize("step,groups", [
     ("放入预热好的烤箱，200 度烤 15 分钟", [["oven"]]),
     ("也可以用高压锅压 20 分钟", []),
     ("放入蒸锅大火蒸 8 分钟", [["steamer"]]),
     ("小贴士：隔夜可用烤箱回温", []),
+    ("盖上锅盖，转中小火炖煮 50 分钟-60 分钟（高压锅则为 40 分钟）", []),
+    ("放入烤箱 (也可以用微波炉。)", [["oven"]]),
 ])
 def test_kitchen_equipment_step_lines(importer, step, groups):
     assert importer._step_equipment(step) == groups

@@ -249,14 +249,28 @@ _HEAD_SEPARATOR_RE = re.compile(r"\s|[（(，,、/]|或者?")
 _ALTERNATIVE_RE = re.compile(r"或者?|/")
 _NOTE_ALTERNATIVE_RE = re.compile(r"可替代|代替|即可|也行|也可以|没有的话")
 _STEP_ALTERNATIVE_RE = re.compile(r"或|也可以|可以用|如果没有|没有的话|代替|替代|可选")
+_INGREDIENT_QUANTITY_UNITS = (
+    r"克|毫升|升|斤|两|kg|g|ml|l|勺|汤匙|茶匙|根|条|片|个|只|颗|包|袋|把|捆|块|份|碗|盒|瓶|罐|扎|打"
+)
+_INGREDIENT_QUANTITY_RE = re.compile(
+    rf"([\d.]+)\s*({_INGREDIENT_QUANTITY_UNITS})"
+    rf"(?:(?:\s*\+\s*\d+(?:\.\d+)?\s*(?:{_INGREDIENT_QUANTITY_UNITS}))+"
+    r"(?=\s*(?:[（(]|$)))?"
+)
 
 
-def _tool_subject(segment: str) -> tuple[str, bool]:
-    segment = re.sub(r"^[①-⑩]|^\d+[.、](?!\d)", "", segment.strip()).lstrip()
+def _strip_ingredient_prefix(segment: str) -> tuple[str, bool]:
+    """Strip list numbering and labels while tracking optional ingredients."""
+    segment = re.sub(r"^(?:[①-⑩]|\d+[.)、](?!\d))\s*", "", segment.strip())
     optional = False
     while label := _LABEL_RE.match(segment):
         optional |= label[1] == "可选"
         segment = segment[label.end():]
+    return segment, optional
+
+
+def _tool_subject(segment: str) -> tuple[str, bool]:
+    segment, optional = _strip_ingredient_prefix(segment.translate(str.maketrans("", "", "`*")))
     subject = re.split(r"[：:]", segment, maxsplit=1)[0]
     subject = _SIZE_RE.sub("", subject)
     subject = _HEAD_SEPARATOR_RE.split(subject, maxsplit=1)[0]
@@ -286,6 +300,31 @@ def _bracket_parts(segment: str) -> tuple[str, list[str]]:
     if note:
         notes.append("".join(note))
     return "".join(body), notes
+
+
+def _ingredient_segments(line: str) -> list[str]:
+    """Split top-level plus signs unless a segment starts with a quantity."""
+    if "+" not in line:
+        return [line]
+    depth = start = 0
+    segments = []
+    for index, char in enumerate(line):
+        if char in "(（":
+            depth += 1
+        elif char in ")）" and depth:
+            depth -= 1
+        elif char == "+" and not depth:
+            segments.append(line[start:index].strip())
+            start = index + 1
+    segments.append(line[start:].strip())
+    if any(segment and segment[0].isdigit() for segment in segments):
+        return [line]
+    return segments
+
+
+def _is_explanatory_line(line: str) -> bool:
+    body, _ = _bracket_parts(line)
+    return bool(re.search(r"[。！!；;]", body) or (len(body.strip()) > 30 and re.search(r"[，,]", body)))
 
 
 def _basic_note_alternative(note: str) -> bool:
@@ -343,7 +382,8 @@ def _step_equipment(text: str) -> list[list[str]]:
         step = _clean_line(line)
         if re.match(r"^(?:小贴士|附加内容)\s*[：:]", step):
             continue
-        for sentence in re.split(r"[。！？!?；;]", step):
+        body, _ = _bracket_parts(step)
+        for sentence in re.split(r"[。！？!?；;]", body):
             if not _STEP_ALTERNATIVE_RE.search(sentence):
                 groups.extend([code] for code in _special_codes(sentence))
     return groups
@@ -369,7 +409,8 @@ def _parse_ingredient_section(text: str) -> tuple[list[dict], list[list[str]], l
         line = _clean_line(raw_line)
         if not line or line.startswith(("注：", "注意", "建议")):
             continue
-        for segment in map(str.strip, line.split("+")):
+        explanatory = _is_explanatory_line(line)
+        for segment in _ingredient_segments(line):
             if not segment:
                 continue
             subject, optional = _tool_subject(segment)
@@ -380,24 +421,23 @@ def _parse_ingredient_section(text: str) -> tuple[list[dict], list[list[str]], l
                 if not listed_tool:
                     unclassified.append(subject)
                 groups.extend(_tool_groups(segment, optional))
-            else:
-                ingredients.append(segment)
+            elif not explanatory:
+                ingredient, _ = _strip_ingredient_prefix(segment)
+                if ingredient:
+                    ingredients.append((ingredient, optional))
 
     results = []
     seen: set[str] = set()
-    for line in ingredients:
+    for line, optional in ingredients:
         is_seasoning = any(kw in line for kw in [
             "盐", "糖", "酱油", "醋", "料酒", "油", "胡椒", "花椒",
             "八角", "桂皮", "香叶", "生抽", "老抽", "蚝油", "味精",
             "鸡精", "淀粉", "葱", "姜", "蒜",
         ])
 
-        # Try to extract quantity
-        qty_match = re.search(
-            r"([\d.]+)\s*(克|毫升|升|斤|两|kg|g|ml|l|勺|汤匙|茶匙|根|条|片|个|只|颗|包|袋|把|捆|块|份|碗|盒|瓶|罐|扎|打)",
-            line,
-        )
-        # Remove "500克" from the name; store 500 and 克 separately (#47).
+        # Store the first quantity as before. Strip any additional quantities
+        # connected by plus signs so they do not become part of the name.
+        qty_match = _INGREDIENT_QUANTITY_RE.search(line)
         name = line
         if qty_match:
             name = name.replace(qty_match.group(0), "", 1)
@@ -415,7 +455,7 @@ def _parse_ingredient_section(text: str) -> tuple[list[dict], list[list[str]], l
             "quantity": qty_match.group(1) if qty_match else None,
             "unit": qty_match.group(2) if qty_match else None,
             "is_seasoning": is_seasoning,
-            "is_optional": False,
+            "is_optional": optional,
             "sort_order": len(results),
         })
 
