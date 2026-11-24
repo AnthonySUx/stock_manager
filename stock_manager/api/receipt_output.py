@@ -11,6 +11,8 @@ from stock_manager.api.receipt_aliases import (
 from stock_manager.api.receipt_schemas import ReceiptSpecificity
 
 _SPECIFICITIES = get_args(ReceiptSpecificity)
+# The model has never seen a first-seen label confirmed, so its guess is capped.
+FIRST_SEEN_MAX_CONFIDENCE = 0.5
 _INFERRED_FIELDS = {
     "quantity_unit": "quantity_unit_inferred",
     "location": "location_inferred",
@@ -78,8 +80,14 @@ def apply_receipt_line(
         and may_auto_apply(history.specificity, history.confirmed_count, history.distinct_names)
         and may_auto_apply(line.specificity, history.confirmed_count, history.distinct_names)
     )
-    if generic:
+    first_seen = history is None
+    # A first-seen label the model could not identify gets no guessed name (#84).
+    # Without raw_name there is nothing to review instead, so the name stays.
+    unidentified = first_seen and line.specificity == "unknown" and line.raw_name is not None
+    if generic or unidentified:
         fields["name"] = None
+    if first_seen:
+        confidence = min(confidence, FIRST_SEEN_MAX_CONFIDENCE)
     if auto:
         fields.update(
             name=history.confirmed_name,

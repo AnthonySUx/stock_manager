@@ -215,8 +215,9 @@ def _add_candidate(
         elif fields.get("purchase_date"):
             warnings.append(warning("purchase_date_from_receipt"))
         metadata = apply_receipt_line(line, history, fields, confidence, warnings)
-    generic = metadata.get("specificity") == "generic_category" and metadata.get("raw_name")
-    if not fields.get("name") and not generic:
+    # Generic and unidentified receipt lines keep raw_name for review without a name.
+    unnamed_ok = metadata.get("specificity") in ("generic_category", "unknown") and metadata.get("raw_name")
+    if not fields.get("name") and not unnamed_ok:
         return None
     if fields.get("purchase_date") is None:
         fields["purchase_date"] = context.purchase_date.isoformat()

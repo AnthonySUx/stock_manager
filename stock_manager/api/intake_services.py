@@ -127,6 +127,10 @@ _RECEIPT_RULES = """
 - In each receipt candidate, include raw_name as printed, name, generic_name, quantity_value,
   quantity_unit, numeric price, store_name and specificity. Specificity is specific_product,
   specific_receipt_label, generic_category or unknown. Preserve generic labels as raw_name.
+- Fill name only when the label clearly identifies the product. Do not expand unfamiliar
+  abbreviations, store codes or brand fragments. If unsure, set name to null and specificity
+  to unknown. Set generic_name only for a clear product type, otherwise null. Keep raw_name
+  exactly as printed.
   Set purchase_date only if a receipt date is visible. If available, use the same receipt_group
   for photos from one receipt and a different group for unrelated receipts.
 - Use inferred_fields to flag inferred quantity_unit, location or unopened_expiration_date.
