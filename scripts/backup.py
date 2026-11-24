@@ -13,7 +13,8 @@ Each run writes one folder named by the local time, for example
 
 The folder is written under a temporary name and renamed when complete, so a
 failed run never leaves a folder that looks like a finished backup. After a
-successful run, only the newest `--keep` backups (default 14) are kept.
+successful run, only the newest `--keep` backups (default 7, one week of
+daily runs) are kept.
 
 Settings come from the environment and the project's `.env`:
 `DATABASE_URL`, `MEDIA_DIR`, and `BACKUP_DIR` (the default for `--dest`).
@@ -39,7 +40,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # A finished backup folder name; anything else in the destination is left alone.
 BACKUP_NAME = re.compile(r"^\d{8}-\d{6}$")
-DEFAULT_KEEP = 14
+DEFAULT_KEEP = 7
 
 
 def _load_env() -> None:

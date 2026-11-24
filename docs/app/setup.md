@@ -432,8 +432,8 @@ under `BACKUP_DIR`, or under `--dest` when given:
 - `manifest.json`: sizes and SHA-256 checksums.
 
 A run writes to a hidden temporary folder and renames it only when complete.
-After a successful run, only the newest 14 backups are kept (`--keep N` to
-change). The password is passed to `mysqldump` through `MYSQL_PWD` and is
+After a successful run, only the newest 7 backups are kept, one week of daily
+runs (`--keep N` to change). The password is passed to `mysqldump` through `MYSQL_PWD` and is
 never printed. The app's database user needs no extra privileges.
 
 ```bash
