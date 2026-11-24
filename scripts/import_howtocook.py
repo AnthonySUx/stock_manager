@@ -81,7 +81,8 @@ def parse_recipe_md(filepath: str) -> dict:
     for line in lines:
         m = re.match(r"^#\s+(.+)$", line)
         if m:
-            title = m.group(1).strip()
+            original = m.group(1).strip()
+            title = original.removesuffix("的做法").strip() or original
             break
 
     if not title:
@@ -334,6 +335,7 @@ def import_howtocook(howtocook_path: str, db_url: str = "", prune_non_recipes: b
     error_count = 0
     synced_count = 0
     steps_synced_count = 0
+    titles_synced_count = 0
 
     for md_file in sorted(md_files):
         # Check if already imported (by source_path)
@@ -341,7 +343,8 @@ def import_howtocook(howtocook_path: str, db_url: str = "", prune_non_recipes: b
         from stock_manager.api.models import Recipe
 
         existing = session.query(Recipe).filter(
-            Recipe.source_path == rel_path
+            Recipe.source_path == rel_path,
+            Recipe.source_type == "howtocook"
         ).first()
         if existing:
             existing_count += 1
@@ -357,6 +360,10 @@ def import_howtocook(howtocook_path: str, db_url: str = "", prune_non_recipes: b
                 error_count += 1
                 print(f"  ✗ {rel_path}: {e}")
                 continue
+            if existing.title != parsed["title"]:
+                print(f"  ↻ {rel_path}: title '{existing.title}' → '{parsed['title']}'")
+                existing.title = parsed["title"]
+                titles_synced_count += 1
             if _sync_ingredients(session, existing, parsed["ingredients"]):
                 print(f"  ↻ {rel_path}: ingredients re-parsed")
                 synced_count += 1
@@ -428,12 +435,12 @@ def import_howtocook(howtocook_path: str, db_url: str = "", prune_non_recipes: b
     print(
         f"\nImport complete: {imported_count} imported, {existing_count} existing "
         f"({fixed_count} categories fixed, {synced_count} ingredient lists and "
-        f"{steps_synced_count} step lists re-parsed), "
+        f"{steps_synced_count} step lists re-parsed, {titles_synced_count} titles updated), "
         f"{error_count} errors"
     )
     return {"imported": imported_count, "existing": existing_count,
             "fixed": fixed_count, "ingredients_synced": synced_count,
-            "steps_synced": steps_synced_count,
+            "steps_synced": steps_synced_count, "titles_synced": titles_synced_count,
             "errors": error_count, "non_recipe": non_recipe, "pruned": pruned}
 
 

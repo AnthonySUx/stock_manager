@@ -56,7 +56,7 @@ NON_RECIPES = [
 
 
 def _counts(**overrides):
-    base = {"imported": 0, "existing": 0, "fixed": 0, "ingredients_synced": 0, "steps_synced": 0,
+    base = {"imported": 0, "existing": 0, "fixed": 0, "ingredients_synced": 0, "steps_synced": 0, "titles_synced": 0,
             "errors": 0, "non_recipe": 0, "pruned": 0}
     base.update(overrides)
     return base
@@ -225,7 +225,7 @@ class TestImport:
             "dishes/soup/番茄蛋汤.md": "soup",
         }
         recipe = session.query(Recipe).filter_by(source_path="dishes/meat_dish/口水鸡/口水鸡.md").one()
-        assert recipe.title == "口水鸡的做法"
+        assert recipe.title == "口水鸡"
         # Number and unit stored separately (#47); bracketed notes dropped from
         # names and the duplicate 盐 skipped (#49).
         assert [(i.ingredient_name, i.quantity, i.unit, i.sort_order) for i in recipe.ingredients] == [
@@ -233,6 +233,36 @@ class TestImport:
             ("鲤鱼", "1.5", "斤", 3),
         ]
         assert len(recipe.steps) == 2
+
+    @pytest.mark.parametrize(("title", "expected"), [
+        (" 拔丝土豆 的做法 ", "拔丝土豆"),
+        ("的做法", "的做法"),
+        ("土豆的做法合集", "土豆的做法合集"),
+    ])
+    def test_title_suffix(self, importer, tmp_path, title, expected):
+        path = tmp_path / "recipe.md"
+        path.write_text(f"# {title}\n", encoding="utf-8")
+        assert importer.parse_recipe_md(str(path))["title"] == expected
+
+    def test_rerun_updates_title_and_keeps_fork_and_user_titles(self, importer, repo, db, capsys):
+        url, session = db
+        importer.import_howtocook(str(repo), url)
+        rel = "dishes/meat_dish/口水鸡/口水鸡.md"
+        recipe = session.query(Recipe).filter_by(source_path=rel).one()
+        recipe.title = "口水鸡的做法"
+        fork = Recipe(title="口水鸡的做法", source_type="user", base_recipe_id=recipe.id)
+        user = Recipe(title="我的菜的做法", source_type="user", source_path=rel)
+        session.add_all([fork, user])
+        session.commit()
+
+        result = importer.import_howtocook(str(repo), url)
+
+        session.expire_all()
+        assert result == _counts(existing=4, titles_synced=1)
+        assert recipe.title == "口水鸡"
+        assert fork.title == "口水鸡的做法"
+        assert user.title == "我的菜的做法"
+        assert f"↻ {rel}: title '口水鸡的做法' → '口水鸡'" in capsys.readouterr().out
 
     def test_rerun_fixes_old_categories_and_adds_nothing(self, importer, repo, db):
         url, session = db
