@@ -2,10 +2,12 @@
 
 import json
 from dataclasses import asdict
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Header, Query
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import Response
+from pydantic import ValidationError, WithJsonSchema
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
@@ -23,6 +25,9 @@ from stock_manager.api.uploads import PhotoUpload, read_photo_upload
 
 
 router = APIRouter(tags=["Recipes"])
+
+# Check which fields were sent before validating their values against PhotoUpdate.
+PhotoPatchBody = Annotated[dict, WithJsonSchema(PhotoUpdate.model_json_schema())]
 
 
 def _get_photo(db: Session, recipe_id: int, photo_id: int) -> RecipePhoto:
@@ -100,11 +105,20 @@ def add_photo(
 
 @router.patch("/recipes/{recipe_id}/photos/{photo_id}", response_model=RecipePhotoResponse)
 @media.file_transaction()
-def patch_photo(recipe_id: int, photo_id: int, data: PhotoUpdate, db: Session = Depends(get_session)):
+def patch_photo(recipe_id: int, photo_id: int, data: PhotoPatchBody, db: Session = Depends(get_session)):
     get_photo_recipe(db, recipe_id, lock=True)
     media.require_media()
     photo = _get_photo(db, recipe_id, photo_id)
-    changes = data.model_dump(exclude_unset=True)
+    if photo.origin == "howtocook" and data.keys() - {"hidden"}:
+        raise APIError(409, "photo_source_readonly", "Only hidden can be changed on source photos")
+    try:
+        changes = PhotoUpdate.model_validate(data).model_dump(exclude_unset=True)
+    except ValidationError as exc:
+        errors = [
+            {**error, "loc": ("body", *error["loc"])}
+            for error in exc.errors(include_url=False)
+        ]
+        raise RequestValidationError(errors, body=data) from exc
     if "hidden" in changes and photo.origin != "howtocook":
         raise APIError(422, "photo_hidden_source_only", "Only source photos can be hidden")
     if changes.get("hidden"):
@@ -116,8 +130,7 @@ def patch_photo(recipe_id: int, photo_id: int, data: PhotoUpdate, db: Session = 
                 raise APIError(422, "photo_group_invalid", "A photo can belong to a step or cook record")
             validate_step(db, recipe_id, step)
         if step != photo.step_number:
-            if photo.origin == "user":
-                ensure_group_capacity(db, recipe_id, step, None)
+            ensure_group_capacity(db, recipe_id, step, None)
             if "position" not in changes:
                 photo.position = next_position(db, recipe_id, step)
     for field, value in changes.items():
@@ -213,19 +226,17 @@ def cook_history(
     db: Session = Depends(get_session),
 ):
     get_photo_recipe(db, recipe_id)
-    media.require_media()
     records = list(db.scalars(select(RecipeUsageHistory).where(
         RecipeUsageHistory.recipe_id == recipe_id, RecipeUsageHistory.event_type == "cooked",
     ).order_by(RecipeUsageHistory.created_at.desc(), RecipeUsageHistory.id.desc())
         .limit(limit).offset(offset)))
-    if not records:
-        return []
     grouped = {}
-    for photo in db.scalars(select(RecipePhoto).where(
-        RecipePhoto.recipe_id == recipe_id,
-        RecipePhoto.usage_history_id.in_([record.id for record in records]),
-    ).order_by(RecipePhoto.position, RecipePhoto.id)):
-        grouped.setdefault(photo.usage_history_id, []).append(photo_response(photo))
+    if records and media.available():
+        for photo in db.scalars(select(RecipePhoto).where(
+            RecipePhoto.recipe_id == recipe_id,
+            RecipePhoto.usage_history_id.in_([record.id for record in records]),
+        ).order_by(RecipePhoto.position, RecipePhoto.id)):
+            grouped.setdefault(photo.usage_history_id, []).append(photo_response(photo))
     return [
         CookHistoryEntry(id=r.id, created_at=r.created_at, notes=_cook_notes(r.metadata_json),
                          photos=grouped.get(r.id, []))

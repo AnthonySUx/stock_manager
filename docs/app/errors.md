@@ -117,5 +117,5 @@ code. Authentication errors retain the `WWW-Authenticate` header.
 | `photo_cook_record_invalid` | 422 | — | The cook record does not belong to the recipe or is not a cooked event. |
 | `photo_limit_reached` | 422 | `group`, `limit` | The group already has the maximum number of user photos. |
 | `photo_hidden_source_only` | 422 | — | Only an imported photo supports the `hidden` field. |
-| `photo_source_readonly` | 409 | — | An imported photo cannot be deleted. |
+| `photo_source_readonly` | 409 | — | An imported photo cannot be deleted. Updates to it accept only the `hidden` field. |
 | `photo_cover_invalid` | 422 | — | The selected photo is hidden or is outside the recipe. |

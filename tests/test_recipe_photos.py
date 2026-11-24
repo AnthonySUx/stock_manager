@@ -246,6 +246,35 @@ def test_cover_rules_and_readonly_source(photo_client, db_session):
     assert client.get(url).json()["cover"]["id"] == recent["id"]
 
 
+def test_source_photo_patch_allows_only_hidden(photo_client, db_session):
+    client = photo_client
+    recipe = make_recipe(client)
+    photo_id = source_photo(db_session, recipe, position=4)
+    photos_url = f"/api/recipes/{recipe}/photos"
+    original = client.get(photos_url).json()
+    photo_url = f"{photos_url}/{photo_id}"
+    for changes in (
+        {"step_number": 10}, {"position": 2}, {"caption": "New caption"},
+        {"hidden": True, "position": 2}, {"position": None}, {"unknown": True},
+    ):
+        response = client.patch(photo_url, json=changes)
+        assert (response.status_code, response.json()["code"]) == (409, "photo_source_readonly")
+        assert client.get(photos_url).json() == original
+
+    response = client.patch(photo_url, json={"hidden": True})
+    assert response.status_code == 200
+    assert response.json() == {**original["photos"][0], "hidden": True}
+
+
+def test_user_photo_patch_keeps_request_validation(photo_client):
+    recipe = make_recipe(photo_client)
+    photo = upload(photo_client, recipe).json()
+    url = f"/api/recipes/{recipe}/photos/{photo['id']}"
+    response = photo_client.patch(url, json={"position": None})
+    assert (response.status_code, response.json()["code"]) == (422, "validation_error")
+    assert response.json()["params"]["errors"][0]["loc"] == ["body", "position"]
+
+
 def test_image_auth_etag_and_thumbnail(photo_client, db_session, media_dir):
     client = photo_client
     photo = upload(photo_client, make_recipe(photo_client), raw=image_bytes(size=(900, 450))).json()
@@ -272,6 +301,32 @@ def test_disabled_media(client, monkeypatch):
     assert (response.status_code, response.json()["code"]) == (503, "media_unavailable")
     assert client.get("/api/recipes").json()[0]["cover"] is None
     assert client.get(f"/api/recipes/{recipe}").json()["cover_mode"] == "none"
+
+
+def test_cook_history_returns_notes_without_media(photo_client, monkeypatch):
+    client = photo_client
+    recipe = make_recipe(client)
+    recipe_url = f"/api/recipes/{recipe}"
+    record = client.post(f"{recipe_url}/cook", json={"notes": "Dinner"}).json()
+    photo = upload(client, recipe, usage_history_id=record["usage_history_id"])
+    assert photo.status_code == 201
+    history_url = f"{recipe_url}/cook-history"
+    with_media = client.get(history_url).json()
+    assert len(with_media[0]["photos"]) == 1
+
+    monkeypatch.delenv("MEDIA_DIR")
+    media.reload_config()
+
+    response = client.get(history_url)
+    assert response.status_code == 200
+    assert response.json() == [{
+        "id": record["usage_history_id"],
+        "created_at": with_media[0]["created_at"],
+        "notes": "Dinner",
+        "photos": [],
+    }]
+    assert client.get(f"{recipe_url}/photos").status_code == 503
+    assert client.get(photo.json()["image_url"]).status_code == 503
 
 
 def test_replacing_steps_moves_only_removed_numbers_to_end(photo_client):

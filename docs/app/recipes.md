@@ -544,12 +544,12 @@ With no eligible photo, `cover` is null and `cover_mode` is `none`.
 | --- | --- |
 | `GET /api/recipes/{id}/photos` | Returns `cover`, `cover_mode` and all photo records, including hidden originals, sorted by group, step number, position and ID. |
 | `POST /api/recipes/{id}/photos` | Sends one multipart `file` and optionally one of `step_number` or `usage_history_id`. Returns the new photo with status 201. |
-| `PATCH /api/recipes/{id}/photos/{photo_id}` | Updates `position`, `caption`, `step_number`, or source-only `hidden`. Set a step photo's `step_number` to null to move it to the gallery. |
+| `PATCH /api/recipes/{id}/photos/{photo_id}` | Updates `position`, `caption`, or `step_number` for user photos. Set a user step photo's `step_number` to null to move it to the gallery. An imported photo accepts only `hidden`. Any other field causes the entire update to return 409. |
 | `DELETE /api/recipes/{id}/photos/{photo_id}` | Deletes a user photo. |
 | `PUT /api/recipes/{id}/cover` | Selects a visible photo with `{"photo_id": 12}`. |
 | `DELETE /api/recipes/{id}/cover` | Restores automatic cover selection. |
 | `GET /api/photos/{photo_id}/image?size=thumb` | Fetches JPEG bytes. Omit `size` or use `full` for the full image. Send the bearer token and optionally `If-None-Match`. |
-| `GET /api/recipes/{id}/cook-history` | Lists cooked records newest first with their notes and photos. Supports `limit` (1–100) and `offset`. |
+| `GET /api/recipes/{id}/cook-history` | Lists cooked records newest first with their notes and photos. Supports `limit` (1–100) and `offset`. With `MEDIA_DIR` unset, each record has an empty `photos` list. |
 
 A successful `POST /api/recipes/{id}/cook` returns the
 `usage_history_id` for that cook. Pass it when uploading photos for the
