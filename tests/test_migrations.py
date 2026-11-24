@@ -5,6 +5,9 @@ another database (it must be an empty, throwaway database: tables are
 dropped).
 """
 
+from contextlib import contextmanager
+from decimal import Decimal
+
 import sqlalchemy as sa
 import pytest
 from alembic import command
@@ -12,13 +15,63 @@ from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from fastapi.testclient import TestClient
 from sqlalchemy import Float, Numeric, create_engine, inspect, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from stock_manager.api import schema_version
 from stock_manager.api.models import Base
 from tests.conftest import IS_SQLITE, TEST_DATABASE_URL
 
 APP_TABLES = set(Base.metadata.tables)
+
+# Legacy tables built by hand need an auto-incrementing id on MySQL, as the
+# real pre-Alembic tables had; SQLite's INTEGER PRIMARY KEY already is one.
+LEGACY_ID = "id INTEGER PRIMARY KEY" + ("" if IS_SQLITE else " AUTO_INCREMENT")
+MYSQL_CHECK_VIOLATION = 3819
+
+
+@contextmanager
+def _rejected():
+    """Expect a constraint violation.
+
+    SQLite reports CHECK and UNIQUE violations as IntegrityError. MySQL reports
+    UNIQUE as IntegrityError but CHECK as OperationalError 3819.
+    """
+    with pytest.raises(DBAPIError) as caught:
+        yield
+    error = caught.value
+    assert isinstance(error, IntegrityError) or (
+        not IS_SQLITE and error.orig.args[0] == MYSQL_CHECK_VIOLATION
+    ), error
+
+
+def _numbers(row):
+    return tuple(float(value) if isinstance(value, Decimal) else value for value in row)
+
+
+def _named_indexes(inspector, table):
+    """Indexes created by the migrations (`ix_*`).
+
+    MySQL also lists the indexes it creates for foreign keys and unique
+    constraints; those are checked through their constraints instead.
+    """
+    return {
+        entry["name"]: entry["column_names"] for entry in inspector.get_indexes(table)
+        if entry["name"].startswith("ix_")
+    }
+
+
+_NOW_DEFAULTS = {"now", "current_timestamp"}
+
+
+def _compare_server_default(context, inspected_column, metadata_column, inspected_default,
+                            metadata_default, rendered_metadata_default):
+    """Treat MySQL's CURRENT_TIMESTAMP and (now()) as the same default as func.now()."""
+    def normalized(value):
+        return "".join(ch for ch in (value or "") if ch not in "()'\"").strip().lower()
+
+    if normalized(inspected_default) in _NOW_DEFAULTS and normalized(rendered_metadata_default) in _NOW_DEFAULTS:
+        return False
+    return None
 
 
 def _drop_everything(engine):
@@ -54,7 +107,7 @@ def _schema_diff(engine, tables=None):
     with engine.connect() as connection:
         context = MigrationContext.configure(connection, opts={
             "compare_type": True,
-            "compare_server_default": True,
+            "compare_server_default": _compare_server_default,
             "include_object": include_object,
         })
         return compare_metadata(context, Base.metadata)
@@ -227,7 +280,7 @@ def test_0003_repairs_legacy_category_columns_without_losing_rows(fresh_db):
     with engine.begin() as connection:
         connection.execute(text(
             "CREATE TABLE categories ("
-            "id INTEGER PRIMARY KEY, name VARCHAR(100) NOT NULL, slug VARCHAR(100) NOT NULL UNIQUE, "
+            f"{LEGACY_ID}, name VARCHAR(100) NOT NULL, slug VARCHAR(100) NOT NULL UNIQUE, "
             "parent_id INTEGER, recipe_usage VARCHAR(20) NOT NULL DEFAULT 'never', "
             "is_system BOOLEAN NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0, "
             "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
@@ -240,7 +293,7 @@ def test_0003_repairs_legacy_category_columns_without_losing_rows(fresh_db):
         ))
         connection.execute(text(
             "CREATE TABLE items ("
-            "id INTEGER PRIMARY KEY, name VARCHAR(255) NOT NULL, category VARCHAR(100) NOT NULL)"
+            f"{LEGACY_ID}, name VARCHAR(255) NOT NULL, category VARCHAR(100) NOT NULL)"
         ))
         connection.execute(text(
             "INSERT INTO items (id, name, category) VALUES "
@@ -248,7 +301,7 @@ def test_0003_repairs_legacy_category_columns_without_losing_rows(fresh_db):
         ))
         connection.execute(text(
             "CREATE TABLE restock_items ("
-            "id INTEGER PRIMARY KEY, name VARCHAR(255) NOT NULL, category VARCHAR(100))"
+            f"{LEGACY_ID}, name VARCHAR(255) NOT NULL, category VARCHAR(100))"
         ))
         connection.execute(text(
             "INSERT INTO restock_items (id, name, category) VALUES "
@@ -468,7 +521,7 @@ def test_0006_status_checks_upgrade_and_downgrade_preserve_rows(fresh_db):
             for status in reversed(valid_values):
                 connection.execute(update, {"status": status})
         for status in ("banana", valid_values[0].upper(), f"{valid_values[0]} "):
-            with pytest.raises(IntegrityError), engine.begin() as connection:
+            with _rejected(), engine.begin() as connection:
                 connection.execute(update, {"status": status})
 
     with engine.connect() as connection:
@@ -523,7 +576,7 @@ def test_0007_upgrade_and_downgrade_preserve_status_checks_and_rows(fresh_db):
             ("restock_items", "ix_restock_items_status", "status"),
             ("recipes", "ix_recipes_source_type", "source_type"),
         ):
-            indexes = {entry["name"]: entry["column_names"] for entry in inspector.get_indexes(table)}
+            indexes = _named_indexes(inspector, table)
             assert indexes == ({index: [column]} if revision == "0007" else {})
         for table in ("items", "restock_items"):
             assert f"ck_{table}_status" in _status_constraint_names(engine, table)
@@ -536,18 +589,19 @@ def test_0007_upgrade_and_downgrade_preserve_status_checks_and_rows(fresh_db):
                 assert (quantity_type.precision, quantity_type.scale) == (12, 3)
             else:
                 assert isinstance(quantity_type, Float)
-            with pytest.raises(IntegrityError), engine.begin() as connection:
+            with _rejected(), engine.begin() as connection:
                 connection.execute(text(f"UPDATE {table} SET status = 'banana' WHERE id = 1"))
 
         favorite_keys = inspector.get_unique_constraints("recipe_favorites")
         restock_columns = {col["name"]: col for col in inspector.get_columns("restock_items")}
         with engine.connect() as connection:
-            assert connection.execute(text(
+            # MySQL returns DECIMAL as Decimal and FLOAT as float; compare numbers.
+            assert _numbers(connection.execute(text(
                 "SELECT quantity_value, status FROM items WHERE id = 1"
-            )).one() == (1.235, "active")
-            assert connection.execute(text(
+            )).one()) == (1.235, "active")
+            assert [_numbers(row) for row in connection.execute(text(
                 "SELECT quantity_value, status, source_item_id FROM restock_items ORDER BY id"
-            )).all() == [(2.346, "pending", 1), (None, "done", None)]
+            ))] == [(2.346, "pending", 1), (None, "done", None)]
             assert connection.execute(text(
                 "SELECT id, note FROM recipe_favorites"
             )).all() == [(1, "First")]
@@ -564,7 +618,7 @@ def test_0007_upgrade_and_downgrade_preserve_status_checks_and_rows(fresh_db):
                 assert favorite_keys == []
 
         if revision == "0007":
-            with pytest.raises(IntegrityError), engine.begin() as connection:
+            with _rejected(), engine.begin() as connection:
                 connection.execute(text("INSERT INTO recipe_favorites (recipe_id) VALUES (1)"))
             command.downgrade(config, "0006")
 
@@ -599,7 +653,7 @@ def test_0008_adds_and_removes_shopping_checked_at_and_keeps_rows(fresh_db):
     assert _revision(engine) == "0007"
     assert "shopping_checked_at" not in {col["name"] for col in inspect(engine).get_columns("restock_items")}
     assert "ck_restock_items_status" in _status_constraint_names(engine, "restock_items")
-    with pytest.raises(IntegrityError), engine.begin() as connection:
+    with _rejected(), engine.begin() as connection:
         connection.execute(text("UPDATE restock_items SET status = 'banana' WHERE id = 1"))
     with engine.connect() as connection:
         assert connection.execute(text(
@@ -626,7 +680,7 @@ def test_0009_recipe_photos_upgrade_constraints_and_downgrade(fresh_db):
     engine.dispose()
     inspector = sa.inspect(engine)
     table = "recipe_photos"
-    assert {i["name"] for i in inspector.get_indexes(table)} == {
+    assert set(_named_indexes(inspector, table)) == {
         "ix_recipe_photos_recipe_id", "ix_recipe_photos_usage_history_id",
     }
     assert {c["name"] for c in inspector.get_check_constraints(table)} == {
@@ -654,7 +708,7 @@ def test_0009_recipe_photos_upgrade_constraints_and_downgrade(fresh_db):
             dict(origin="USER", step=None, history=None, path=None),
             dict(origin="howtocook", step=None, history=None, path="example.jpg"),
         ]:
-            with pytest.raises(sa.exc.IntegrityError), conn.begin_nested():
+            with _rejected(), conn.begin_nested():
                 conn.execute(stmt, invalid)
 
     command.downgrade(config, "0008")
