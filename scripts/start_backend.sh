@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
 # Start the Stock Manager API backend server.
+# Use --dev to enable automatic reload. The default is suitable for production.
 # Prerequisites: explicitly configured MySQL and Python dependencies installed.
 
 set -euo pipefail
+
+if [ "$#" -eq 1 ] && [ "$1" = "--dev" ]; then
+  set -- --reload
+elif [ "$#" -ne 0 ]; then
+  echo "Usage: $0 [--dev]" >&2
+  exit 2
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
@@ -38,4 +46,4 @@ if [ "$HOST" = "0.0.0.0" ]; then
   echo ""
 fi
 
-exec "$VENV_PYTHON" -m uvicorn stock_manager.api.main:app --host "$HOST" --port "${API_PORT:-8000}" --reload
+exec "$VENV_PYTHON" -m uvicorn stock_manager.api.main:app --host "$HOST" --port "${API_PORT:-8000}" "$@"

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from stock_manager.api import ai_client
 
+from stock_manager.api.rate_limit import require_ai_quota
 from stock_manager.api.db import get_session
 from stock_manager.api.errors import APIError
 from stock_manager.api.recipe_schemas import (
@@ -177,7 +178,7 @@ def _load_recipe_titles(db: Session) -> list[tuple[int, str]]:
     return [(row.id, row.title) for row in db.query(Recipe.id, Recipe.title)]
 
 
-@router.post("/explore", response_model=ExploreResponse)
+@router.post("/explore", response_model=ExploreResponse, dependencies=[Depends(require_ai_quota)])
 async def explore_recipes_endpoint(
     data: ExploreRequest,
     db: Session = Depends(get_session),
@@ -254,6 +255,7 @@ async def _explore_events(events, path: str):
 
 @router.post(
     "/explore/stream",
+    dependencies=[Depends(require_ai_quota)],
     response_class=StreamingResponse,
     responses={200: {"content": {"text/event-stream": {}},
                      "description": "Server-sent events: idea*, then done or error"}},
@@ -313,7 +315,7 @@ def _load_explore_inventory(
     return inv_dicts, bad_ids, household_locale(db)
 
 
-@router.post("/explore/expand", response_model=ExpandResponse)
+@router.post("/explore/expand", response_model=ExpandResponse, dependencies=[Depends(require_ai_quota)])
 async def explore_expand_endpoint(
     data: ExpandRequest,
     db: Session = Depends(get_session),

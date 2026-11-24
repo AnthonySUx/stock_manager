@@ -314,8 +314,8 @@ def test_default_asr_is_disabled_and_route_requires_token(client):
     assert client.post(_TRANSCRIBE, headers={"Authorization": ""}).status_code == 401
 
 
-def test_openapi_describes_only_supported_fields(client):
-    operation = client.get("/openapi.json").json()["paths"][_TRANSCRIBE]["post"]
+def test_openapi_describes_only_supported_fields(docs_client):
+    operation = docs_client.get("/openapi.json").json()["paths"][_TRANSCRIBE]["post"]
     form = operation["requestBody"]["content"]["multipart/form-data"]["schema"]
     assert form["required"] == ["audio"]
     assert set(form["properties"]) == {"audio", "feature"}

@@ -99,6 +99,8 @@ API_PORT=8000
 
 # AI recipe recommendations (optional, for Explore Recipes)
 # AI_RECIPE_ENABLED=false
+AI_RATE_LIMIT_PER_WINDOW=30
+AI_RATE_LIMIT_WINDOW_SECONDS=600
 # AI_BASE_URL=https://api.deepseek.com
 # AI_API_KEY=
 # AI_MODEL=deepseek-flash
@@ -134,6 +136,12 @@ API_PORT=8000
 `DATABASE_URL` is mandatory. The backend has no localhost fallback. When
 `MYSQL_HOST_PORT` is present, the backend verifies that the URL uses the same
 port and exits with a configuration error if they differ.
+
+Intake parse, Explore (including streaming), Expand, and speech transcription share an
+in-process rolling quota per API token. The default is 30 requests in 600 seconds. Change
+`AI_RATE_LIMIT_PER_WINDOW` or `AI_RATE_LIMIT_WINDOW_SECONDS` and restart to adjust it.
+A 429 response includes `rate_limited` and `params.retry_after` in seconds.
+See [API errors](errors.md).
 
 `AI_VISION_ENABLED` defaults to `false`. Image intake also requires the
 backend's AI feature and key to be configured. `AI_IMAGE_DETAIL` accepts
@@ -190,6 +198,8 @@ It uses `DATABASE_URL` from `.env`, the same database as the API. Then start the
 ./scripts/start_backend.sh
 ```
 
+Start with `./scripts/start_backend.sh --dev` to enable automatic reload during development.
+
 On startup the API checks that the database is at the newest migration. If it is not, it
 refuses to start and says to run `alembic upgrade head`. It seeds the default inventory
 categories on every start.
@@ -202,7 +212,7 @@ curl http://localhost:8000/api/health
 
 Expected: `{"status":"ok","version":"0.9.0"}`
 
-`/api/health` is public. Every other endpoint needs the token (see 3.7):
+Business endpoints under `/api` require the token. The health check is public (see 3.7):
 
 ```bash
 curl -H "Authorization: Bearer $API_TOKEN" http://localhost:8000/api/items
@@ -210,7 +220,10 @@ curl -H "Authorization: Bearer $API_TOKEN" http://localhost:8000/api/items
 
 ### 3.4 API Documentation
 
-Open http://localhost:8000/docs in your browser. Click **Authorize** and paste the API token to try protected endpoints.
+The API documentation routes `/docs`, `/redoc`, and `/openapi.json` are disabled by default.
+For local development, set `API_DOCS_ENABLED=true` and restart the backend. Open
+`http://localhost:8000/docs`, select **Authorize**, and enter the token to call protected
+endpoints. The documentation itself is public when enabled.
 
 ### 3.5 Database Migrations (Alembic)
 

@@ -44,8 +44,8 @@ class TestTokenRequired:
     def test_health_is_public(self, anon):
         assert anon.get("/api/health").status_code == 200
 
-    def test_openapi_declares_bearer_scheme(self, anon):
-        spec = anon.get("/openapi.json").json()
+    def test_openapi_declares_bearer_scheme(self, docs_client):
+        spec = docs_client.get("/openapi.json", headers={"Authorization": ""}).json()
         schemes = spec["components"]["securitySchemes"]
         assert any(s.get("scheme", "").lower() == "bearer" for s in schemes.values())
 

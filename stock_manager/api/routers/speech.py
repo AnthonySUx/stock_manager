@@ -2,10 +2,11 @@
 
 from typing import Literal
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from stock_manager.api import ai_client, asr_client
+from stock_manager.api.rate_limit import require_ai_quota
 from stock_manager.api.errors import APIError
 from stock_manager.api.speech_audio import check_audio
 from stock_manager.api.uploads import read_audio_upload
@@ -44,7 +45,7 @@ _REQUEST_BODY = {
 
 
 @router.post(
-    "/transcribe", response_model=TranscriptionResponse, response_model_exclude_none=True,
+    "/transcribe", dependencies=[Depends(require_ai_quota)], response_model=TranscriptionResponse, response_model_exclude_none=True,
     openapi_extra=_REQUEST_BODY,
 )
 async def transcribe(request: Request) -> TranscriptionResponse:
