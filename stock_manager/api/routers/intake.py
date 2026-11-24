@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from stock_manager.api import ai_client
+from stock_manager.api.rate_limit import require_ai_quota
 from stock_manager.api.db import get_session
 from stock_manager.api.intake_schemas import (
     MAX_IMAGES,
@@ -117,7 +118,10 @@ async def _read_text_request(request: Request) -> ParseRequest:
     return _validate_payload(ParseRequest, body, ("body",))
 
 
-@router.post("/parse", response_model=ParseResponse, openapi_extra=_PARSE_REQUEST_BODY)
+@router.post(
+    "/parse", response_model=ParseResponse, openapi_extra=_PARSE_REQUEST_BODY,
+    dependencies=[Depends(require_ai_quota)],
+)
 async def parse(
     request: Request,
     db: Session = Depends(get_session),

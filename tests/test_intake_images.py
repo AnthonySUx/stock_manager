@@ -76,8 +76,8 @@ def test_image_mime_rejects_unsupported_signatures(data):
     assert raised.value.params == {"index": 3}
 
 
-def test_openapi_exposes_json_and_multipart_parse(client):
-    api = client.get("/openapi.json").json()
+def test_openapi_exposes_json_and_multipart_parse(docs_client):
+    api = docs_client.get("/openapi.json").json()
     content = api["paths"][PARSE]["post"]["requestBody"]["content"]
     assert set(content) == {"application/json", "multipart/form-data"}
     text = content["application/json"]["schema"]

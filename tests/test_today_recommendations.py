@@ -264,7 +264,7 @@ class TestRecipeCategoryRequired:
         assert second["category"] is None
 
 
-def test_ai_today_endpoint_is_removed(client):
+def test_ai_today_endpoint_is_removed(docs_client):
     """Deprecated since PR #14; removed in #66."""
-    assert client.post("/api/recipes/ai/today").status_code in (404, 405)
-    assert "/api/recipes/ai/today" not in client.get("/openapi.json").json()["paths"]
+    assert docs_client.post("/api/recipes/ai/today").status_code in (404, 405)
+    assert "/api/recipes/ai/today" not in docs_client.get("/openapi.json").json()["paths"]

@@ -28,7 +28,7 @@ dotenv.load_dotenv = lambda *args, **kwargs: False
 os.environ.setdefault("DATABASE_URL", "sqlite://")
 
 from stock_manager.api.db import get_session  # noqa: E402
-from stock_manager.api.main import app  # noqa: E402
+from stock_manager.api.main import app, create_app  # noqa: E402
 from stock_manager.api.models import Base  # noqa: E402
 from stock_manager.api.schema_version import stamp_head  # noqa: E402
 
@@ -78,12 +78,8 @@ def db_session():
 TEST_API_TOKEN = "test-api-token"
 
 
-@pytest.fixture()
-def client(db_session, monkeypatch):
-    """Provide a FastAPI TestClient with an isolated SQLite database.
-
-    The client sends the shared API token (issue #41) on every request.
-    """
+def _test_client(app, db_session, monkeypatch):
+    """Use an isolated SQLite database and the test bearer token."""
     # Must patch before TestClient enters startup lifespan
     monkeypatch.setattr("stock_manager.api.main.engine", test_engine)
     monkeypatch.setenv("API_TOKEN", TEST_API_TOKEN)
@@ -101,6 +97,17 @@ def client(db_session, monkeypatch):
         yield test_client
 
     app.dependency_overrides.clear()
+
+
+@pytest.fixture()
+def client(db_session, monkeypatch):
+    yield from _test_client(app, db_session, monkeypatch)
+
+
+@pytest.fixture()
+def docs_client(db_session, monkeypatch):
+    monkeypatch.setenv("API_DOCS_ENABLED", "true")
+    yield from _test_client(create_app(), db_session, monkeypatch)
 
 
 # ─── AI (never calls the real provider) ──────────────────────────

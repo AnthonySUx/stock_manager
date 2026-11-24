@@ -38,10 +38,10 @@ def check_auth_config() -> None:
 
 def require_api_token(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
-) -> None:
-    """FastAPI dependency: reject requests without the shared token."""
+) -> str | None:
+    """Return the authenticated token, or reject an invalid bearer credential."""
     if auth_disabled():
-        return
+        return None
     expected = configured_token()
     provided = credentials.credentials if credentials else ""
     if not expected or not provided or not secrets.compare_digest(provided, expected):
@@ -50,3 +50,4 @@ def require_api_token(
             detail="Missing or invalid API token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    return provided

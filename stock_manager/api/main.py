@@ -18,6 +18,7 @@ from stock_manager.api.auth import check_auth_config, require_api_token
 from stock_manager.api.schema_version import check_schema_current
 from stock_manager.api.db import engine
 from stock_manager.api.errors import APIError
+from stock_manager.api.rate_limit import AIRateLimiter
 from stock_manager.api.routers import capabilities, categories, intake, items, recipes, restock, settings, speech
 
 
@@ -57,21 +58,13 @@ async def lifespan(app: FastAPI):
     check_auth_config()
     check_schema_current(engine)
     ai_client.reload_config()  # read and validate AI settings once (#66)
+    app.state.ai_rate_limiter = AIRateLimiter.from_env()
     from sqlalchemy.orm import sessionmaker
     from stock_manager.api.category_services import seed_default_categories
     SeedSession = sessionmaker(bind=engine)
     with SeedSession() as session:
         seed_default_categories(session)
     yield
-
-app = FastAPI(
-    title="Stock Manager API",
-    description=description,
-    version=__version__,
-    docs_url="/docs",
-    redoc_url="/redoc",
-    lifespan=lifespan,
-)
 
 # CORS — only browser clients (e.g. Expo web) are affected; native iOS/Android
 # requests do not use CORS. Origins come from CORS_ALLOW_ORIGINS (comma-separated).
@@ -81,26 +74,6 @@ DEFAULT_CORS_ORIGINS = "http://localhost:8081,http://127.0.0.1:8081,http://local
 def _cors_origins() -> list[str]:
     raw = os.getenv("CORS_ALLOW_ORIGINS", DEFAULT_CORS_ORIGINS)
     return [o.strip() for o in raw.split(",") if o.strip()]
-
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_cors_origins(),
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Routers — all require the shared API token (issue #41); /api/health stays public.
-_auth = [Depends(require_api_token)]
-app.include_router(items.router, prefix="/api/items", tags=["Stock Items"], dependencies=_auth)
-app.include_router(restock.router, prefix="/api/restock", tags=["Restock Items"], dependencies=_auth)
-app.include_router(settings.router, prefix="/api/settings", tags=["Settings"], dependencies=_auth)
-app.include_router(recipes.router, prefix="/api/recipes", tags=["Recipes"], dependencies=_auth)
-app.include_router(categories.router, prefix="/api/categories", tags=["Categories"], dependencies=_auth)
-app.include_router(capabilities.router, prefix="/api/capabilities", tags=["Capabilities"], dependencies=_auth)
-app.include_router(intake.router, prefix="/api/intake", tags=["Intake"], dependencies=_auth)
-app.include_router(speech.router, prefix="/api/speech", tags=["Speech"], dependencies=_auth)
 
 
 HTTP_ERROR_CODES = {
@@ -134,7 +107,6 @@ def _error_response(status_code, code, params, detail, *, headers=None):
     )
 
 
-@app.exception_handler(StarletteHTTPException)
 async def http_error_handler(request: Request, exc: StarletteHTTPException):
     if not is_body_allowed_for_status_code(exc.status_code):
         return Response(status_code=exc.status_code, headers=exc.headers)
@@ -142,7 +114,6 @@ async def http_error_handler(request: Request, exc: StarletteHTTPException):
     return _error_response(exc.status_code, code, {}, exc.detail, headers=exc.headers)
 
 
-@app.exception_handler(RequestValidationError)
 async def request_validation_error_handler(request: Request, exc: RequestValidationError):
     # Invalid numeric input may contain a non-finite float that JSON cannot echo.
     errors = jsonable_encoder(
@@ -151,12 +122,10 @@ async def request_validation_error_handler(request: Request, exc: RequestValidat
     return _error_response(422, "validation_error", {"errors": errors}, errors)
 
 
-@app.exception_handler(APIError)
 async def api_error_handler(request: Request, exc: APIError):
     return _error_response(exc.status_code, exc.code, exc.params, exc.detail)
 
 
-@app.exception_handler(ai_client.AIError)
 async def ai_error_handler(request: Request, exc: ai_client.AIError):
     """Return a public message while keeping the provider diagnostic in the server log."""
     ai_client.log_ai_error(request.method, request.url.path, exc)
@@ -164,7 +133,47 @@ async def ai_error_handler(request: Request, exc: ai_client.AIError):
     return _error_response(exc.status_code, exc.code, {}, detail)
 
 
-@app.get("/api/health", tags=["Health"])
 def health():
     """Health check endpoint."""
     return {"status": "ok", "version": __version__}
+
+
+def create_app() -> FastAPI:
+    docs_enabled = os.getenv("API_DOCS_ENABLED", "false").strip().lower() == "true"
+    app = FastAPI(
+        title="Stock Manager API",
+        description=description,
+        version=__version__,
+        docs_url="/docs" if docs_enabled else None,
+        redoc_url="/redoc" if docs_enabled else None,
+        openapi_url="/openapi.json" if docs_enabled else None,
+        lifespan=lifespan,
+    )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins(),
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # Routers — all require the shared API token (issue #41); /api/health stays public.
+    _auth = [Depends(require_api_token)]
+    app.include_router(items.router, prefix="/api/items", tags=["Stock Items"], dependencies=_auth)
+    app.include_router(restock.router, prefix="/api/restock", tags=["Restock Items"], dependencies=_auth)
+    app.include_router(settings.router, prefix="/api/settings", tags=["Settings"], dependencies=_auth)
+    app.include_router(recipes.router, prefix="/api/recipes", tags=["Recipes"], dependencies=_auth)
+    app.include_router(categories.router, prefix="/api/categories", tags=["Categories"], dependencies=_auth)
+    app.include_router(capabilities.router, prefix="/api/capabilities", tags=["Capabilities"], dependencies=_auth)
+    app.include_router(intake.router, prefix="/api/intake", tags=["Intake"], dependencies=_auth)
+    app.include_router(speech.router, prefix="/api/speech", tags=["Speech"], dependencies=_auth)
+
+    app.add_exception_handler(StarletteHTTPException, http_error_handler)
+    app.add_exception_handler(RequestValidationError, request_validation_error_handler)
+    app.add_exception_handler(APIError, api_error_handler)
+    app.add_exception_handler(ai_client.AIError, ai_error_handler)
+    app.add_api_route("/api/health", health, methods=["GET"], tags=["Health"])
+    return app
+
+
+app = create_app()

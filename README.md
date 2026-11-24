@@ -239,7 +239,7 @@ curl -H "Authorization: Bearer <YOUR_API_TOKEN>" \
   "http://127.0.0.1:8000/api/recipes/recommendations?scene=all&limit=10"
 ```
 
-Interactive API documentation is available at <http://127.0.0.1:8000/docs>. Use **Authorize** to supply the same bearer token.
+Set `API_DOCS_ENABLED=true` and restart the backend to enable interactive documentation at <http://127.0.0.1:8000/docs>. Use **Authorize** to supply the same bearer token.
 
 ### 10. Build and Run the Native iOS App
 
@@ -415,6 +415,8 @@ See [docs/app.md](docs/app.md) for the full App documentation.
 ## Legacy CLI
 
 The original CLI is still available and uses **SQLite**. It does not require Docker or a running API server.
+
+The CLI database implementation in `stock_manager/database.py` is legacy code. Its behavior can differ from the API because the implementations are maintained independently.
 
 ```bash
 python3 -m stock_manager --help
