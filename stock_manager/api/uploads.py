@@ -200,6 +200,70 @@ class _AudioForm(_MultipartForm):
         return AudioUpload(self.audio, self.feature)
 
 
+@dataclass(frozen=True)
+class PhotoUpload:
+    data: bytes
+    step_number: int | None
+    usage_history_id: int | None
+
+
+def photo_too_large() -> APIError:
+    return APIError(413, "photo_too_large", "Photo is too large")
+
+
+class _PhotoForm(_MultipartForm):
+    def __init__(self):
+        super().__init__()
+        self.photo: bytes | None = None
+        self.associations: dict[str, int | None] = {}
+
+    @staticmethod
+    def invalid() -> APIError:
+        return APIError(422, "photo_upload_invalid", "Expected one photo file and optional association")
+
+    def start_field(self, name: str | None, is_file: bool) -> None:
+        if name == "file" and is_file and self.photo is None:
+            self.field = name
+        elif name in ("step_number", "usage_history_id") and not is_file and name not in self.associations:
+            self.field = name
+        else:
+            raise self.invalid()
+
+    def on_part_data(self, data: bytes, start: int, end: int) -> None:
+        size = len(self.part) + end - start
+        if self.field == "file":
+            if size > MAX_IMAGE_BYTES:
+                raise photo_too_large()
+        elif size > 64:
+            raise self.invalid()
+        self.part.extend(memoryview(data)[start:end])
+
+    def on_part_end(self) -> None:
+        if self.field == "file":
+            self.photo = bytes(self.part)
+        else:
+            value = self.part.strip()
+            if value:
+                if not re.fullmatch(rb"[+-]?[0-9]+", value):
+                    raise self.invalid()
+                self.associations[self.field] = int(value)
+            else:
+                self.associations[self.field] = None
+        self.part.clear()
+
+    def result(self) -> PhotoUpload:
+        if self.photo is None:
+            raise self.invalid()
+        return PhotoUpload(self.photo, self.associations.get("step_number"),
+                           self.associations.get("usage_history_id"))
+
+
+async def read_photo_upload(request: Request) -> PhotoUpload:
+    form = _PhotoForm()
+    await _read_multipart(request, form, MAX_IMAGE_BYTES + 64 * 1024, photo_too_large)
+    return form.result()
+
+
 async def read_image_upload(request: Request) -> tuple[dict, list[dict]]:
     form = _ImageForm()
     await _read_multipart(request, form, MAX_REQUEST_BYTES, _request_too_large)
@@ -214,7 +278,7 @@ async def read_audio_upload(request: Request) -> AudioUpload:
 
 async def _read_multipart(
     request: Request,
-    form: _ImageForm | _AudioForm,
+    form: _MultipartForm,
     max_request_bytes: int,
     too_large: Callable[[], APIError],
 ) -> None:

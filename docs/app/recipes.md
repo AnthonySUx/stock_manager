@@ -517,3 +517,51 @@ Currently AI is used **only** for Explore Recipes. Today Recommendations use loc
 | `AI_TOTAL_TIMEOUT_SECONDS` | `50` | Upper bound for one text round, retry included; the repair round gets its own |
 | `AI_IMAGE_TOTAL_TIMEOUT_SECONDS` | `110` | Upper bound for one image call, including retries and one retry after an empty reply |
 | `AI_MAX_RETRIES` | `1` | Retries after a connection error, `429` or `5xx`, before any content arrived. Timeouts are not retried |
+
+## Photos
+
+Recipes can have imported HowToCook photos and user photos. HowToCook
+photos can be hidden or unhidden. User photos can be deleted. List photos
+to manage hidden originals.
+
+| Group | Association | User photo limit |
+| --- | --- | --- |
+| `gallery` | Recipe | 12 per recipe |
+| `step` | Stored `step_number` | 3 per step |
+| `cooked` | Cooked `usage_history_id` | 6 per record |
+
+Imported photos are excluded from each limit. If a recipe edit removes a
+step number, its photos move to the end of the gallery. A fork shares the
+files for visible gallery and step photos and gets its own photo records.
+
+Recipe detail, recipe lists, and recommendations return `cover` and
+`cover_mode`. The server uses the manually chosen visible photo
+(`chosen`), then the most recently uploaded user photo across all groups
+(`auto`), then the first visible HowToCook photo by position (`auto`).
+With no eligible photo, `cover` is null and `cover_mode` is `none`.
+
+| Method and path | Behavior |
+| --- | --- |
+| `GET /api/recipes/{id}/photos` | Returns `cover`, `cover_mode` and all photo records, including hidden originals, sorted by group, step number, position and ID. |
+| `POST /api/recipes/{id}/photos` | Sends one multipart `file` and optionally one of `step_number` or `usage_history_id`. Returns the new photo with status 201. |
+| `PATCH /api/recipes/{id}/photos/{photo_id}` | Updates `position`, `caption`, or `step_number` for user photos. Set a user step photo's `step_number` to null to move it to the gallery. An imported photo accepts only `hidden`. Any other field causes the entire update to return 409. |
+| `DELETE /api/recipes/{id}/photos/{photo_id}` | Deletes a user photo. |
+| `PUT /api/recipes/{id}/cover` | Selects a visible photo with `{"photo_id": 12}`. |
+| `DELETE /api/recipes/{id}/cover` | Restores automatic cover selection. |
+| `GET /api/photos/{photo_id}/image?size=thumb` | Fetches JPEG bytes. Omit `size` or use `full` for the full image. Send the bearer token and optionally `If-None-Match`. |
+| `GET /api/recipes/{id}/cook-history` | Lists cooked records newest first with their notes and photos. Supports `limit` (1–100) and `offset`. With `MEDIA_DIR` unset, each record has an empty `photos` list. |
+
+A successful `POST /api/recipes/{id}/cook` returns the
+`usage_history_id` for that cook. Pass it when uploading photos for the
+record.
+
+Upload JPEG, PNG or WebP files up to 5 MiB. The server stores a JPEG up to
+1600 pixels on the longest side and a 400-pixel JPEG thumbnail. JPEG
+re-encoding strips EXIF metadata, including GPS coordinates.
+
+Pass `--with-photos` when importing HowToCook to add local images. The
+first image goes into the gallery. Subsequent images following an
+operation step belong to that step, except preview and finished-dish
+images, which go into the gallery. Other images also go into the gallery.
+Remote references and missing files are skipped. Re-import matches photos
+by source path and preserves hidden and manual cover settings.

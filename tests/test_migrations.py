@@ -5,6 +5,7 @@ another database (it must be an empty, throwaway database: tables are
 dropped).
 """
 
+import sqlalchemy as sa
 import pytest
 from alembic import command
 from alembic.autogenerate import compare_metadata
@@ -604,3 +605,59 @@ def test_0008_adds_and_removes_shopping_checked_at_and_keeps_rows(fresh_db):
         assert connection.execute(text(
             "SELECT id, name, status, quantity_value FROM restock_items ORDER BY id"
         )).all() == before
+
+
+def test_0009_recipe_photos_upgrade_constraints_and_downgrade(fresh_db):
+    url, engine = fresh_db
+    config = _alembic(url)
+    command.upgrade(config, "0008")
+    with engine.begin() as conn:
+        conn.execute(sa.text(
+            "INSERT INTO recipes (id, title, source_type, source_name, is_user_created) "
+            "VALUES (1, 'Dinner', 'user', 'User', 1)"
+        ))
+        conn.execute(sa.text(
+            "INSERT INTO recipe_usage_history (id, recipe_id, event_type) VALUES (1, 1, 'cooked')"
+        ))
+
+    command.upgrade(config, "0009")
+    command.upgrade(config, "0009")
+    # Earlier metadata reads used a pooled connection from before the DDL.
+    engine.dispose()
+    inspector = sa.inspect(engine)
+    table = "recipe_photos"
+    assert {i["name"] for i in inspector.get_indexes(table)} == {
+        "ix_recipe_photos_recipe_id", "ix_recipe_photos_usage_history_id",
+    }
+    assert {c["name"] for c in inspector.get_check_constraints(table)} == {
+        "ck_recipe_photos_origin", "ck_recipe_photos_group", "ck_recipe_photos_source_group",
+    }
+    assert {c["name"] for c in inspector.get_unique_constraints(table)} == {
+        "uq_recipe_photos_source_path",
+    }
+    assert {f["referred_table"] for f in inspector.get_foreign_keys(table)} == {
+        "recipes", "recipe_usage_history",
+    }
+
+    stmt = sa.text(
+        "INSERT INTO recipe_photos (recipe_id, origin, step_number, usage_history_id, "
+        "position, sha256, width, height, bytes, source_path) "
+        "VALUES (1, :origin, :step, :history, 0, 'hash', 1, 1, 1, :path)"
+    )
+    with engine.begin() as conn:
+        conn.execute(stmt, dict(origin="howtocook", step=None, history=None, path="example.jpg"))
+        for _ in range(2):
+            conn.execute(stmt, dict(origin="user", step=None, history=None, path=None))
+        for invalid in [
+            dict(origin="user", step=10, history=1, path=None),
+            dict(origin="howtocook", step=None, history=1, path=None),
+            dict(origin="USER", step=None, history=None, path=None),
+            dict(origin="howtocook", step=None, history=None, path="example.jpg"),
+        ]:
+            with pytest.raises(sa.exc.IntegrityError), conn.begin_nested():
+                conn.execute(stmt, invalid)
+
+    command.downgrade(config, "0008")
+    assert not sa.inspect(engine).has_table(table)
+    with engine.connect() as conn:
+        assert conn.execute(sa.text("SELECT id, title FROM recipes")).all() == [(1, "Dinner")]

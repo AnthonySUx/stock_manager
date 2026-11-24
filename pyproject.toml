@@ -20,6 +20,7 @@ dependencies = [
     "httpx>=0.28.0",
     "python-multipart>=0.0.32",
     "alembic>=1.13,<2",
+    "pillow>=11.0",
 ]
 
 [project.optional-dependencies]

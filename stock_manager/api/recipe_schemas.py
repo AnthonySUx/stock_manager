@@ -4,6 +4,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from stock_manager.api.photo_schemas import RecipeCover
 from stock_manager.api.schemas import ItemStatus, PositiveStockQuantity, RestockItemResponse
 
 # Dish categories = HowToCook `dishes/<dir>` names (template excluded), so user
@@ -87,7 +88,7 @@ class RecipeUpdate(BaseModel):
         return value
 
 
-class RecipeResponse(BaseModel):
+class RecipeResponse(RecipeCover):
     id: int
     source_type: str
     source_name: str
@@ -113,7 +114,7 @@ class RecipeResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class RecipeSummary(BaseModel):
+class RecipeSummary(RecipeCover):
     id: int
     source_type: str
     source_name: str
@@ -130,7 +131,7 @@ class RecipeSummary(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class RecipeRecommendation(BaseModel):
+class RecipeRecommendation(RecipeCover):
     recipe_id: int
     title: str
     score: float = 0.0
@@ -224,6 +225,7 @@ class CookLine(BaseModel):
 
 class CookRecipeResponse(BaseModel):
     """Response after cooking a recipe and consuming inventory."""
+    usage_history_id: int
     message: str
     recipe_id: int
     title: str

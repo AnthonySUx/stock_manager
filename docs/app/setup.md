@@ -230,10 +230,12 @@ endpoints. The documentation itself is public when enabled.
 Schema changes are Alembic migrations in `migrations/versions/`. The API never creates or alters
 tables itself.
 
-**Upgrade an existing database** (after pulling a change with a new migration). Existing data
-is kept:
+**Upgrade an existing backend** after pulling an update. Reinstall dependencies in the
+backend environment before applying migrations so the backend can import new dependencies
+such as Pillow. Migrations preserve existing data. Restart the backend after the upgrade.
 
 ```bash
+.venv/bin/python -m pip install -e .
 .venv/bin/python -m alembic upgrade head
 .venv/bin/python -m alembic current        # shows the database's revision, e.g. "0005 (head)"
 ```
@@ -400,4 +402,20 @@ cd /path/to/stock_manager
 ./scripts/start_backend.sh
 
 # Then launch StockManager from Xcode or the installed iOS app.
+```
+
+## Recipe photo storage
+
+Set `MEDIA_DIR` in the backend's environment file to a writable directory
+outside the repository. The API creates it on startup if needed. Without
+this setting, photo endpoints are unavailable and recipe covers are null.
+Cooking history remains available with empty photo lists.
+Back up `MEDIA_DIR` together with the database.
+
+To import HowToCook photos from your local checkout, first restore the
+image files, then run the importer from the Stock Manager repository.
+
+```bash
+git -C ~/Documents/HowToCook sparse-checkout disable
+python scripts/import_howtocook.py ~/Documents/HowToCook --with-photos
 ```

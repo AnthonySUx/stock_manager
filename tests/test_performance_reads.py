@@ -6,6 +6,7 @@ from datetime import date, timedelta
 import pytest
 from sqlalchemy import event, func
 
+from stock_manager.api import media
 from stock_manager.api.category_services import get_category_by_slug
 from stock_manager.api.models import (
     Category,
@@ -299,12 +300,22 @@ def test_get_recipes_order_matches_old_version(db_session, recipe_library, query
         assert [r.id for r in get_recipes(db_session, **kwargs)] == expected, kwargs
 
 
-def test_recipe_list_queries_do_not_grow_with_page_size(client, db_session, recipe_library):
+def test_recipe_list_queries_do_not_grow_with_page_size(
+    client, db_session, recipe_library, tmp_path, monkeypatch,
+):
     counts = []
     for limit in (2, 20):
+        monkeypatch.delenv("MEDIA_DIR", raising=False)
+        media.reload_config()
+        with count_sql() as baseline:
+            assert client.get(f"/api/recipes?limit={limit}").status_code == 200
+        monkeypatch.setenv("MEDIA_DIR", str(tmp_path))
+        media.reload_config()
         with count_sql() as statements:
             response = client.get(f"/api/recipes?limit={limit}")
         assert len(response.json()) == limit
+        assert len(_selects_from(statements, "recipe_photos")) == 1
+        assert len(statements) == len(baseline) + 1
         counts.append(len(statements))
     assert counts[0] == counts[1]
 
@@ -323,19 +334,38 @@ def test_recipe_list_flags_match_detail(client, db_session, recipe_library):
 # ─── Recommendations: ingredients in one query ────────────────────
 
 
-def test_recommendations_load_ingredients_once(client, db_session, recipe_library):
+def test_recommendations_load_ingredients_once(
+    client, db_session, recipe_library, tmp_path, monkeypatch,
+):
     _item(client, db_session, "番茄", 1)
     for recipe in db_session.query(Recipe):
         recipe.source_type = "howtocook"
         recipe.source_path = f"dishes/{recipe.category}/{recipe.id}.md"
     db_session.commit()
 
-    with count_sql() as statements:
-        response = client.get("/api/recipes/recommendations?limit=50")
+    from tests.test_recipe_photos import source_photo
 
-    assert response.status_code == 200
-    assert response.json()["recommendations"]
-    assert len(_selects_from(statements, "recipe_ingredients")) == 1
+    monkeypatch.setenv("MEDIA_DIR", str(tmp_path))
+    media.reload_config()
+    covers = {recipe.id: source_photo(db_session, recipe.id) for recipe in db_session.query(Recipe).all()}
+    for limit in (1, 50):
+        monkeypatch.delenv("MEDIA_DIR", raising=False)
+        media.reload_config()
+        with count_sql() as baseline:
+            assert client.get(f"/api/recipes/recommendations?limit={limit}").status_code == 200
+
+        monkeypatch.setenv("MEDIA_DIR", str(tmp_path))
+        media.reload_config()
+        with count_sql() as statements:
+            response = client.get(f"/api/recipes/recommendations?limit={limit}")
+
+        assert response.status_code == 200
+        assert response.json()["recommendations"]
+        for row in response.json()["recommendations"]:
+            assert row["cover"]["id"] == covers[row["recipe_id"]]
+        assert len(_selects_from(statements, "recipe_ingredients")) == 1
+        assert len(_selects_from(statements, "recipe_photos")) == 1
+        assert len(statements) == len(baseline) + 1
 
 
 def test_recommendations_with_no_recipes(client, db_session):

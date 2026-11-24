@@ -110,6 +110,15 @@ def docs_client(db_session, monkeypatch):
     yield from _test_client(create_app(), db_session, monkeypatch)
 
 
+@pytest.fixture(autouse=True)
+def _isolated_media_config(monkeypatch):
+    """Only photo tests configure storage, always inside a temporary directory."""
+    from stock_manager.api import media
+
+    monkeypatch.delenv("MEDIA_DIR", raising=False)
+    monkeypatch.setattr(media, "_directory", None)
+
+
 # ─── AI (never calls the real provider) ──────────────────────────
 
 
