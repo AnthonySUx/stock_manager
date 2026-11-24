@@ -14,6 +14,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
     func,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
@@ -277,3 +278,38 @@ class RecipeUsageHistory(Base):
     metadata_json = Column(Text, nullable=True)
 
     recipe = relationship("Recipe")
+
+
+class RecipePhoto(Base):
+    """Metadata for a recipe JPEG and its thumbnail."""
+
+    __tablename__ = "recipe_photos"
+    __table_args__ = (
+        CheckConstraint(
+            "HEX(origin) IN (HEX('howtocook'), HEX('user'))", name="ck_recipe_photos_origin",
+        ),
+        CheckConstraint(
+            "step_number IS NULL OR usage_history_id IS NULL", name="ck_recipe_photos_group",
+        ),
+        CheckConstraint(
+            "HEX(origin) != HEX('howtocook') OR usage_history_id IS NULL",
+            name="ck_recipe_photos_source_group",
+        ),
+        UniqueConstraint("recipe_id", "source_path", name="uq_recipe_photos_source_path"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    recipe_id = Column(Integer, ForeignKey("recipes.id"), nullable=False, index=True)
+    origin = Column(String(20), nullable=False)
+    step_number = Column(Integer)
+    usage_history_id = Column(Integer, ForeignKey("recipe_usage_history.id"), index=True)
+    position = Column(Integer, nullable=False)
+    is_cover = Column(Boolean, nullable=False, default=False, server_default=false())
+    hidden = Column(Boolean, nullable=False, default=False, server_default=false())
+    sha256 = Column(String(64), nullable=False)
+    width = Column(Integer, nullable=False)
+    height = Column(Integer, nullable=False)
+    bytes = Column(Integer, nullable=False)
+    caption = Column(String(255))
+    source_path = Column(String(500))
+    created_at = Column(DateTime, nullable=False, default=utcnow, server_default=func.now())

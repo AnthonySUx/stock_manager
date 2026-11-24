@@ -2,7 +2,7 @@
 """Import HowToCook markdown recipes into the Stock Manager MySQL database.
 
 Usage:
-    python scripts/import_howtocook.py /path/to/HowToCook [--db-url DATABASE_URL]
+    python scripts/import_howtocook.py /path/to/HowToCook [--db-url DATABASE_URL] [--with-photos]
 
 If --db-url is not provided, the script requires DATABASE_URL from the .env
 file in the project root. It never guesses a local MySQL connection.
@@ -18,7 +18,10 @@ import argparse
 import os
 import re
 import sys
+from collections import Counter
+from dataclasses import asdict
 from pathlib import Path
+from urllib.parse import unquote
 
 # Add project root to sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -277,6 +280,109 @@ def _parse_steps(text: str) -> list[dict]:
     return results
 
 
+_PHOTO_REF = re.compile(r"!\[([^\]]*)\]\(([^)]*)\)")
+_PHOTO_STATS = ("added", "updated", "removed", "missing", "remote_skipped")
+
+
+def _photo_steps(markdown: str, step_numbers: list[int]) -> list[tuple[str, str, int | None]]:
+    """Extract images while counting steps with the same rules as _parse_steps."""
+    refs = []
+    in_steps = False
+    step_number = 0
+    section_start = 0
+    for line in markdown.split("\n"):
+        heading = re.match(r"^##\s+(.+)$", line)
+        if heading:
+            title = heading.group(1)
+            in_steps = not ("原料" in title or "工具" in title or "计算" in title) and (
+                "操作" in title or "步骤" in title
+            )
+            if in_steps:
+                # Like parse_recipe_md, the last steps section replaces earlier ones.
+                refs[section_start:] = [(alt, path, None) for alt, path, _ in refs[section_start:]]
+                section_start = len(refs)
+                step_number = 0
+        for match in _PHOTO_REF.finditer(line):
+            alt, path = match.groups()
+            step = None
+            if refs and in_steps and "预览图" not in alt and "成品" not in alt:
+                step = step_number + bool(_clean_line(line[:match.start()])) or None
+            refs.append((alt, path.strip().removeprefix("<").removesuffix(">"), step))
+        if in_steps and _clean_line(line):
+            step_number += 1
+    return [
+        (alt, path, step_numbers[index - 1] if index is not None else None)
+        for alt, path, index in refs
+    ]
+
+
+def _sync_photos(session, recipe, parsed, md_file, root, stored_hashes, old_hashes):
+    from stock_manager.api import media
+    from stock_manager.api.errors import APIError
+    from stock_manager.api.models import RecipePhoto
+
+    stats = Counter()
+    existing = {
+        photo.source_path: photo for photo in session.query(RecipePhoto).filter(
+            RecipePhoto.recipe_id == recipe.id, RecipePhoto.origin == "howtocook",
+            RecipePhoto.source_path.is_not(None),
+        )
+    }
+    positions = Counter()
+    referenced = set()
+    seen = set()
+    step_numbers = [step["step_number"] for step in parsed["steps"]]
+    for caption, ref, step in _photo_steps(parsed["raw_markdown"], step_numbers):
+        if ref.lower().startswith(("http://", "https://")):
+            stats["remote_skipped"] += 1
+            continue
+        path = (md_file.parent / unquote(ref)).resolve()
+        if not path.is_relative_to(root):
+            stats["missing"] += 1
+            continue
+        source_path = path.relative_to(root).as_posix()
+        referenced.add(source_path)
+        if not path.is_file():
+            stats["missing"] += 1
+            continue
+        if source_path in seen:
+            continue
+        try:
+            with path.open("rb") as image:
+                stored = media.store_image(image.read(media.MAX_IMAGE_BYTES + 1))
+        except APIError as exc:
+            print(f"  ⚠ {source_path}: {exc.code}")
+            continue
+        stored_hashes.add(stored.sha256)
+        photo = existing.get(source_path)
+        seen.add(source_path)
+        fields = {
+            **asdict(stored), "step_number": step, "position": positions[step],
+            "caption": caption[:255],
+        }
+        positions[step] += 1
+        if photo is None:
+            session.add(RecipePhoto(
+                recipe_id=recipe.id, origin="howtocook", source_path=source_path, **fields,
+            ))
+            stats["added"] += 1
+        elif any(getattr(photo, key) != value for key, value in fields.items()):
+            if photo.sha256 != stored.sha256:
+                old_hashes.add(photo.sha256)
+            for key, value in fields.items():
+                setattr(photo, key, value)
+            stats["updated"] += 1
+
+    # A sparse checkout may temporarily lack a referenced source. Remove rows
+    # only when the Markdown reference itself has disappeared.
+    for source_path, photo in existing.items():
+        if source_path not in referenced:
+            session.delete(photo)
+            old_hashes.add(photo.sha256)
+            stats["removed"] += 1
+    return stats
+
+
 # ─── DB operations ───────────────────────────────────────────────
 
 
@@ -290,7 +396,9 @@ def _get_db_session(db_url: str):
     return session_local()
 
 
-def import_howtocook(howtocook_path: str, db_url: str = "", prune_non_recipes: bool = False):
+def import_howtocook(
+    howtocook_path: str, db_url: str = "", prune_non_recipes: bool = False, *, with_photos: bool = False,
+):
     """Import all HowToCook recipes into the database.
 
     HowToCook rows that are not recipes (imported from tips/, .github/ or
@@ -322,7 +430,16 @@ def import_howtocook(howtocook_path: str, db_url: str = "", prune_non_recipes: b
 
     print(f"Found {len(md_files)} recipe files")
 
+    from stock_manager.api import media
+    from stock_manager.api.models import Recipe, RecipeIngredient, RecipeStep
+
+    if with_photos or prune_non_recipes:
+        media.reload_config()
+    if with_photos and not media.available():
+        raise RuntimeError("MEDIA_DIR is required with --with-photos")
+
     session = _get_db_session(db_url)
+    root = howtocook_dir.resolve()
 
     # Import metadata
     source_url = "https://github.com/Anduin2017/HowToCook"
@@ -337,100 +454,93 @@ def import_howtocook(howtocook_path: str, db_url: str = "", prune_non_recipes: b
     steps_synced_count = 0
     titles_synced_count = 0
 
+    photo_stats = Counter()
     for md_file in sorted(md_files):
-        # Check if already imported (by source_path)
         rel_path = str(md_file.relative_to(howtocook_dir))
-        from stock_manager.api.models import Recipe
-
-        existing = session.query(Recipe).filter(
-            Recipe.source_path == rel_path,
-            Recipe.source_type == "howtocook"
-        ).first()
-        if existing:
-            existing_count += 1
-            category = howtocook_category(md_file.relative_to(howtocook_dir)) or None
-            if existing.category != category:
-                print(f"  ↻ {rel_path}: category {existing.category!r} → {category!r}")
-                existing.category = category
-                fixed_count += 1
+        with media.file_transaction(enabled=with_photos):
+            stored_hashes = set()
+            old_hashes = set()
             try:
-                parsed = parse_recipe_md(str(md_file))
-            except Exception as e:  # keep going; report like a failed import
+                recipe_data = parse_recipe_md(str(md_file))
+                if not recipe_data["title"]:
+                    print(f"  ⚠ Skipping {rel_path}: no title found")
+                    error_count += 1
+                    continue
+
+                recipe = session.query(Recipe).filter(
+                    Recipe.source_path == rel_path, Recipe.source_type == "howtocook",
+                ).with_for_update().first()
+                new_recipe = recipe is None
+                category = howtocook_category(md_file.relative_to(howtocook_dir)) or None
+                messages = []
+                if new_recipe:
+                    recipe = Recipe(
+                        source_type="howtocook", source_name=howtocook_name,
+                        source_url=source_url, source_path=rel_path, license_name=license_name,
+                        title=recipe_data["title"], category=category,
+                        description=recipe_data["description"] or None,
+                        difficulty=recipe_data["difficulty"] or None,
+                        servings=recipe_data["servings"] or None,
+                        cook_time_minutes=recipe_data["cook_time_minutes"],
+                        raw_markdown=recipe_data["raw_markdown"], is_user_created=False,
+                    )
+                    session.add(recipe)
+                    session.flush()
+                    for ing in recipe_data["ingredients"]:
+                        session.add(RecipeIngredient(recipe_id=recipe.id, **ing))
+                    for step in recipe_data["steps"]:
+                        session.add(RecipeStep(recipe_id=recipe.id, **step))
+                    category_changed = title_changed = ingredients_changed = steps_changed = False
+                else:
+                    category_changed = recipe.category != category
+                    title_changed = recipe.title != recipe_data["title"]
+                    if category_changed:
+                        messages.append(f"  ↻ {rel_path}: category {recipe.category!r} → {category!r}")
+                        recipe.category = category
+                    if title_changed:
+                        messages.append(f"  ↻ {rel_path}: title '{recipe.title}' → '{recipe_data['title']}'")
+                        recipe.title = recipe_data["title"]
+                    ingredients_changed = _sync_ingredients(session, recipe, recipe_data["ingredients"])
+                    if ingredients_changed:
+                        messages.append(f"  ↻ {rel_path}: ingredients re-parsed")
+                    steps_changed = _sync_steps(session, recipe, recipe_data["steps"])
+                    if steps_changed:
+                        messages.append(f"  ↻ {rel_path}: steps re-parsed")
+
+                if with_photos:
+                    stats = _sync_photos(
+                        session, recipe, recipe_data, md_file, root, stored_hashes, old_hashes,
+                    )
+                session.commit()
+            except Exception as e:
+                session.rollback()
+                for sha256 in stored_hashes:
+                    media.delete_files_if_unused(session, sha256)
                 session.rollback()
                 error_count += 1
                 print(f"  ✗ {rel_path}: {e}")
                 continue
-            if existing.title != parsed["title"]:
-                print(f"  ↻ {rel_path}: title '{existing.title}' → '{parsed['title']}'")
-                existing.title = parsed["title"]
-                titles_synced_count += 1
-            if _sync_ingredients(session, existing, parsed["ingredients"]):
-                print(f"  ↻ {rel_path}: ingredients re-parsed")
-                synced_count += 1
-            if _sync_steps(session, existing, parsed["steps"]):
-                print(f"  ↻ {rel_path}: steps re-parsed")
-                steps_synced_count += 1
-            session.commit()
-            continue
 
-        try:
-            recipe_data = parse_recipe_md(str(md_file))
-
-            if not recipe_data["title"]:
-                print(f"  ⚠ Skipping {rel_path}: no title found")
-                error_count += 1
-                continue
-
-            from stock_manager.api.models import Recipe, RecipeIngredient, RecipeStep
-
-            recipe = Recipe(
-                source_type="howtocook",
-                source_name=howtocook_name,
-                source_url=source_url,
-                source_path=rel_path,
-                license_name=license_name,
-                title=recipe_data["title"],
-                # From the path relative to the repo root, so folders above it
-                # (e.g. ~/dishes/HowToCook) cannot be mistaken for dishes/.
-                category=howtocook_category(md_file.relative_to(howtocook_dir)) or None,
-                description=recipe_data["description"] or None,
-                difficulty=recipe_data["difficulty"] or None,
-                servings=recipe_data["servings"] or None,
-                cook_time_minutes=recipe_data["cook_time_minutes"],
-                raw_markdown=recipe_data["raw_markdown"],
-                is_user_created=False,
-            )
-            session.add(recipe)
-            session.flush()
-
-            for ing in recipe_data["ingredients"]:
-                session.add(RecipeIngredient(
-                    recipe_id=recipe.id,
-                    ingredient_name=ing["ingredient_name"],
-                    quantity=ing["quantity"],
-                    unit=ing["unit"],
-                    is_seasoning=ing["is_seasoning"],
-                    is_optional=ing["is_optional"],
-                    sort_order=ing["sort_order"],
-                ))
-
-            for step in recipe_data["steps"]:
-                session.add(RecipeStep(
-                    recipe_id=recipe.id,
-                    step_number=step["step_number"],
-                    instruction=step["instruction"],
-                ))
-
-            session.commit()
+            if with_photos:
+                photo_stats.update(stats)
+                for sha256 in old_hashes:
+                    media.delete_files_if_unused(session, sha256)
+                if old_hashes:
+                    session.rollback()
+        if new_recipe:
             imported_count += 1
             print(f"  ✓ {rel_path} → {recipe_data['title']}")
+        else:
+            existing_count += 1
+            fixed_count += category_changed
+            titles_synced_count += title_changed
+            synced_count += ingredients_changed
+            steps_synced_count += steps_changed
+            for message in messages:
+                print(message)
 
-        except Exception as e:
-            session.rollback()
-            error_count += 1
-            print(f"  ✗ {rel_path}: {e}")
-
-    non_recipe, pruned = _handle_non_recipe_rows(session, prune_non_recipes)
+    with media.file_transaction(enabled=prune_non_recipes):
+        non_recipe, pruned = _handle_non_recipe_rows(session, prune_non_recipes)
     session.close()
     print(
         f"\nImport complete: {imported_count} imported, {existing_count} existing "
@@ -438,10 +548,16 @@ def import_howtocook(howtocook_path: str, db_url: str = "", prune_non_recipes: b
         f"{steps_synced_count} step lists re-parsed, {titles_synced_count} titles updated), "
         f"{error_count} errors"
     )
-    return {"imported": imported_count, "existing": existing_count,
+    result = {"imported": imported_count, "existing": existing_count,
             "fixed": fixed_count, "ingredients_synced": synced_count,
             "steps_synced": steps_synced_count, "titles_synced": titles_synced_count,
-            "errors": error_count, "non_recipe": non_recipe, "pruned": pruned}
+              "errors": error_count, "non_recipe": non_recipe, "pruned": pruned}
+    if with_photos:
+        result["photos"] = {key: photo_stats[key] for key in _PHOTO_STATS}
+        print("photos: " + ", ".join(f"{key} {photo_stats[key]}" for key in _PHOTO_STATS))
+        if photo_stats["missing"]:
+            print(f"Images are missing. Run: git -C {howtocook_path} sparse-checkout disable")
+    return result
 
 
 _INGREDIENT_FIELDS = ("ingredient_name", "quantity", "unit", "is_seasoning", "is_optional", "sort_order")
@@ -508,12 +624,18 @@ def _handle_non_recipe_rows(session, prune: bool) -> tuple[int, int]:
         print("They are not recommended. Re-run with --prune-non-recipes to delete them.")
         return len(rows), 0
 
+    from stock_manager.api import media
+    from stock_manager.api.photo_services import delete_recipe_photos
+
     ids = [r.id for r in rows]
+    hashes = delete_recipe_photos(session, ids)
     session.query(RecipeFavorite).filter(RecipeFavorite.recipe_id.in_(ids)).delete(synchronize_session=False)
     session.query(RecipeUsageHistory).filter(RecipeUsageHistory.recipe_id.in_(ids)).delete(synchronize_session=False)
     for r in rows:
         session.delete(r)  # ingredients and steps cascade; forks keep a NULL link
     session.commit()
+    for sha256 in hashes:
+        media.delete_files_if_unused(session, sha256)
     print(f"Deleted {len(rows)} non-recipe row(s).")
     return len(rows), len(rows)
 
@@ -533,9 +655,15 @@ def main():
         default="",
         help="Database URL (default: required from .env)",
     )
+    parser.add_argument("--with-photos", action="store_true", help="Import local recipe photos")
     args = parser.parse_args()
     _load_env()
-    import_howtocook(args.howtocook_path, args.db_url, args.prune_non_recipes)
+    try:
+        import_howtocook(
+            args.howtocook_path, args.db_url, args.prune_non_recipes, with_photos=args.with_photos,
+        )
+    except RuntimeError as exc:
+        parser.exit(1, f"Error: {exc}\n")
 
 
 if __name__ == "__main__":

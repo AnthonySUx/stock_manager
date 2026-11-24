@@ -13,13 +13,13 @@ from fastapi.utils import is_body_allowed_for_status_code
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from stock_manager import __version__
-from stock_manager.api import ai_client
+from stock_manager.api import ai_client, media
 from stock_manager.api.auth import check_auth_config, require_api_token
 from stock_manager.api.schema_version import check_schema_current
 from stock_manager.api.db import engine
 from stock_manager.api.errors import APIError
 from stock_manager.api.rate_limit import AIRateLimiter
-from stock_manager.api.routers import capabilities, categories, intake, items, recipes, restock, settings, speech
+from stock_manager.api.routers import capabilities, categories, intake, items, photos, recipes, restock, settings, speech
 
 
 def configure_logging() -> None:
@@ -58,6 +58,7 @@ async def lifespan(app: FastAPI):
     check_auth_config()
     check_schema_current(engine)
     ai_client.reload_config()  # read and validate AI settings once (#66)
+    media.reload_config()
     app.state.ai_rate_limiter = AIRateLimiter.from_env()
     from sqlalchemy.orm import sessionmaker
     from stock_manager.api.category_services import seed_default_categories
@@ -162,6 +163,7 @@ def create_app() -> FastAPI:
     app.include_router(items.router, prefix="/api/items", tags=["Stock Items"], dependencies=_auth)
     app.include_router(restock.router, prefix="/api/restock", tags=["Restock Items"], dependencies=_auth)
     app.include_router(settings.router, prefix="/api/settings", tags=["Settings"], dependencies=_auth)
+    app.include_router(photos.router, prefix="/api", dependencies=_auth)
     app.include_router(recipes.router, prefix="/api/recipes", tags=["Recipes"], dependencies=_auth)
     app.include_router(categories.router, prefix="/api/categories", tags=["Categories"], dependencies=_auth)
     app.include_router(capabilities.router, prefix="/api/capabilities", tags=["Capabilities"], dependencies=_auth)

@@ -14,6 +14,8 @@ from stock_manager.api import ai_client
 from stock_manager.api.rate_limit import require_ai_quota
 from stock_manager.api.db import get_session
 from stock_manager.api.errors import APIError
+from stock_manager.api.photo_schemas import RecipeCover
+from stock_manager.api.photo_services import load_covers
 from stock_manager.api.recipe_schemas import (
     AIWarning,
     ConsumePreviewResponse,
@@ -67,18 +69,21 @@ HOWTOCOOK_SOURCE = SourceResponse(
 )
 
 
-def _recipe_to_summary(recipe, favorite_ids: set[int], cooked_ids: set[int]) -> RecipeSummary:
+def _recipe_to_summary(
+    recipe, favorite_ids: set[int], cooked_ids: set[int], cover: RecipeCover,
+) -> RecipeSummary:
     return RecipeSummary(
         id=recipe.id, source_type=recipe.source_type, source_name=recipe.source_name,
         title=recipe.title, category=recipe.category, difficulty=recipe.difficulty,
         cook_time_minutes=recipe.cook_time_minutes, is_user_created=recipe.is_user_created,
         base_recipe_id=recipe.base_recipe_id, is_favorite=recipe.id in favorite_ids,
         has_been_cooked=recipe.id in cooked_ids,
-        created_at=recipe.created_at,
+        created_at=recipe.created_at, cover=cover.cover, cover_mode=cover.cover_mode,
     )
 
 
 def _recipe_to_response(recipe, db: Session) -> RecipeResponse:
+    cover = load_covers(db, [recipe.id]).get(recipe.id, RecipeCover())
     return RecipeResponse(
         id=recipe.id, source_type=recipe.source_type, source_name=recipe.source_name,
         source_url=recipe.source_url, source_path=recipe.source_path,
@@ -108,6 +113,7 @@ def _recipe_to_response(recipe, db: Session) -> RecipeResponse:
             for step in recipe.steps
         ] if recipe.steps else [],
         created_at=recipe.created_at, updated_at=recipe.updated_at,
+        cover=cover.cover, cover_mode=cover.cover_mode,
     )
 
 
@@ -126,8 +132,11 @@ def list_recipes(
     recipes = get_recipes(db, source_type=source_type, category=category,
         query=query, favorite_only=favorite_only, limit=limit, offset=offset)
     # Flags for the whole page in two queries, not two per recipe (#48).
-    favorite_ids, cooked_ids = get_recipe_flags(db, [r.id for r in recipes])
-    return [_recipe_to_summary(r, favorite_ids, cooked_ids) for r in recipes]
+    recipe_ids = [r.id for r in recipes]
+    favorite_ids, cooked_ids = get_recipe_flags(db, recipe_ids)
+    covers = load_covers(db, recipe_ids)
+    empty = RecipeCover()
+    return [_recipe_to_summary(r, favorite_ids, cooked_ids, covers.get(r.id, empty)) for r in recipes]
 
 
 @router.get("/recommendations", response_model=RecipeRecommendationResponse)
@@ -140,8 +149,13 @@ def rule_recommendations(
 ):
     """Refresh inventory status and score recipes using recent cooking history."""
     results = get_recommendations(db, limit=limit, scene=scene)
-    return RecipeRecommendationResponse(source_notice=HOWTOCOOK_SOURCE.notice,
-        recommendations=[RecipeRecommendation(**r) for r in results])
+    covers = load_covers(db, [row["recipe_id"] for row in results])
+    empty = RecipeCover()
+    recommendations = []
+    for row in results:
+        cover = covers.get(row["recipe_id"], empty)
+        recommendations.append(RecipeRecommendation(**row, cover=cover.cover, cover_mode=cover.cover_mode))
+    return RecipeRecommendationResponse(source_notice=HOWTOCOOK_SOURCE.notice, recommendations=recommendations)
 
 
 async def _prepare_explore(db: Session, data: ExploreRequest, accept_language: Optional[str]) -> dict:
@@ -384,6 +398,7 @@ def cook_recipe_endpoint(
     return CookRecipeResponse(
         message="Recipe marked as cooked" + (" and inventory consumed" if consume_dicts else ""),
         recipe_id=result["recipe_id"],
+        usage_history_id=result["usage_history_id"],
         title=result["title"],
         consumed_items=result["consumed_items"],
         lines=result["lines"],

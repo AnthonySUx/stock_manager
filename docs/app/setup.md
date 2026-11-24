@@ -401,3 +401,18 @@ cd /path/to/stock_manager
 
 # Then launch StockManager from Xcode or the installed iOS app.
 ```
+
+## Recipe photo storage
+
+Set `MEDIA_DIR` in the backend's environment file to a writable directory
+outside the repository. The API creates it on startup if needed. Without
+this setting, photo endpoints are unavailable and recipe covers are null.
+Back up `MEDIA_DIR` together with the database.
+
+To import HowToCook photos from your local checkout, first restore the
+image files, then run the importer from the Stock Manager repository.
+
+```bash
+git -C ~/Documents/HowToCook sparse-checkout disable
+python scripts/import_howtocook.py ~/Documents/HowToCook --with-photos
+```

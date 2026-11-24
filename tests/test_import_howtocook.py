@@ -387,3 +387,107 @@ def test_import_requires_an_explicit_database_url(importer, repo, monkeypatch):
     monkeypatch.delenv("DATABASE_URL", raising=False)
     with pytest.raises(RuntimeError, match="DATABASE_URL is required"):
         importer.import_howtocook(str(repo))
+
+
+def test_import_photos_and_align_on_rerun(importer, tmp_path, db, monkeypatch, capsys):
+    from stock_manager.api import media
+    from stock_manager.api.models import RecipePhoto
+    from tests.test_recipe_photos import image_bytes
+
+    url, session = db
+    root = tmp_path / "HowToCook"
+    folder = root / "dishes" / "soup"
+    folder.mkdir(parents=True)
+    path = folder / "soup.md"
+    text = """# 汤的做法
+
+![封面](first.png)
+![越界](../../../outside.png)
+
+## 操作步骤
+
+* 加水。
+![步骤](step.png)
+![预览图](preview.png)
+![缺失](missing.png)
+![远程](https://example.invalid/image.png)
+
+* 加盐。
+![成品](finished.png)
+"""
+    path.write_text(text, encoding="utf-8")
+    for name, color in [("first", "red"), ("step", "blue"), ("preview", "green"), ("finished", "pink")]:
+        (folder / f"{name}.png").write_bytes(image_bytes(color=color))
+    (tmp_path / "outside.png").write_bytes(image_bytes())
+    monkeypatch.setenv("MEDIA_DIR", str(tmp_path / "media"))
+
+    no_photos = importer.import_howtocook(str(root), url)
+    assert "photos" not in no_photos
+    assert session.query(RecipePhoto).count() == 0
+
+    result = importer.import_howtocook(str(root), url, with_photos=True)
+    assert result["photos"] == dict(added=4, updated=0, removed=0, missing=2, remote_skipped=1)
+    output = capsys.readouterr().out
+    assert "photos: added 4, updated 0, removed 0, missing 2, remote_skipped 1" in output
+    assert f"Images are missing. Run: git -C {root} sparse-checkout disable" in output
+
+    def photos():
+        session.expire_all()
+        return {Path(p.source_path).name: p for p in session.query(RecipePhoto)}
+
+    rows = photos()
+    assert {name: (p.step_number, p.position, p.caption) for name, p in rows.items()} == {
+        "first.png": (None, 0, "封面"), "step.png": (1, 0, "步骤"),
+        "preview.png": (None, 1, "预览图"), "finished.png": (None, 2, "成品"),
+    }
+    rows["first.png"].is_cover = True
+    rows["step.png"].hidden = True
+    first_id = rows["first.png"].id
+    old_hash = rows["first.png"].sha256
+    removed_hash = rows["finished.png"].sha256
+    session.commit()
+    (folder / "first.png").write_bytes(image_bytes(color="black"))
+    path.write_text(text.replace("![成品](finished.png)", "").replace("![封面]", "![新封面]"),
+                    encoding="utf-8")
+
+    rerun = importer.import_howtocook(str(root), url, with_photos=True)
+    assert rerun["photos"] == dict(added=0, updated=1, removed=1, missing=2, remote_skipped=1)
+    after = photos()
+    assert set(after) == {"first.png", "step.png", "preview.png"}
+    assert (after["first.png"].id, after["first.png"].is_cover, after["first.png"].caption) == (
+        first_id, True, "新封面",
+    )
+    assert after["step.png"].hidden
+    assert after["first.png"].sha256 != old_hash
+    for sha in (old_hash, removed_hash):
+        assert not media.image_path(sha).exists()
+        assert not media.image_path(sha, "thumb").exists()
+
+
+def test_with_photos_requires_media_configuration(importer, repo, db):
+    url, _ = db
+    with pytest.raises(RuntimeError, match="MEDIA_DIR is required"):
+        importer.import_howtocook(str(repo), url, with_photos=True)
+
+
+def test_prune_non_recipe_deletes_photo_files(importer, repo, db, tmp_path, monkeypatch):
+    from dataclasses import asdict
+
+    from stock_manager.api import media
+    from stock_manager.api.models import RecipePhoto
+    from tests.test_recipe_photos import image_bytes
+
+    url, session = db
+    monkeypatch.setenv("MEDIA_DIR", str(tmp_path / "media"))
+    media.reload_config()
+    stored = media.store_image(image_bytes())
+    recipe = Recipe(title="Tip", source_type="howtocook", source_path="tips/rice.md")
+    session.add(recipe)
+    session.flush()
+    session.add(RecipePhoto(recipe_id=recipe.id, position=0, origin="howtocook", **asdict(stored)))
+    session.commit()
+
+    assert importer.import_howtocook(str(repo), url, prune_non_recipes=True)["pruned"] == 1
+    assert session.query(RecipePhoto).count() == 0
+    assert not media.image_path(stored.sha256).exists()
+    assert not media.image_path(stored.sha256, "thumb").exists()

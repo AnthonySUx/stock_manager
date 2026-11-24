@@ -101,3 +101,21 @@ code. Authentication errors retain the `WWW-Authenticate` header.
 | 422 | `audio_too_long` | `max_seconds` |
 | 502 | `asr_upstream_error` | |
 | 503 | `asr_unavailable` | |
+
+## Recipe photos
+
+| Code | HTTP status | Parameters | Meaning |
+| --- | --- | --- | --- |
+| `media_unavailable` | 503 | — | `MEDIA_DIR` is unset. |
+| `photo_not_found` | 404 | — | The photo does not exist, is outside the requested recipe, or its JPEG is missing. |
+| `photo_type_unsupported` | 422 | — | The file signature is outside JPEG, PNG and WebP. |
+| `photo_too_large` | 413 | — | The file is larger than 5 MiB. |
+| `photo_invalid` | 422 | — | The server could not decode the photo or it exceeded the pixel limit. |
+| `photo_upload_invalid` | 422 | — | The multipart request has missing, duplicate, or invalid fields. |
+| `photo_group_invalid` | 422 | — | The request combines a step and a cook record for one photo. |
+| `photo_step_invalid` | 422 | `step_numbers` | The recipe has no step with that number. The parameter lists valid step numbers in ascending order. |
+| `photo_cook_record_invalid` | 422 | — | The cook record does not belong to the recipe or is not a cooked event. |
+| `photo_limit_reached` | 422 | `group`, `limit` | The group already has the maximum number of user photos. |
+| `photo_hidden_source_only` | 422 | — | Only an imported photo supports the `hidden` field. |
+| `photo_source_readonly` | 409 | — | An imported photo cannot be deleted. |
+| `photo_cover_invalid` | 422 | — | The selected photo is hidden or is outside the recipe. |

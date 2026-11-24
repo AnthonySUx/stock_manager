@@ -10,12 +10,15 @@ from sqlalchemy import case, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from stock_manager.api import media
+from stock_manager.api.photo_services import delete_recipe_photos, move_orphaned_step_photos
 from stock_manager.api.category_services import RECIPE_USAGE_NEVER
 from stock_manager.api.errors import APIError
 from stock_manager.api.models import (
     Recipe,
     RecipeFavorite,
     RecipeIngredient,
+    RecipePhoto,
     RecipeStep,
     RecipeUsageHistory,
     RestockItem,
@@ -326,9 +329,10 @@ def create_recipe(db: Session, data: RecipeCreate, source_type: str = "user") ->
     return recipe
 
 
+@media.file_transaction()
 def update_recipe(db: Session, recipe_id: int, data: RecipeUpdate) -> Optional[Recipe]:
     """Update an editable recipe and mark edited AI drafts as user recipes."""
-    recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
+    recipe = db.query(Recipe).filter(Recipe.id == recipe_id).with_for_update().first()
     if recipe is None:
         return None
     if not is_user_editable(recipe):
@@ -354,6 +358,7 @@ def update_recipe(db: Session, recipe_id: int, data: RecipeUpdate) -> Optional[R
             ))
 
     if data.steps is not None:
+        move_orphaned_step_photos(db, recipe_id, {step.step_number for step in data.steps})
         db.query(RecipeStep).filter(RecipeStep.recipe_id == recipe_id).delete()
         for step in data.steps:
             db.add(RecipeStep(
@@ -374,9 +379,10 @@ def update_recipe(db: Session, recipe_id: int, data: RecipeUpdate) -> Optional[R
     return recipe
 
 
+@media.file_transaction()
 def delete_recipe(db: Session, recipe_id: int) -> bool:
     """Delete a user-created recipe."""
-    recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
+    recipe = db.query(Recipe).filter(Recipe.id == recipe_id).with_for_update().first()
     if recipe is None:
         return False
     if not is_user_editable(recipe):
@@ -384,6 +390,7 @@ def delete_recipe(db: Session, recipe_id: int) -> bool:
     # Remove rows that reference this recipe so the delete does not violate
     # foreign keys (issue #43). Forks are kept: the `forks` backref sets their
     # base_recipe_id to NULL when the recipe is deleted.
+    hashes = delete_recipe_photos(db, [recipe_id])
     db.query(RecipeFavorite).filter(RecipeFavorite.recipe_id == recipe_id).delete(
         synchronize_session=False
     )
@@ -392,12 +399,15 @@ def delete_recipe(db: Session, recipe_id: int) -> bool:
     ).delete(synchronize_session=False)
     db.delete(recipe)
     db.commit()
+    for photo_hash in hashes:
+        media.delete_files_if_unused(db, photo_hash)
     return True
 
 
+@media.file_transaction()
 def fork_recipe(db: Session, recipe_id: int) -> Optional[Recipe]:
     """Fork a recipe into a user-editable copy."""
-    original = db.query(Recipe).filter(Recipe.id == recipe_id).first()
+    original = db.query(Recipe).filter(Recipe.id == recipe_id).with_for_update().first()
     if original is None:
         return None
     if is_user_editable(original):
@@ -438,6 +448,18 @@ def fork_recipe(db: Session, recipe_id: int) -> Optional[Recipe]:
             recipe_id=recipe.id,
             step_number=step.step_number,
             instruction=step.instruction,
+        ))
+
+    photos = db.query(RecipePhoto).filter(
+        RecipePhoto.recipe_id == original.id, RecipePhoto.hidden.is_(False),
+        RecipePhoto.usage_history_id.is_(None),
+    ).all()
+    for photo in photos:
+        db.add(RecipePhoto(
+            recipe_id=recipe.id, origin=photo.origin, step_number=photo.step_number,
+            position=photo.position, caption=photo.caption, is_cover=photo.is_cover,
+            sha256=photo.sha256, width=photo.width, height=photo.height, bytes=photo.bytes,
+            created_at=photo.created_at,
         ))
 
     db.commit()
@@ -1007,13 +1029,16 @@ def cook_recipe_and_consume(
                 409, "cook_nothing_consumed", "No stock was consumed", lines=lines,
             )
 
-        db.add(RecipeUsageHistory(
+        history = RecipeUsageHistory(
             recipe_id=recipe_id,
             event_type="cooked",
             metadata_json=json.dumps({"consumed_items": consumed, "notes": notes}, ensure_ascii=False),
-        ))
+        )
+        db.add(history)
+        db.flush()
         result = {
             "recipe_id": recipe_id,
+            "usage_history_id": history.id,
             "title": recipe.title,
             "consumed_items": consumed,
             "notes": notes,
