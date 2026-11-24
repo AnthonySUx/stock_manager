@@ -408,13 +408,17 @@ def get_restock_items(
     db: Session,
     *,
     status: Optional[str] = None,
+    shopping_checked: Optional[bool] = None,
     limit: Optional[int] = None,
     offset: int = 0,
 ) -> list[RestockItem]:
-    """Return restock items that match the optional status filter."""
+    """Return restock items that match the optional status and shopping filters."""
     query = db.query(RestockItem).options(selectinload(RestockItem.category))
     if status is not None:
         query = query.filter(RestockItem.status == status)
+    if shopping_checked is not None:
+        checked_at = RestockItem.shopping_checked_at
+        query = query.filter(checked_at.is_not(None) if shopping_checked else checked_at.is_(None))
 
     query = query.order_by(RestockItem.status == "done", RestockItem.id)
     if limit is not None:
@@ -547,7 +551,8 @@ def apply_restock_purchase(
         guard = guard.filter(RestockItem.quantity_value == observed_qty)
 
     if remaining > 0:
-        values = {RestockItem.quantity_value: remaining}
+        # The rest still has to be bought, so it goes back on the shopping list.
+        values = {RestockItem.quantity_value: remaining, RestockItem.shopping_checked_at: None}
     else:
         values = {RestockItem.status: "done", RestockItem.done_at: utcnow()}
 
@@ -576,6 +581,30 @@ def complete_restock_purchase(
 
     db.refresh(stock_item)
     return stock_item
+
+
+def set_restock_shopping_checked(db: Session, item_id: int, checked: bool) -> Optional[RestockItem]:
+    """Check or uncheck a pending restock item while shopping (#22).
+
+    Checking keeps the first check time; repeating either call changes nothing.
+    It never touches stock or `status`.
+
+    Raises:
+        RestockAlreadyDoneError: the item is done.
+    """
+    item = get_restock_item(db, item_id)
+    if item is None:
+        return None
+    if item.status == "done":
+        raise RestockAlreadyDoneError(item_id)
+    if checked and item.shopping_checked_at is None:
+        item.shopping_checked_at = utcnow()
+    elif not checked:
+        item.shopping_checked_at = None
+    if db.is_modified(item):
+        db.commit()
+        db.refresh(item)
+    return item
 
 
 def delete_restock_item(db: Session, item_id: int) -> bool:

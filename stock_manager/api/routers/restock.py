@@ -19,6 +19,7 @@ from stock_manager.api.services import (
     get_restock_item,
     get_restock_items,
     prepare_item_data,
+    set_restock_shopping_checked,
     update_restock_item,
 )
 
@@ -48,12 +49,15 @@ def _validate_references(
 @router.get("", response_model=list[schemas.RestockItemResponse])
 def list_restock(
     status: Optional[str] = Query(None),
+    shopping_checked: Optional[bool] = Query(None),
     limit: Optional[int] = Query(None, ge=1, le=100),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_session),
 ):
-    """List restock items, optionally filtered by status."""
-    return get_restock_items(db, status=status, limit=limit, offset=offset)
+    """List restock items, optionally filtered by status and shopping check state."""
+    return get_restock_items(
+        db, status=status, shopping_checked=shopping_checked, limit=limit, offset=offset,
+    )
 
 
 @router.get("/duplicates", response_model=schemas.RestockDuplicatesResponse)
@@ -179,6 +183,28 @@ def done_restock(
         raise APIError(409, "restock_already_done", RESTOCK_ALREADY_DONE_DETAIL)
 
     return {"message": f"Added {float(purchased_qty)} {unit} to stock"}
+
+
+def _set_shopping_checked(db: Session, item_id: int, checked: bool):
+    try:
+        item = set_restock_shopping_checked(db, item_id, checked)
+    except RestockAlreadyDoneError:
+        raise APIError(409, "restock_already_done", RESTOCK_ALREADY_DONE_DETAIL)
+    if item is None:
+        raise APIError(404, "restock_not_found", "Restock item not found")
+    return item
+
+
+@router.post("/{item_id}/shopping-check", response_model=schemas.RestockItemResponse)
+def shopping_check(item_id: int, db: Session = Depends(get_session)):
+    """Mark a pending item as in the cart. It stays pending and nothing is stocked."""
+    return _set_shopping_checked(db, item_id, True)
+
+
+@router.post("/{item_id}/shopping-uncheck", response_model=schemas.RestockItemResponse)
+def shopping_uncheck(item_id: int, db: Session = Depends(get_session)):
+    """Put a checked pending item back on the shopping list."""
+    return _set_shopping_checked(db, item_id, False)
 
 
 @router.delete("/{item_id}", response_model=schemas.MessageResponse)

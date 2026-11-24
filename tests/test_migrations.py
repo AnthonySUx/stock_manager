@@ -570,3 +570,37 @@ def test_0007_upgrade_and_downgrade_preserve_status_checks_and_rows(fresh_db):
     with engine.begin() as connection:
         connection.execute(text("INSERT INTO recipe_favorites (recipe_id) VALUES (1)"))
         assert connection.execute(text("SELECT COUNT(*) FROM recipe_favorites")).scalar_one() == 2
+
+
+def test_0008_adds_and_removes_shopping_checked_at_and_keeps_rows(fresh_db):
+    url, engine = fresh_db
+    config = _alembic(url)
+    command.upgrade(config, "0007")
+    _seed_status_rows(engine)
+    with engine.connect() as connection:
+        before = connection.execute(text(
+            "SELECT id, name, status, quantity_value FROM restock_items ORDER BY id"
+        )).all()
+
+    command.upgrade(config, "0008")
+    command.upgrade(config, "0008")  # already applied: no-op
+    columns = {col["name"]: col for col in inspect(engine).get_columns("restock_items")}
+    assert columns["shopping_checked_at"]["nullable"] is True
+    with engine.begin() as connection:
+        assert connection.execute(text(
+            "SELECT COUNT(*) FROM restock_items WHERE shopping_checked_at IS NOT NULL"
+        )).scalar_one() == 0
+        connection.execute(text(
+            "UPDATE restock_items SET shopping_checked_at = '2026-11-25 10:00:00' WHERE id = 1"
+        ))
+
+    command.downgrade(config, "0007")
+    assert _revision(engine) == "0007"
+    assert "shopping_checked_at" not in {col["name"] for col in inspect(engine).get_columns("restock_items")}
+    assert "ck_restock_items_status" in _status_constraint_names(engine, "restock_items")
+    with pytest.raises(IntegrityError), engine.begin() as connection:
+        connection.execute(text("UPDATE restock_items SET status = 'banana' WHERE id = 1"))
+    with engine.connect() as connection:
+        assert connection.execute(text(
+            "SELECT id, name, status, quantity_value FROM restock_items ORDER BY id"
+        )).all() == before
