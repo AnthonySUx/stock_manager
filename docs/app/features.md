@@ -240,6 +240,13 @@ Manage global app-level settings (`GET` / `PATCH /api/settings`), stored in the 
   expiring-soon / expired status, the default purchase date, and stock status after cooking.
   `null` (the default) uses the server's local date. An unknown name is a `422`.
 
+- `kitchen_equipment` contains the household's special equipment codes in catalog order.
+  Send a list to replace the entire selection. Omit the field or send `null`
+  to keep the current selection.
+- `kitchen_equipment_configured` reports whether a selection has ever been saved.
+  Saving an empty list enables filtering with no special equipment available.
+  See [Kitchen equipment](recipes.md#kitchen-equipment).
+
 Send `""` to clear `default_locale` or `default_timezone` (back to `null`).
 
 `default_database` was removed from the API (the app always uses MySQL); a client that still

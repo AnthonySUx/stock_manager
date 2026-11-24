@@ -285,8 +285,12 @@ def get_recipe(db: Session, recipe_id: int) -> Optional[Recipe]:
 
 
 def recipe_draft_hash(data: RecipeDraft | RecipeCreate) -> str:
-    """Hash the full draft content apart from the user-selected category."""
-    fields = RecipeDraft.model_fields.keys() - {"category"}
+    """Hash draft content excluding category and equipment.
+
+    Older iOS clients omit equipment when saving, so its omission must
+    preserve the AI draft identity.
+    """
+    fields = RecipeDraft.model_fields.keys() - {"category", "equipment"}
     content = data.model_dump(mode="json", include=fields)
     canonical = json.dumps(content, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     return sha256(canonical.encode("utf-8")).hexdigest()

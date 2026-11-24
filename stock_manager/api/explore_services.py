@@ -26,6 +26,7 @@ from stock_manager.api.ai_output import (
     needs_repair,
 )
 from stock_manager.api import recipe_services
+from stock_manager.api.equipment import EQUIPMENT_CODES
 from stock_manager.api.json_stream import ArrayItemStream
 from stock_manager.api.localization import LANGUAGE_NAMES
 from stock_manager.api.text_search import TitleMatcher
@@ -403,7 +404,10 @@ def _build_expand_prompt(idea: dict, inventory_items: list[dict], locale: str) -
         "inventory unit. Leave unit empty for \"to taste\" quantities.\n"
         "7. Mark seasonings with is_seasoning and optional ingredients with is_optional.\n"
         "8. servings is a whole number of people.\n"
-        "9. Output ONLY valid JSON.\n\n"
+        "9. List only special kitchen equipment required to make the recipe. "
+        f"Use these equipment codes: {', '.join(EQUIPMENT_CODES)}. "
+        "Omit basic cookware and use [] when no special equipment is required.\n"
+        "10. Output ONLY valid JSON.\n\n"
         "OUTPUT FORMAT:\n"
         "```json\n"
         + json.dumps(
@@ -422,6 +426,7 @@ def _build_expand_prompt(idea: dict, inventory_items: list[dict], locale: str) -
                     "is_optional": False,
                 }],
                 "steps": [{"step_number": 1, "instruction": f"<step in {language}>"}],
+                "equipment": ["oven"],
             },
             ensure_ascii=False,
             indent=2,

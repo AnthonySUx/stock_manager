@@ -19,6 +19,7 @@ import os
 import re
 import sys
 from collections import Counter
+from collections.abc import Iterator
 from dataclasses import asdict
 from pathlib import Path
 from urllib.parse import unquote
@@ -27,8 +28,10 @@ from urllib.parse import unquote
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from stock_manager.api.equipment import (
+# The script can be run directly from scripts/, with the repository on sys.path.
+from stock_manager.api.equipment import (  # noqa: E402
     BASIC_TOOL_TERMS,
+    EQUIPMENT_CODES,
     EQUIPMENT_TERMS,
     INGREDIENT_EXCEPTIONS,
     TOOL_SUFFIXES,
@@ -106,10 +109,9 @@ def parse_recipe_md(filepath: str) -> dict:
 
     # Parse sections
     ingredients = []
-    tool_groups = []
+    equipment = [[code] for code in _special_codes(title)]
     unclassified_tools = []
     steps = []
-    step_groups = []
     description = ""
     servings = ""
     difficulty = ""
@@ -124,10 +126,12 @@ def parse_recipe_md(filepath: str) -> dict:
             # Flush previous section buffer
             section_text = "\n".join(buffer).strip()
             if current_section == "ingredients":
-                ingredients, tool_groups, unclassified_tools = _parse_ingredient_section(section_text)
+                ingredients, tool_groups, unclassified = _parse_ingredient_section(section_text)
+                equipment.extend(tool_groups)
+                unclassified_tools.extend(unclassified)
             elif current_section == "steps":
                 steps = _parse_steps(section_text)
-                step_groups = _step_equipment(section_text)
+                equipment.extend(_step_equipment(section_text))
             elif current_section == "compute":
                 if "至少" in section_text or "份" in section_text:
                     m = re.search(r"每份.*?(\d+)\s*[份人]", section_text)
@@ -153,10 +157,12 @@ def parse_recipe_md(filepath: str) -> dict:
     # Flush last buffer
     section_text = "\n".join(buffer).strip()
     if current_section == "ingredients":
-        ingredients, tool_groups, unclassified_tools = _parse_ingredient_section(section_text)
+        ingredients, tool_groups, unclassified = _parse_ingredient_section(section_text)
+        equipment.extend(tool_groups)
+        unclassified_tools.extend(unclassified)
     elif current_section == "steps":
         steps = _parse_steps(section_text)
-        step_groups = _step_equipment(section_text)
+        equipment.extend(_step_equipment(section_text))
 
     return {
         "title": title,
@@ -167,9 +173,7 @@ def parse_recipe_md(filepath: str) -> dict:
         "cook_time_minutes": cook_time,
         "ingredients": ingredients,
         "steps": steps,
-        "equipment": _merge_equipment(
-            [[code] for code in _special_codes(title)] + tool_groups + step_groups
-        ),
+        "equipment": _merge_equipment(equipment),
         "unclassified_tools": unclassified_tools,
         "raw_markdown": content,
     }
@@ -320,15 +324,24 @@ def _tool_groups(segment: str, optional: bool) -> list[list[str]]:
     return [catalog_order(codes)] if alternative else [[code] for code in codes]
 
 
+def _lines_outside_notes(text: str) -> Iterator[str]:
+    """Skip tips subheadings and everything nested under them."""
+    notes_level = 0
+    for line in text.splitlines():
+        heading = re.match(r"^(#{3,6})\s+(.+)", line.strip())
+        if heading:
+            level = len(heading[1])
+            if not notes_level or level <= notes_level:
+                notes_level = level if re.search(r"附加|小贴士|技巧", heading[2]) else 0
+        elif not notes_level:
+            yield line
+
+
 def _step_equipment(text: str) -> list[list[str]]:
     groups = []
-    in_notes = False
-    for line in text.splitlines():
-        heading = re.match(r"^#{3,6}\s+(.+)", line.strip())
-        if heading:
-            in_notes = bool(re.search(r"附加|小贴士|技巧", heading[1]))
+    for line in _lines_outside_notes(text):
         step = _clean_line(line)
-        if in_notes or re.match(r"^(?:小贴士|附加内容)\s*[：:]", step):
+        if re.match(r"^(?:小贴士|附加内容)\s*[：:]", step):
             continue
         for sentence in re.split(r"[。！？!?；;]", step):
             if not _STEP_ALTERNATIVE_RE.search(sentence):
@@ -352,7 +365,7 @@ def _parse_ingredients(text: str) -> list[dict]:
 def _parse_ingredient_section(text: str) -> tuple[list[dict], list[list[str]], list[str]]:
     """Split ingredients and equipment, then parse ingredients as before."""
     ingredients, groups, unclassified = [], [], []
-    for raw_line in text.splitlines():
+    for raw_line in _lines_outside_notes(text):
         line = _clean_line(raw_line)
         if not line or line.startswith(("注：", "注意", "建议")):
             continue
@@ -575,7 +588,6 @@ def import_howtocook(
     print(f"Found {len(md_files)} recipe files")
 
     from stock_manager.api import media
-    from stock_manager.api.equipment import EQUIPMENT_CODES
     from stock_manager.api.equipment_services import replace_recipe_equipment
     from stock_manager.api.models import Recipe, RecipeIngredient, RecipeStep
 

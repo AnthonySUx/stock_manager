@@ -627,3 +627,16 @@ def test_import_replaces_equipment_and_preserves_fork(importer, tmp_path, db, ca
         recipe.id: [["clay_pot"]],
         fork_id: [["oven", "rice_cooker"]],
     }
+
+
+def test_equipment_groups_follow_section_order_and_skip_nested_tips(importer, tmp_path):
+    recipe = tmp_path / "recipe.md"
+    recipe.write_text(
+        "# Soup\n\n## 必备原料和工具\n- 微波炉\n"
+        "### 小贴士\n- 面包机\n#### 清洗\n- 烧烤炉\n"
+        "## 操作步骤\n- 用蒸锅蒸熟\n"
+        "## 工具\n- 砂锅\n",
+        encoding="utf-8",
+    )
+    parsed = importer.parse_recipe_md(str(recipe))
+    assert parsed["equipment"] == [["microwave"], ["steamer"], ["clay_pot"]]

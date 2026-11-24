@@ -374,6 +374,7 @@ class RecipeDraft(BaseModel):
     raw_markdown: Optional[str] = None
     ingredients: list[IngredientSchema] = []
     steps: list[StepSchema] = []
+    equipment: list[list[str]] = []
 
 
 class ExpandResponse(BaseModel):
