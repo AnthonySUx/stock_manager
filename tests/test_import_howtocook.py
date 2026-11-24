@@ -508,3 +508,85 @@ def test_image_and_link_targets_may_contain_parentheses(importer):
     assert [ref for _, ref, _ in importer._photo_steps("![a](a(1).jpg) 和 ![b](b.jpg)", [])] == [
         "a(1).jpg", "b.jpg",
     ]
+
+
+@pytest.mark.parametrize("line,names,groups", [
+    ('烤箱', [], [['oven']]),
+    ('烤箱 大小不限', [], [['oven']]),
+    ('烤箱 *（**不要使用不带控温的烤箱**）*', [], [['oven']]),
+    ('④烤箱：烘烤食材。烤箱分为小型的经济型烤箱和大型的专业烤箱。', [], [['oven']]),
+    ('需要烤箱 1 个（有上下火功能的最佳，也可以没有）', [], [['oven']]),
+    ('1 个空气炸锅（喜欢脆的切忌小牌子）', [], [['air_fryer']]),
+    ('可选：空气炸锅烤架（用烤架油比较少）', [], []),
+    ('空气炸锅或者油锅', [], []),
+    ('高压锅（推荐）或普通汤锅', [], []),
+    ('炖煮锅，高压锅（可选，但极度推荐！）', [], []),
+    ('电压力锅（可以极大简化烹饪过程和时间）', [], [['pressure_cooker']]),
+    ('瓦罐或者高压锅', [], [['pressure_cooker', 'clay_pot']]),
+    ('砂锅（相比于炒锅更适合炖汤）', [], [['clay_pot']]),
+    ('砂锅（没有的话，用铁锅也行）', [], []),
+    ('砂锅或深汤锅', [], []),
+    ('蒸锅（电饭煲即可）', [], [['rice_cooker', 'steamer']]),
+    ('蒸锅或电蒸炉', [], [['steamer']]),
+    ('烤箱（电饭锅可替代，但大多情况下由于锅胆材质问题易失败）', [], [['oven', 'rice_cooker']]),
+    ('烤箱或明火', [], []),
+    ('平底锅 或 微波炉', [], []),
+    ('分可控火候微波炉或不可控火候微波炉', [], [['microwave']]),
+    ('能放进微波炉的容器', [], [['microwave']]),
+    ('2 个大碗（推荐微波炉专用碗）', [], []),
+    ('保鲜膜或微波炉专用盖', [], []),
+    ('烧烤炉', [], [['grill']]),
+    ('电磁炉/灶台', [], []),
+    ('32 厘米以上的炒锅一个(锅太小难炒', [], []),
+    ('100°C 沸水锅（直径≥ 15cm）', [], []),
+    ('一次性手套', [], []),
+    ('厨房纸', [], []),
+    ('塑料盘或塑料盆（腌鱼用）', [], []),
+    ('鏊子 或 平底不粘锅（直径不小于 28 cm）', [], []),
+    ('注：如果有可能，请尽量把刀磨的锋利一些。', [], []),
+    ('蒸鱼豉油', ['蒸鱼豉油'], []),
+    ('板栗', ['板栗'], []),
+    ('火锅底料（随意）', ['火锅底料'], []),
+    ('肥牛（火锅肥牛即可，也可选用原切肥牛片）', ['肥牛'], []),
+    ('火锅牛肉卷', ['火锅牛肉卷'], []),
+    ('清水（蒸锅用）2000ml', ['清水'], []),
+    ('盐（出锅调味）', ['盐'], []),
+    ('白醋（建议使用 9 度的醋）', ['白醋'], []),
+    ('北京二锅头酒（可选）', ['北京二锅头酒'], []),
+    ('泡好的粉丝（放碗底）', ['泡好的粉丝'], []),
+    ('面团（封锅口用）', ['面团'], []),
+    ('昆布', ['昆布'], []),
+    ('调味料：火锅底料、花生酱、全脂牛奶', ['调味料：火锅底料、花生酱、全脂牛奶'], []),
+    ('油 + 锅 + 菜刀 + 铲子', ['油'], []),
+])
+def test_kitchen_equipment_ingredient_lines(importer, line, names, groups):
+    rows, equipment, _ = importer._parse_ingredient_section(line)
+    assert [row["ingredient_name"] for row in rows] == names
+    assert equipment == groups
+
+
+@pytest.mark.parametrize("step,groups", [
+    ("放入预热好的烤箱，200 度烤 15 分钟", [["oven"]]),
+    ("也可以用高压锅压 20 分钟", []),
+    ("放入蒸锅大火蒸 8 分钟", [["steamer"]]),
+])
+def test_kitchen_equipment_step_lines(importer, step, groups):
+    assert importer._step_equipment(step) == groups
+
+
+def test_kitchen_equipment_title_and_merge(importer, tmp_path):
+    recipe = tmp_path / "recipe.md"
+    recipe.write_text(
+        "# 微波炉鸡蛋羹的做法\n\n## 必备原料和工具\n"
+        "- 烤箱或电饭锅\n\n## 操作步骤\n- 放入烤箱\n"
+        "### 小贴士\n可以用蒸锅。\n放入砂锅\n"
+        "## 附加内容\n- 高压锅\n",
+        encoding="utf-8",
+    )
+    assert importer.parse_recipe_md(str(recipe))["equipment"] == [["microwave"], ["oven"]]
+
+
+def test_optional_equipment_is_still_classified_as_tool(importer):
+    assert importer._parse_ingredient_section(
+        "可选：空气炸锅烤架（用烤架油比较少）"
+    ) == ([], [], ["空气炸锅烤架"])
