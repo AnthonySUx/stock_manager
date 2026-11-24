@@ -187,6 +187,25 @@ The response has `query` (trimmed), `normalized_name` (the synonym group's
 canonical name, or the trimmed name) and `candidates`: restock items in ID
 order, each with the usual restock fields plus `match_reason`.
 
+### Shopping check
+
+While shopping, a pending item can be checked off ("in the cart") without
+entering stock details. Stocking it later still goes through
+`POST /api/restock/{id}/done`.
+
+- `POST /api/restock/{id}/shopping-check` sets `shopping_checked_at`. Repeating
+  it keeps the first time.
+- `POST /api/restock/{id}/shopping-uncheck` clears it. Repeating it is allowed.
+- Neither call changes `status` or creates stock. Both return the restock item,
+  `404 restock_not_found` for an unknown ID, and `409 restock_already_done` for
+  a done item.
+- Responses include `shopping_checked` (true when `shopping_checked_at` is set)
+  and `shopping_checked_at`. `PATCH` cannot change them.
+- `GET /api/restock?status=pending&shopping_checked=false` lists what is still
+  to buy; `shopping_checked=true` lists what is in the cart.
+- A partial `/done` leaves the rest pending and unchecked, so it shows up on
+  the shopping list again. A full `/done` works the same as before.
+
 ---
 
 ## Expiration Reminder

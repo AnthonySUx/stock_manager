@@ -168,6 +168,8 @@ class RestockItem(Base):
         server_default=func.now(),
     )
     done_at = Column(DateTime, nullable=True)
+    # Set while shopping when the item is in the cart; not stocked yet (#22).
+    shopping_checked_at = Column(DateTime, nullable=True)
     updated_at = Column(
         DateTime, nullable=False, default=utcnow, server_default=func.now(), onupdate=utcnow,
     )

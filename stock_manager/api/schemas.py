@@ -9,6 +9,7 @@ from pydantic import (
     BaseModel,
     BeforeValidator,
     Field,
+    computed_field,
     field_validator,
     model_validator,
 )
@@ -256,8 +257,14 @@ class RestockItemResponse(BaseModel):
     notes: Optional[str] = None
     created_at: Optional[datetime] = None
     done_at: Optional[datetime] = None
+    shopping_checked_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
+
+    @computed_field
+    @property
+    def shopping_checked(self) -> bool:
+        return self.shopping_checked_at is not None
 
 
 class RestockDuplicateCandidate(RestockItemResponse):
