@@ -410,7 +410,7 @@ Set `MEDIA_DIR` in the backend's environment file to a writable directory
 outside the repository. The API creates it on startup if needed. Without
 this setting, photo endpoints are unavailable and recipe covers are null.
 Cooking history remains available with empty photo lists.
-Back up `MEDIA_DIR` together with the database.
+Back up `MEDIA_DIR` together with the database; see [Backups](#backups).
 
 To import HowToCook photos from your local checkout, first restore the
 image files, then run the importer from the Stock Manager repository.
@@ -419,3 +419,44 @@ image files, then run the importer from the Stock Manager repository.
 git -C ~/Documents/HowToCook sparse-checkout disable
 python scripts/import_howtocook.py ~/Documents/HowToCook --with-photos
 ```
+
+## Backups
+
+`scripts/backup.py` backs up the database and `MEDIA_DIR` together. Each run
+writes one folder named by the local time (for example `20261125-031500/`)
+under `BACKUP_DIR`, or under `--dest` when given:
+
+- `database.sql.gz`: a `mysqldump` of the database in `DATABASE_URL`, taken
+  as a consistent snapshot without locking tables;
+- `media.tar.gz`: the `MEDIA_DIR` folder, when `MEDIA_DIR` is set;
+- `manifest.json`: sizes and SHA-256 checksums.
+
+A run writes to a hidden temporary folder and renames it only when complete.
+After a successful run, only the newest 14 backups are kept (`--keep N` to
+change). The password is passed to `mysqldump` through `MYSQL_PWD` and is
+never printed. The app's database user needs no extra privileges.
+
+```bash
+# BACKUP_DIR in .env, for example a folder in iCloud Drive:
+# BACKUP_DIR="/Users/<you>/Library/Mobile Documents/com~apple~CloudDocs/StockManagerBackups"
+python scripts/backup.py
+```
+
+Keep backups off the disk that holds the database (iCloud Drive or an
+external disk). A copy on the same disk does not survive a disk failure.
+
+### Restore
+
+Stop the backend first. Then restore the database and the photos from one
+backup folder (`B`):
+
+```bash
+B="$BACKUP_DIR/20261125-031500"
+mysql -uroot -e "DROP DATABASE stock_manager; CREATE DATABASE stock_manager CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci"
+gunzip -c "$B/database.sql.gz" | mysql -uroot stock_manager
+tar -xzf "$B/media.tar.gz" -C /tmp && rsync -a --delete /tmp/media/ "$MEDIA_DIR/"
+```
+
+If the app user's grants were made on `stock_manager.*`, they survive the drop.
+The restored database keeps its Alembic revision; run `alembic upgrade head`
+if the code is newer than the backup.
