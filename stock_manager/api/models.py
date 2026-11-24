@@ -14,7 +14,6 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
-    false,
     func,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
@@ -304,8 +303,8 @@ class RecipePhoto(Base):
     step_number = Column(Integer)
     usage_history_id = Column(Integer, ForeignKey("recipe_usage_history.id"), index=True)
     position = Column(Integer, nullable=False)
-    is_cover = Column(Boolean, nullable=False, default=False, server_default=false())
-    hidden = Column(Boolean, nullable=False, default=False, server_default=false())
+    is_cover = Column(Boolean, nullable=False, default=False, server_default="0")
+    hidden = Column(Boolean, nullable=False, default=False, server_default="0")
     sha256 = Column(String(64), nullable=False)
     width = Column(Integer, nullable=False)
     height = Column(Integer, nullable=False)
