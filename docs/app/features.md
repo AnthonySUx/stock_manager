@@ -168,6 +168,25 @@ neither provides a value, the request returns `422 restock_item_invalid` with
 `params.field` set to the missing field. The backend derives the stock item's
 effective expiration date and status using the same rules as item creation.
 
+### Duplicate check
+
+`GET /api/restock/duplicates?name=<name>` lists pending restock items that look
+like the same thing, so the app can offer to edit an existing entry instead of
+adding a second one. It is read-only and `POST /api/restock` does not enforce it.
+
+- Two names match when they are equal after trimming and case folding
+  (`match_reason: same_name`) or belong to the same ingredient synonym group,
+  for example `egg` and `鸡蛋` (`match_reason: synonym`). This is the same rule
+  "missing ingredients to restock" uses to skip pending entries.
+- There is no substring matching: `egg` does not match `eggplant`, and `鸡蛋`
+  does not match `鸭蛋`.
+- Done items are ignored.
+- `name` is required, 1–255 characters, and not blank; otherwise `422`.
+
+The response has `query` (trimmed), `normalized_name` (the synonym group's
+canonical name, or the trimmed name) and `candidates`: restock items in ID
+order, each with the usual restock fields plus `match_reason`.
+
 ---
 
 ## Expiration Reminder

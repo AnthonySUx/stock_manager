@@ -424,6 +424,33 @@ def get_restock_items(
     return query.all()
 
 
+def find_restock_duplicates(db: Session, name: str) -> dict:
+    """Return pending restock items with the same or a synonym name (#18).
+
+    Matching uses the same rule as "missing ingredients to restock": two names
+    match when their synonym-normalized, lower-cased forms are equal. There is
+    no substring matching, so "egg" does not match "eggplant". Read-only.
+    """
+    # Imported here: recipe_services imports this module.
+    from stock_manager.api.recipe_services import _normalize_name
+
+    query = name.strip()
+    key = _normalize_name(query).lower()
+    pending = (
+        db.query(RestockItem)
+        .options(selectinload(RestockItem.category))
+        .filter(RestockItem.status == "pending")
+        .order_by(RestockItem.id)
+    )
+    candidates = []
+    for item in pending:
+        if _normalize_name(item.name).lower() != key:
+            continue
+        same_name = item.name.strip().lower() == query.lower()
+        candidates.append({"item": item, "match_reason": "same_name" if same_name else "synonym"})
+    return {"query": query, "normalized_name": _normalize_name(query), "candidates": candidates}
+
+
 def get_restock_item(db: Session, item_id: int) -> Optional[RestockItem]:
     """Return one restock item by id."""
     return db.query(RestockItem).filter(RestockItem.id == item_id).first()
