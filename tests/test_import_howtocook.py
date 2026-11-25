@@ -568,7 +568,21 @@ def test_image_and_link_targets_may_contain_parentheses(importer):
         [], [],
     ),
     ("炒糖色过程火不要太大！！！电磁炉温度不够，火候过了发苦，不够发甜", [], []),
-    ("火锅底料：某宝小龙坎传统清油火锅底料味道最佳，29.8元一包，可以做20份", [], []),
+    ("冰糖：炒出来的`糖色`色泽最为鲜艳，红亮，必须水油炒，不加水融化会很慢", ["冰糖"], []),
+    ("> 荞麦面：pdd买食尚烩荞麦面，一包400g，价格4.9元，可以做4份", ["荞麦面"], []),
+    ("> 花椒油：pdd五丰黎红花椒油400ml,32元两瓶，可以做80份", ["花椒油"], []),
+    ("谷朊粉：这是从小麦中提取出来的蛋白质，在吸水后会形成网格状结构。", ["谷朊粉"], []),
+    ("火锅底料：某宝小龙坎传统清油火锅底料味道最佳，29.8元一包，可以做20份", ["火锅底料"], []),
+    ("④烤箱：烘烤食材……", [], [["oven"]]),
+    (
+        "香叶， 花椒，八角，干辣椒，丁香，甘草，干辣椒，小米辣（可选），姜，蒜",
+        ["香叶， 花椒，八角，干辣椒，丁香，甘草，干辣椒，小米辣，姜，蒜"], [],
+    ),
+    ("可选（洒在顶部）", [], []),
+    ("可选（巧克力味）", [], []),
+    ("**原料**", [], []),
+    ("**工具**", [], []),
+    ("工具", [], []),
     (
         "调味料：火锅底料、花生酱、全脂牛奶、生抽、辣椒油、醋、花椒油",
         ["调味料：火锅底料、花生酱、全脂牛奶、生抽、辣椒油、醋、花椒油"], [],
@@ -578,6 +592,13 @@ def test_kitchen_equipment_ingredient_lines(importer, line, names, groups):
     rows, equipment, _ = importer._parse_ingredient_section(line)
     assert [row["ingredient_name"] for row in rows] == names
     assert equipment == groups
+
+
+def test_ingredient_colon_name_preserves_quantity(importer):
+    rows = importer._parse_ingredients("高筋面粉：400g")
+    assert [(row["ingredient_name"], row["quantity"], row["unit"]) for row in rows] == [
+        ("高筋面粉", "400", "g"),
+    ]
 
 
 @pytest.mark.parametrize("line,subject,unclassified", [

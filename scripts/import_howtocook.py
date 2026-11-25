@@ -240,6 +240,8 @@ _SPECIAL_CODES = {
     term: code for code, terms in EQUIPMENT_TERMS.items() for term in terms
 }
 _SPECIAL_RE = re.compile("|".join(sorted(_SPECIAL_CODES, key=len, reverse=True)))
+_MARKDOWN_EMPHASIS = str.maketrans("", "", "`*")
+_SENTENCE_PUNCTUATION_RE = re.compile(r"[。！!；;]")
 _LABEL_RE = re.compile(r"^(需要|必备|工具|可选)\s*[：:]?\s*")
 _SIZE_RE = re.compile(
     r"^\d+(?:\.\d+)?\s*(?:厘米|公分|毫米|cm|mm|°C|℃|个|把|口|只|件|升|克|kg|ml|g)?"
@@ -270,7 +272,7 @@ def _strip_ingredient_prefix(segment: str) -> tuple[str, bool]:
 
 
 def _tool_subject(segment: str) -> tuple[str, bool]:
-    segment, optional = _strip_ingredient_prefix(segment.translate(str.maketrans("", "", "`*")))
+    segment, optional = _strip_ingredient_prefix(segment.translate(_MARKDOWN_EMPHASIS))
     subject = re.split(r"[：:]", segment, maxsplit=1)[0]
     subject = _SIZE_RE.sub("", subject)
     subject = _HEAD_SEPARATOR_RE.split(subject, maxsplit=1)[0]
@@ -324,7 +326,29 @@ def _ingredient_segments(line: str) -> list[str]:
 
 def _is_explanatory_line(line: str) -> bool:
     body, _ = _bracket_parts(line)
-    return bool(re.search(r"[。！!；;]", body) or (len(body.strip()) > 30 and re.search(r"[，,]", body)))
+    if _SENTENCE_PUNCTUATION_RE.search(body):
+        return True
+    parts = re.split(r"[，,]", body)
+    return len(parts) > 1 and len(body.strip()) > 30 and any(len(part.strip()) > 10 for part in parts)
+
+
+def _ingredient_text(segment: str, explanatory: bool) -> tuple[str, str | None] | None:
+    """Return ingredient text and an optional name override, skipping headings and prose."""
+    plain = segment.translate(_MARKDOWN_EMPHASIS)
+    stripped, _ = _strip_ingredient_prefix(plain)
+    body, _ = _bracket_parts(stripped)
+    body = body.strip()
+    if (not body and _bracket_parts(plain)[0].strip()) or body.rstrip("：:").strip() == "原料":
+        return None
+
+    ingredient, _ = _strip_ingredient_prefix(segment)
+    parts = re.split(r"[：:]", body, maxsplit=1)
+    if len(parts) == 2 and 0 < len(name := parts[0].strip()) <= 8:
+        description = parts[1]
+        if "、" in description and not _SENTENCE_PUNCTUATION_RE.search(description):
+            return ingredient, None
+        return ingredient, name
+    return (ingredient, None) if ingredient and not explanatory else None
 
 
 def _basic_note_alternative(note: str) -> bool:
@@ -421,14 +445,13 @@ def _parse_ingredient_section(text: str) -> tuple[list[dict], list[list[str]], l
                 if not listed_tool:
                     unclassified.append(subject)
                 groups.extend(_tool_groups(segment, optional))
-            elif not explanatory:
-                ingredient, _ = _strip_ingredient_prefix(segment)
-                if ingredient:
-                    ingredients.append((ingredient, optional))
+            elif ingredient := _ingredient_text(segment, explanatory):
+                line, name_override = ingredient
+                ingredients.append((line, name_override, optional))
 
     results = []
     seen: set[str] = set()
-    for line, optional in ingredients:
+    for line, name_override, optional in ingredients:
         is_seasoning = any(kw in line for kw in [
             "盐", "糖", "酱油", "醋", "料酒", "油", "胡椒", "花椒",
             "八角", "桂皮", "香叶", "生抽", "老抽", "蚝油", "味精",
@@ -438,12 +461,14 @@ def _parse_ingredient_section(text: str) -> tuple[list[dict], list[list[str]], l
         # Store the first quantity as before. Strip any additional quantities
         # connected by plus signs so they do not become part of the name.
         qty_match = _INGREDIENT_QUANTITY_RE.search(line)
-        name = line
-        if qty_match:
-            name = name.replace(qty_match.group(0), "", 1)
-        name = _strip_bracket_notes(name)
-        # Clean up leading punctuation/spaces
-        name = re.sub(r"^[\s,，、；;]+", "", name) or line
+        name = name_override
+        if name is None:
+            name = line
+            if qty_match:
+                name = name.replace(qty_match.group(0), "", 1)
+            name = _strip_bracket_notes(name)
+            # Clean up leading punctuation and spaces.
+            name = re.sub(r"^[\s,，、；;]+", "", name) or line
 
         # Some recipes list an ingredient twice (口水鸡: 花椒); keep the first.
         if name in seen:
