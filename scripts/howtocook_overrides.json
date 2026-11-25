@@ -1,11 +1,127 @@
 {
+  "dishes/aquatic/红烧鱼.md": {
+    "sha256": "1697e99fcdeefac939c8e9473e44d1deee82cf9baf8dd4a9d86953e685579c83",
+    "reason": "Record the named ingredients and their explicit amounts. The cilantro line describes preference and supplies no amount.",
+    "ingredients": [
+      {
+        "ingredient_name": "姜",
+        "quantity": "2-3",
+        "unit": "片",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "蒜瓣",
+        "quantity": "3-4",
+        "unit": "个",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "干辣椒",
+        "quantity": "2-3",
+        "unit": "个"
+      },
+      {
+        "ingredient_name": "油",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "盐",
+        "quantity": "10",
+        "unit": "g",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "料酒",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "醋",
+        "quantity": "5",
+        "unit": "ml",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "酱油",
+        "quantity": "5",
+        "unit": "ml",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "白砂糖",
+        "quantity": "10",
+        "unit": "g",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "鱼"
+      },
+      {
+        "ingredient_name": "蚝油",
+        "quantity": "5",
+        "unit": "g",
+        "is_optional": true,
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "葱",
+        "quantity": "1-2",
+        "unit": "根",
+        "is_optional": true,
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "香菜",
+        "is_optional": true
+      },
+      {
+        "ingredient_name": "小米椒",
+        "quantity": "1-2",
+        "unit": null,
+        "is_optional": true
+      },
+      {
+        "ingredient_name": "味精",
+        "quantity": "5",
+        "unit": "g",
+        "is_optional": true,
+        "is_seasoning": true
+      }
+    ]
+  },
+  "dishes/breakfast/水煮玉米.md": {
+    "sha256": "675bfc65305cc8da1f9d3ef50c95343d0afc97d293087ad60c2ad13e8e7d2b82",
+    "reason": "The calculation puts the ear count before the ingredient. The salt quantity comes from the separately described brine.",
+    "ingredients": [
+      {
+        "ingredient_name": "玉米",
+        "quantity": "一",
+        "unit": "个"
+      },
+      {
+        "ingredient_name": "水"
+      },
+      {
+        "ingredient_name": "盐",
+        "is_seasoning": true,
+        "quantity": "2",
+        "unit": "克"
+      },
+      {
+        "ingredient_name": "糖",
+        "is_seasoning": true,
+        "is_optional": true
+      }
+    ]
+  },
   "dishes/dessert/咖啡椰奶冻/咖啡椰奶冻.md": {
+    "sha256": "b5bb0774195d6b6826612a183bc51cc4275fbd11ed443cdefcaa11a1e162fe36",
+    "reason": "Keep the source wording for espresso and record the two plating ingredients as optional. Omit the strainer.",
     "ingredients": [
       {
         "ingredient_name": "淡奶油",
-        "is_seasoning": true,
         "quantity": "125",
-        "unit": "ml"
+        "unit": "ml",
+        "is_seasoning": true
       },
       {
         "ingredient_name": "椰树牌椰汁",
@@ -13,7 +129,7 @@
         "unit": "ml"
       },
       {
-        "ingredient_name": "意式浓缩咖啡",
+        "ingredient_name": "意式浓缩",
         "quantity": "35",
         "unit": "ml"
       },
@@ -40,25 +156,841 @@
         "is_optional": true,
         "is_seasoning": true
       }
-    ],
-    "reason": "Use one name for the bilingual espresso entry, separate the two optional garnishes from the parenthetical prose, and omit the strainer from the ingredient list.",
-    "sha256": "b5bb0774195d6b6826612a183bc51cc4275fbd11ed443cdefcaa11a1e162fe36"
+    ]
+  },
+  "dishes/dessert/魔芋蛋糕/魔芋蛋糕.md": {
+    "sha256": "5aa6c84dc18d8c80c1dbd743fe2665f5cbd9ade1c924a170aefb65b20eb5fc61",
+    "reason": "The egg count comes before the ingredient in the calculation. Preserve it and omit the optional egg separator.",
+    "ingredients": [
+      {
+        "ingredient_name": "鸡蛋",
+        "quantity": "3",
+        "unit": "个"
+      },
+      {
+        "ingredient_name": "赤藓糖醇",
+        "quantity": "50",
+        "unit": "g",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "可可粉",
+        "quantity": "10",
+        "unit": "g"
+      },
+      {
+        "ingredient_name": "魔芋粉",
+        "quantity": "10",
+        "unit": "g"
+      },
+      {
+        "ingredient_name": "塔塔粉",
+        "quantity": "1",
+        "unit": "g"
+      }
+    ]
+  },
+  "dishes/drink/Mojito莫吉托.md": {
+    "sha256": "7640669db9ff0609665a2b8e0dfa7210ec14733bac4f2324e4235d12e32e5188",
+    "reason": "The lime count comes before the ingredient. Keep the stated amount and leave the muddler out of the ingredients.",
+    "ingredients": [
+      {
+        "ingredient_name": "打碎的冰块"
+      },
+      {
+        "ingredient_name": "冰镇苏打水"
+      },
+      {
+        "ingredient_name": "青柠",
+        "quantity": "一",
+        "unit": "块"
+      },
+      {
+        "ingredient_name": "五珠薄荷叶"
+      },
+      {
+        "ingredient_name": "糖浆",
+        "quantity": "20",
+        "unit": "ml",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "金色朗姆酒",
+        "quantity": "45",
+        "unit": "ml"
+      },
+      {
+        "ingredient_name": "蓝天原味伏特加",
+        "quantity": "10",
+        "unit": "ml"
+      }
+    ]
+  },
+  "dishes/drink/海边落日/海边落日.md": {
+    "sha256": "cd1d3c43bc8a17750e652f9aa45f6f421662f4f7c129bffc1ed22af2fded4c73",
+    "reason": "The big-ice line is serving guidance. Keep the ice already named in the required section without inventing a quantity.",
+    "ingredients": [
+      {
+        "ingredient_name": "红石榴糖浆",
+        "quantity": "15",
+        "unit": "ml",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "NFC 橙汁",
+        "quantity": "35~50",
+        "unit": "ml"
+      },
+      {
+        "ingredient_name": "苏打水",
+        "quantity": "50",
+        "unit": "ml"
+      },
+      {
+        "ingredient_name": "白朗姆",
+        "quantity": "30",
+        "unit": "ml"
+      },
+      {
+        "ingredient_name": "蓝橙力娇酒",
+        "quantity": "15",
+        "unit": "ml"
+      },
+      {
+        "ingredient_name": "柠檬汁",
+        "quantity": "15",
+        "unit": "ml"
+      },
+      {
+        "ingredient_name": "冰块"
+      },
+      {
+        "ingredient_name": "柠檬",
+        "quantity": "1",
+        "unit": "片"
+      },
+      {
+        "ingredient_name": "搅拌棒"
+      },
+      {
+        "ingredient_name": "吸管"
+      }
+    ]
+  },
+  "dishes/drink/酸梅汤/酸梅汤.md": {
+    "sha256": "12d2de30253a2cea227669aebcb391a608447e14d495fa9d74afd122fc603ef2",
+    "reason": "The water amount comes before its name. Keep both the stated water volume and the other named ingredients.",
+    "ingredients": [
+      {
+        "ingredient_name": "水",
+        "quantity": "两",
+        "unit": "升"
+      },
+      {
+        "ingredient_name": "乌枣",
+        "quantity": "25",
+        "unit": "克"
+      },
+      {
+        "ingredient_name": "乌梅",
+        "quantity": "25",
+        "unit": "g"
+      },
+      {
+        "ingredient_name": "山楂片",
+        "quantity": "30",
+        "unit": "克"
+      },
+      {
+        "ingredient_name": "黄冰糖",
+        "quantity": "100",
+        "unit": "克",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "甘草",
+        "quantity": "2",
+        "unit": "克"
+      },
+      {
+        "ingredient_name": "陈皮",
+        "quantity": "4",
+        "unit": "克"
+      },
+      {
+        "ingredient_name": "红豆蔻",
+        "quantity": "1",
+        "unit": "克"
+      },
+      {
+        "ingredient_name": "干桂花",
+        "quantity": "3",
+        "unit": "克"
+      }
+    ]
+  },
+  "dishes/meat_dish/回锅肉/回锅肉.md": {
+    "sha256": "e1639a38cbebb8d56aaa2661c72a3537a79df8c08dcd6b9b08558867e01835b7",
+    "reason": "The pork amount spans two serving examples. Keep the original ingredient names and combine the two stated quantities into a range.",
+    "ingredients": [
+      {
+        "ingredient_name": "五花肉",
+        "quantity": "0.3-0.5",
+        "unit": "斤"
+      },
+      {
+        "ingredient_name": "小葱",
+        "quantity": "2",
+        "unit": "棵",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "生姜",
+        "quantity": "10-40",
+        "unit": "g",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "青红椒",
+        "quantity": "0-30",
+        "unit": "g"
+      },
+      {
+        "ingredient_name": "蒜苗",
+        "quantity": "1",
+        "unit": "把",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "料酒",
+        "quantity": "5",
+        "unit": "ml",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "豆瓣酱",
+        "quantity": "10",
+        "unit": "ml"
+      },
+      {
+        "ingredient_name": "生抽酱油",
+        "quantity": "5",
+        "unit": "ml",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "味精",
+        "quantity": "5",
+        "unit": "g",
+        "is_seasoning": true
+      }
+    ]
+  },
+  "dishes/meat_dish/奶酪培根通心粉/奶酪培根通心粉.md": {
+    "sha256": "4884f223feef8c72ff2ead7ac64b537e63965f7b22839c49360e4f827740c094",
+    "reason": "The calculation gives bacon as the named meat and leaves other meats unspecified. Record the bacon amount once.",
+    "ingredients": [
+      {
+        "ingredient_name": "通心粉",
+        "quantity": "100-125",
+        "unit": "g"
+      },
+      {
+        "ingredient_name": "奶酪",
+        "quantity": "40-55",
+        "unit": "g"
+      },
+      {
+        "ingredient_name": "洋葱",
+        "quantity": "25",
+        "unit": "g",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "黄油",
+        "quantity": "15",
+        "unit": "g",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "面粉",
+        "quantity": "10",
+        "unit": "g"
+      },
+      {
+        "ingredient_name": "牛奶",
+        "quantity": "125",
+        "unit": "ml"
+      },
+      {
+        "ingredient_name": "大蒜",
+        "quantity": "半",
+        "unit": "瓣",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "培根",
+        "quantity": "100-125",
+        "unit": "g"
+      }
+    ]
   },
   "dishes/meat_dish/宫保鸡丁/宫保鸡丁.md": {
     "equipment": [],
     "reason": "The microwave only dries peanuts in the simple version. The advanced version uses a pan.",
     "sha256": "c44371612f01646a0395f7f9e0ef1a6dab6592992f9c1a80ae7d2b0550d6a5ee"
   },
+  "dishes/meat_dish/新疆大盘鸡/新疆大盘鸡.md": {
+    "sha256": "d74bbe97c0199fccafd9f09831666735118aa3f47045c5c31bb3116630e08e4d",
+    "reason": "The recipe specifies separate peppers at 50 g each and gives two equivalent potato quantities. Enter each named ingredient once.",
+    "ingredients": [
+      {
+        "ingredient_name": "花椒",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "香叶",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "香果"
+      },
+      {
+        "ingredient_name": "干线椒",
+        "quantity": "5",
+        "unit": "个"
+      },
+      {
+        "ingredient_name": "大蒜",
+        "quantity": "4",
+        "unit": "瓣",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "大葱",
+        "quantity": "100",
+        "unit": "g",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "油",
+        "quantity": "50",
+        "unit": "g",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "盐",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "生抽",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "蚝油",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "料酒",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "白糖",
+        "quantity": "20",
+        "unit": "g",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "鸡肉",
+        "quantity": "1",
+        "unit": "kg"
+      },
+      {
+        "ingredient_name": "土豆",
+        "quantity": "750",
+        "unit": "g"
+      },
+      {
+        "ingredient_name": "菜椒",
+        "quantity": "50",
+        "unit": "g",
+        "is_optional": true
+      },
+      {
+        "ingredient_name": "甜椒",
+        "quantity": "50",
+        "unit": "g",
+        "is_optional": true
+      }
+    ]
+  },
   "dishes/meat_dish/桂林十八酿/桂林十八酿.md": {
-    "reason": "The source presents a family of stuffed dishes and a design diagram. Organize the actual cooking instructions around the common method and the two worked examples.",
     "sha256": "7c8d95e01c1e780ce31be66482c2d86d847744eb2ea821b998cb189fcfe88089",
+    "reason": "Keep the original cooking examples and filling instructions. Omit the bridge-pattern discussion and diagram.",
     "steps": [
-      "选择一种可挖空的食材作为容器，并准备与之搭配的馅料。",
-      "选择猪肉馅（肥瘦约 3:7）、虾滑，或将猪肉与虾滑混合。做田螺酿时，将螺肉和猪肉按 1:1 混合，可加紫苏和薄荷。",
-      "做青椒酿时，将青椒去籽挖空，塞入猪肉馅或虾滑。",
-      "将填馅的青椒煎至虎皮色，再加酱汁焖熟。",
-      "做田螺酿时，将田螺焯水取肉，和猪肉剁碎混合后塞回螺壳，以紫苏和薄荷焖熟。",
-      "也可用苦瓜、茄子或豆腐等其他中空食材，填入所选馅料后煎或焖熟。"
+      "【核心思路】所谓\"酿\"，就是找一个中空的管状食材作为容器，把调好味的肉馅塞进去，再煎或焖熟。",
+      "以两道已收录的酿菜为例：",
+      "青椒酿：青椒去籽挖空 → 塞入猪肉馅或虾滑 → 煎至虎皮色 → 酱汁焖煮",
+      "田螺酿：田螺焯水取肉 → 螺肉与猪肉剁碎混合 → 塞回螺壳 → 紫苏薄荷焖煮；换成其他管状食材，同样的工序再来一遍，就是一道新菜。苦瓜酿、茄子酿、豆腐酿……皆是如此。；酿心（馅料）同样可以变化：",
+      "猪肉馅：最基础通用的选择，肥瘦 3:7 口感最佳",
+      "虾滑馅：鲜甜弹牙，青椒酿里常用",
+      "螺肉猪肉混合馅：田螺酿的灵魂，螺肉与猪肉 1:1，加紫苏薄荷",
+      "混合馅：猪肉 + 虾滑混搭，鲜甜与油脂香兼得",
+      "一个容器配一种馅，换一个就是一道新酿。当地有\"万物皆可酿\"的说法，正是这个道理。"
+    ]
+  },
+  "dishes/meat_dish/红烧肉/南派红烧肉.md": {
+    "sha256": "c593691671c43624fb6172d79440ddc60555f76e25682cefef825df7125a59e7",
+    "reason": "The preparation and adjustment notes follow quantities on the same lines. Retain the named ingredients and consolidate the source's scallion and garlic names.",
+    "ingredients": [
+      {
+        "ingredient_name": "五花肉",
+        "quantity": "1000",
+        "unit": "g"
+      },
+      {
+        "ingredient_name": "油",
+        "quantity": "100-150",
+        "unit": "ml",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "冰糖",
+        "quantity": "50",
+        "unit": "g",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "老抽",
+        "quantity": "15",
+        "unit": "ml",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "料酒",
+        "quantity": "30",
+        "unit": "ml",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "香叶",
+        "quantity": "4",
+        "unit": "片",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "八角",
+        "quantity": "3",
+        "unit": "个",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "生姜",
+        "quantity": "6",
+        "unit": "片",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "盐",
+        "quantity": "2-3",
+        "unit": "g",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "葱",
+        "quantity": "30",
+        "unit": "g",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "开水"
+      },
+      {
+        "ingredient_name": "凉水"
+      },
+      {
+        "ingredient_name": "蒜",
+        "quantity": "25",
+        "unit": "g",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "花椒",
+        "quantity": "10",
+        "unit": "g",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "白砂糖",
+        "quantity": "30",
+        "unit": "g",
+        "is_seasoning": true
+      }
+    ]
+  },
+  "dishes/meat_dish/西红柿土豆炖牛肉/西红柿土豆炖牛肉.md": {
+    "sha256": "4455842b432b3149c37727b5c58c7faa0f34ed197b5acd8353a5de18cc83c09b",
+    "reason": "The tomato amount follows a size description. Keep the original ingredient name and its stated count. Omit the group heading.",
+    "ingredients": [
+      {
+        "ingredient_name": "牛肉",
+        "quantity": "500-700",
+        "unit": "g"
+      },
+      {
+        "ingredient_name": "葱",
+        "quantity": "一",
+        "unit": "根",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "姜",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "料酒",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "花椒",
+        "quantity": "3",
+        "unit": "g",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "八角",
+        "quantity": "一",
+        "unit": "个",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "香叶",
+        "quantity": "两",
+        "unit": "片",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "白糖",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "冰糖",
+        "is_optional": true,
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "酱油",
+        "is_optional": true,
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "老抽",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "黑胡椒粉",
+        "quantity": "2",
+        "unit": "g",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "土豆",
+        "quantity": "两三",
+        "unit": "个"
+      },
+      {
+        "ingredient_name": "西红柿",
+        "quantity": "两三",
+        "unit": "个"
+      },
+      {
+        "ingredient_name": "洋葱",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "油",
+        "quantity": "15",
+        "unit": "ml",
+        "is_seasoning": true
+      }
+    ]
+  },
+  "dishes/meat_dish/西红柿牛腩/西红柿牛腩.md": {
+    "sha256": "82f1ae878a443d109e8fd9291f0d0854d41f586080440351417fc665726f2c31",
+    "reason": "Equipment and fragmented quantities share the ingredient section. Keep the source's named beef, vegetables, and seasonings as individual rows.",
+    "ingredients": [
+      {
+        "ingredient_name": "西红柿",
+        "quantity": "3-4",
+        "unit": "个"
+      },
+      {
+        "ingredient_name": "牛腩",
+        "quantity": "500",
+        "unit": "g"
+      },
+      {
+        "ingredient_name": "葱段",
+        "quantity": "两",
+        "unit": "段",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "姜片",
+        "quantity": "两",
+        "unit": "片",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "葱花",
+        "quantity": "10",
+        "unit": "g",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "生抽",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "白胡椒粉",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "白糖",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "黄酒"
+      },
+      {
+        "ingredient_name": "八角",
+        "quantity": "三",
+        "unit": "片",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "食用油",
+        "quantity": "20-30",
+        "unit": "ml",
+        "is_seasoning": true
+      }
+    ]
+  },
+  "dishes/meat_dish/贵州辣子鸡/贵州辣子鸡.md": {
+    "sha256": "775b0651198bf29bdd9d3e4096f449f500b00180bed67aec3bc46191fe35e622",
+    "reason": "The chicken and ginger quantities are embedded in serving and size descriptions. Attach the stated quantities to the original names.",
+    "ingredients": [
+      {
+        "ingredient_name": "农村玉米鸡",
+        "quantity": "四",
+        "unit": "斤"
+      },
+      {
+        "ingredient_name": "土豆",
+        "quantity": "两",
+        "unit": "个"
+      },
+      {
+        "ingredient_name": "大蒜",
+        "quantity": "两",
+        "unit": "个",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "香叶",
+        "quantity": "2",
+        "unit": "片",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "姜",
+        "quantity": "两",
+        "unit": "个",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "老抽",
+        "quantity": "20",
+        "unit": "ml",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "花椒",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "麻椒",
+        "is_optional": true
+      },
+      {
+        "ingredient_name": "糍粑辣椒",
+        "quantity": "500",
+        "unit": "g"
+      },
+      {
+        "ingredient_name": "豆瓣酱"
+      },
+      {
+        "ingredient_name": "啤酒",
+        "quantity": "半",
+        "unit": "瓶"
+      },
+      {
+        "ingredient_name": "蒜苗",
+        "quantity": "三",
+        "unit": "根",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "酒糟"
+      },
+      {
+        "ingredient_name": "食用油",
+        "quantity": "两",
+        "unit": "斤",
+        "is_seasoning": true
+      }
+    ]
+  },
+  "dishes/meat_dish/香辣鸡爪煲/香辣鸡爪煲.md": {
+    "sha256": "a17ba665e415af6a9559d8ac4b35fdfe1c45830ccc5af52fa4eaf219f6e8e87f",
+    "reason": "The chicken amount comes before its name. The preparation names for ginger and garlic refer to the same ingredients named in the required section.",
+    "ingredients": [
+      {
+        "ingredient_name": "鸡爪",
+        "quantity": "一",
+        "unit": "斤"
+      },
+      {
+        "ingredient_name": "葱",
+        "quantity": "2",
+        "unit": "根",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "姜",
+        "is_seasoning": true,
+        "quantity": "10",
+        "unit": "g"
+      },
+      {
+        "ingredient_name": "料酒",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "香叶",
+        "quantity": "3",
+        "unit": "片",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "八角",
+        "quantity": "三",
+        "unit": "个",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "生抽",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "老抽",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "蒜",
+        "is_seasoning": true,
+        "quantity": "10",
+        "unit": "g"
+      },
+      {
+        "ingredient_name": "小米椒",
+        "quantity": "6",
+        "unit": "个"
+      },
+      {
+        "ingredient_name": "辣椒面",
+        "is_optional": true
+      },
+      {
+        "ingredient_name": "蚝油",
+        "quantity": "3",
+        "unit": "g",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "五香粉"
+      },
+      {
+        "ingredient_name": "盐",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "鸡精",
+        "is_seasoning": true
+      }
+    ]
+  },
+  "dishes/meat_dish/麻婆豆腐/麻婆豆腐.md": {
+    "sha256": "11547a2586819cd712ccd275aebf7318a724e2bb5d47d10f5f0e6fa71735ba3d",
+    "reason": "The calculation lists amounts before their names. Keep the stated amounts and use the required section's names for the chili and chili paste.",
+    "ingredients": [
+      {
+        "ingredient_name": "内脂豆腐",
+        "quantity": "1",
+        "unit": "盒"
+      },
+      {
+        "ingredient_name": "咸鸭蛋",
+        "quantity": "1",
+        "unit": "枚"
+      },
+      {
+        "ingredient_name": "五花肉",
+        "quantity": "20-30",
+        "unit": "g"
+      },
+      {
+        "ingredient_name": "大蒜",
+        "quantity": "两",
+        "unit": "瓣",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "生姜",
+        "quantity": "2",
+        "unit": "片",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "小米椒",
+        "is_optional": true,
+        "quantity": "5",
+        "unit": "根"
+      },
+      {
+        "ingredient_name": "香辣酱",
+        "quantity": "5",
+        "unit": "g"
+      },
+      {
+        "ingredient_name": "花椒",
+        "quantity": "20",
+        "unit": "颗",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "食盐",
+        "quantity": "3",
+        "unit": "g",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "酱油",
+        "quantity": "10",
+        "unit": "g",
+        "is_seasoning": true
+      }
     ]
   },
   "dishes/semi-finished/牛油火锅底料.md": {
@@ -268,33 +1200,77 @@
     "reason": "The source states the dumplings and their water requirement as sentences. Preserve the bag of dumplings and the water ratio as separate ingredients.",
     "sha256": "a73cd85543a0c4e373cf75a463462e733a6b50dc7466c237fe592a7c94a5b11b"
   },
+  "dishes/soup/朱雀汤/朱雀汤.md": {
+    "sha256": "ef0a8d60e6a1a914e30952c891bae31b2b681d273c2d0aa5fbfa60f643e1b59c",
+    "reason": "Every amount comes before its ingredient name. Preserve the original four ingredients and their stated quantities.",
+    "ingredients": [
+      {
+        "ingredient_name": "鸡蛋",
+        "quantity": "一",
+        "unit": "个"
+      },
+      {
+        "ingredient_name": "香油",
+        "quantity": "2",
+        "unit": "ml",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "白糖",
+        "quantity": "20",
+        "unit": "克",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "水",
+        "quantity": "500",
+        "unit": "ml"
+      }
+    ]
+  },
+  "dishes/soup/紫菜蛋花汤.md": {
+    "sha256": "8b83438660e9d15b9658644b4b9c8d16eecf1207cf33ac7e2fd526aa3f760020",
+    "reason": "The nori and egg amounts come before their names. Preserve the required section names and the stated amounts.",
+    "ingredients": [
+      {
+        "ingredient_name": "鸡蛋",
+        "quantity": "两",
+        "unit": "个"
+      },
+      {
+        "ingredient_name": "紫菜",
+        "quantity": "10",
+        "unit": "g"
+      },
+      {
+        "ingredient_name": "葱花",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "水"
+      },
+      {
+        "ingredient_name": "盐",
+        "quantity": "2",
+        "unit": "克",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "油",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "虾仁"
+      }
+    ]
+  },
   "dishes/staple/基础牛奶面包/基础牛奶面包.md": {
+    "sha256": "1cbcacca0e5bf9721652df1c91da619d46d85e88c4b404e0c9f5e5b864469ccf",
+    "reason": "The steamer liner is offered as a cloth cover. The baking instructions require an oven.",
     "equipment": [
       [
         "oven"
       ]
-    ],
-    "reason": "The starter and dough use separate numbered sequences with interleaved troubleshooting blocks. Preserve photo positions while rebuilding the cooking sequence. A steamer liner is suggested only as a cloth cover.",
-    "sha256": "1cbcacca0e5bf9721652df1c91da619d46d85e88c4b404e0c9f5e5b864469ccf",
-    "steps": [
-      "准备制作酵头。原文建议有条件时发酵 4 天以增加风味。",
-      "将酵母与 30℃ 温水搅匀，静置 5 分钟，再和面粉搅拌成粘稠面糊。",
-      "用布盖上面糊，放到温暖处发酵 45 至 60 分钟。",
-      "观察酵头，表面有很多气泡且体积明显增大时即可使用。",
-      "把剩余原料与酵头混合，刮净容器内壁，拌至无干粉后将面团移到面板或硅胶垫上。",
-      "用手掌下部推开面团再对折，重复揉至没有干粉结块。面团偏硬时可在表面喷水、盖湿布静置 20 分钟。",
-      "给至少有三倍面团体积的容器涂薄油，放入面团，盖布发酵约 1 小时。",
-      "面团体积约翻倍后，将它取出，在撒有薄粉的面板或硅胶垫上压扁排气。",
-      "将面团擀成约 1 cm 厚片，从一边紧密卷起。",
-      "将面团旋转 90 度，再擀开并卷紧。",
-      "整形后将接缝朝下，放入垫有硅油纸的烤盘或已涂油的模具。",
-      "让整形后的面团再发酵 30 至 45 分钟。",
-      "同时预热烤箱。原文建议用最高温度空烤至少 20 分钟。",
-      "用剪刀或小刀在面团表面划几道口。",
-      "可选：用刷子在表面刷蛋液。",
-      "先用上下火 180℃ 烤 30 分钟，再调至 165℃ 烤 10 分钟。可按实际上色情况微调温度和时间。",
-      "彻底放凉后装入食品袋。室温可保存约一周，冷冻约一个月。",
-      "密封放置一晚后，面包表面和内部会回软，可于次日食用。"
     ]
   },
   "dishes/staple/日式咖喱饭/日式咖喱饭.md": {
@@ -302,29 +1278,245 @@
     "reason": "Microwaving is an option for reheating refrigerated curry. The source also gives a stovetop method.",
     "sha256": "e91033b268e47a08ace3e821cd95b040f0767b9c9c882c2b843b245d294c240e"
   },
-  "dishes/staple/老干妈拌面.md": {
-    "reason": "Expand the source's intentional one-character serving step to an equivalent instruction that passes the two-character audit.",
-    "sha256": "ecef27ed60d0291d10119c27608e030f214c0cf7f2ada25b0dad5138833521b7",
-    "steps": [
-      "将水倒入锅中并煮沸",
-      "将面均匀放入锅中",
-      "在煮的过程注意搅拌，避免面粘成一坨",
-      "当用筷子挑起一根面且该面能自然地从筷子上滑落时再等 30 秒关火",
-      "将面夹入碗中",
-      "按照上面的计量放入老干妈和酱油",
-      "用筷子将碗里的面、老干妈、酱油拌均匀",
-      "享用"
+  "dishes/staple/蛋包饭.md": {
+    "sha256": "0bb9649672e61e8de3e9d50f1978e22619922de18e8ea4daa377a9ef07db969a",
+    "reason": "The corn and peas share one total with no individual quantities. Keep the two original ingredient rows without assigning the total to either one.",
+    "ingredients": [
+      {
+        "ingredient_name": "鸡蛋",
+        "quantity": "2",
+        "unit": "个"
+      },
+      {
+        "ingredient_name": "洋葱",
+        "quantity": "30",
+        "unit": "g",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "胡萝卜",
+        "quantity": "30",
+        "unit": "g"
+      },
+      {
+        "ingredient_name": "玉米粒"
+      },
+      {
+        "ingredient_name": "青豆",
+        "is_optional": true
+      },
+      {
+        "ingredient_name": "火腿肠",
+        "quantity": "50",
+        "unit": "g"
+      },
+      {
+        "ingredient_name": "鸡胸肉",
+        "quantity": "50",
+        "unit": "g",
+        "is_optional": true
+      },
+      {
+        "ingredient_name": "米饭",
+        "quantity": "200",
+        "unit": "g"
+      },
+      {
+        "ingredient_name": "番茄酱",
+        "quantity": "20",
+        "unit": "ml"
+      },
+      {
+        "ingredient_name": "食用油",
+        "quantity": "15",
+        "unit": "ml",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "牛奶",
+        "quantity": "10",
+        "unit": "ml",
+        "is_optional": true
+      }
     ]
   },
-  "dishes/staple/醪糟小汤圆.md": {
-    "reason": "Expand the source's intentional one-character serving step to an equivalent instruction that passes the two-character audit.",
-    "sha256": "1449462c523baf3e63113536b271ef31045b0dd308577b1117fd9c0229455c39",
-    "steps": [
-      "将水倒入锅中并煮沸",
-      "放入小汤圆煮 8 分钟",
-      "放入醪糟和枸杞再煮 2 分钟",
-      "盛入碗中根据个人口味加入白糖并搅拌均匀",
-      "享用"
+  "dishes/vegetable_dish/凉拌油麦菜.md": {
+    "sha256": "3a31ea73324f7656ffa025d0963c117946e570a846f2d4c12b51782f4294f9b0",
+    "reason": "The per-serving quantities come before the ingredient names. Record the amounts before their multiplication by the serving count.",
+    "ingredients": [
+      {
+        "ingredient_name": "油麦菜",
+        "quantity": "1",
+        "unit": "颗",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "芝麻酱",
+        "quantity": "10",
+        "unit": "ml"
+      },
+      {
+        "ingredient_name": "酱油",
+        "quantity": "5",
+        "unit": "ml",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "醋",
+        "quantity": "15",
+        "unit": "ml",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "蚝油",
+        "quantity": "10",
+        "unit": "ml",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "白糖",
+        "quantity": "5",
+        "unit": "g",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "香油",
+        "quantity": "5",
+        "unit": "ml",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "蒜",
+        "quantity": "两",
+        "unit": "头",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "盐",
+        "is_seasoning": true
+      }
+    ]
+  },
+  "dishes/vegetable_dish/蒲烧茄子.md": {
+    "sha256": "d8fb3a323f82c6ad45bc7379b6082739a1aa196fa920a9903f22b526b08995de",
+    "reason": "The eggplant, sauce, and sauce ingredients use amount-first lines. Record the source names and quantities for the batch.",
+    "ingredients": [
+      {
+        "ingredient_name": "茄子",
+        "quantity": "1",
+        "unit": "个"
+      },
+      {
+        "ingredient_name": "蒲烧汁",
+        "quantity": "1",
+        "unit": "份"
+      },
+      {
+        "ingredient_name": "蜂蜜",
+        "quantity": "20",
+        "unit": "ml"
+      },
+      {
+        "ingredient_name": "白糖",
+        "quantity": "15",
+        "unit": "ml",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "生抽",
+        "quantity": "40",
+        "unit": "ml",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "老抽",
+        "quantity": "10",
+        "unit": "ml",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "料酒",
+        "quantity": "20",
+        "unit": "ml",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "水",
+        "quantity": "100",
+        "unit": "ml"
+      }
+    ]
+  },
+  "dishes/vegetable_dish/陕北熬豆角.md": {
+    "sha256": "0199e1d4886ae2d653f69d33f2e2e74e339397861995800c1a78c4272d34a670",
+    "reason": "The last calculation line gives chopped cilantro as an optional garnish and leaves the amount to taste.",
+    "ingredients": [
+      {
+        "ingredient_name": "豆角",
+        "quantity": "300",
+        "unit": "g"
+      },
+      {
+        "ingredient_name": "土豆",
+        "quantity": "1",
+        "unit": "个"
+      },
+      {
+        "ingredient_name": "西红柿",
+        "quantity": "1",
+        "unit": "个"
+      },
+      {
+        "ingredient_name": "螺丝椒",
+        "quantity": "2",
+        "unit": "个",
+        "is_optional": true
+      },
+      {
+        "ingredient_name": "盐",
+        "quantity": "6",
+        "unit": "g",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "生抽",
+        "quantity": "6",
+        "unit": "ml",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "五香粉",
+        "quantity": "3",
+        "unit": "g"
+      },
+      {
+        "ingredient_name": "蚝油",
+        "quantity": "6",
+        "unit": "ml",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "葱",
+        "quantity": "3",
+        "unit": "圈",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "姜",
+        "quantity": "2",
+        "unit": "g",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "蒜",
+        "quantity": "2",
+        "unit": "颗",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "香菜碎",
+        "is_optional": true
+      }
     ]
   }
 }
