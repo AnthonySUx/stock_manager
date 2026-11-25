@@ -1,0 +1,31 @@
+# Individually reviewed ingredient names absent from the required-section and synonym vocabulary.
+# Sorted by pinyin. Do not add unreviewed calculation fragments.
+鹌鹑蛋
+百味来拿坡里意面酱
+饼干屑
+冰水
+葱白
+葱油酱汁
+肥肉末
+沸水
+腐乳汁
+黑椒腌料
+红肠
+坚果
+金色朗姆酒
+咖啡粉
+麻辣香锅调料
+麦片
+芒果
+葡萄柚
+奇亚籽
+青柠
+砂糖
+瘦肉末
+蔬菜碎叶
+糖浆
+五珠薄荷叶
+鲜香菇
+香菜碎
+椰奶
+猪排骨
