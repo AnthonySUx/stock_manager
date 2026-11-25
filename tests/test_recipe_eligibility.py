@@ -149,3 +149,35 @@ class TestCookConsume:
         always_after = client.get(f"/api/items/{always_item['id']}").json()
         assert never_after["quantity_value"] == never_item["quantity_value"]
         assert always_after["quantity_value"] == always_item["quantity_value"] - 1
+
+
+def test_water_and_ice_do_not_count_as_required_for_user_recipes(client):
+    recipe = _create_recipe(client, "只用水和冰", ["水", "清水", " 冰块 ", "纯 净水"])
+    response = client.get("/api/recipes/recommendations")
+    assert response.status_code == 200
+    recommendation = next(row for row in response.json()["recommendations"] if row["recipe_id"] == recipe["id"])
+    assert recommendation["missing_ingredients"] == []
+    assert recommendation["matched_inventory_items"] == []
+    assert recommendation["score"] == 5
+
+
+def test_water_inventory_is_ignored_in_matching_consumption_and_restock(client, db_session):
+    _create_item(client, db_session, "水", "drinks")
+    _create_item(client, db_session, "番茄", "vegetables")
+    recipe = _create_recipe(client, "番茄汤", ["番茄", "水", "清水", " 冰块 ", "蜂蜜水"])
+    recipe_id = recipe["id"]
+    recommendation = next(
+        row for row in client.get("/api/recipes/recommendations").json()["recommendations"]
+        if row["recipe_id"] == recipe_id
+    )
+    assert recommendation["matched_inventory_items"] == ["番茄"]
+    assert recommendation["missing_ingredients"] == ["蜂蜜水"]
+
+    preview = client.get(f"/api/recipes/{recipe_id}/consume-preview")
+    assert preview.status_code == 200
+    assert [row["ingredient_name"] for row in preview.json()["suggestions"]] == ["番茄"]
+    assert preview.json()["unmatched_ingredients"] == ["蜂蜜水"]
+
+    restock = client.post(f"/api/recipes/{recipe_id}/missing-to-restock")
+    assert restock.status_code == 200
+    assert [row["name"] for row in restock.json()["created"]] == ["蜂蜜水"]

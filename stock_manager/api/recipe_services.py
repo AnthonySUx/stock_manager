@@ -41,6 +41,18 @@ from stock_manager.api.services import _add_stock_to_restock, deduct_item_quanti
 from stock_manager.api.text_search import contains_ci
 
 
+# Water and ice are assumed to be available in every household (#137).
+ALWAYS_AVAILABLE_INGREDIENTS = frozenset({
+    "水", "清水", "开水", "温水", "热水", "凉水", "冷水", "冰水", "沸水",
+    "凉白开", "饮用水", "纯净水", "冰", "冰块",
+})
+
+
+def is_always_available(name: str | None) -> bool:
+    """True for water and ice, which never count as missing or as stock to deduct."""
+    return "".join((name or "").split()) in ALWAYS_AVAILABLE_INGREDIENTS
+
+
 DEFAULT_SYNONYM_MAP: dict[str, list[str]] = {
     # ── 蔬菜 / Vegetables ──
     "番茄": ["西红柿", "tomato", "tomatoes", "トマト"],
@@ -642,6 +654,8 @@ def _match_recipe_ingredients(
     matched, missing = [], []
     for ingredient in ingredients:
         name = ingredient.ingredient_name
+        if is_always_available(name):
+            continue
         if name.strip().lower() in names or _normalize_name(name).lower() in normalized_names:
             matched.append(ingredient)
         elif not (ingredient.is_seasoning or ingredient.is_optional):
@@ -650,9 +664,22 @@ def _match_recipe_ingredients(
 
 
 def _recommendation_candidates(db: Session, inventory_names: set[str], normalized_names: set[str]):
+    ingredient_name = RecipeIngredient.ingredient_name
+    sqlite = db.get_bind().dialect.name == "sqlite"
+    if sqlite:
+        db.connection().connection.driver_connection.create_function(
+            "recipe_whitespace_key", 1, lambda name: "".join(name.split()), deterministic=True,
+        )
+        available_name = func.recipe_whitespace_key(ingredient_name)
+    else:
+        available_name = func.regexp_replace(ingredient_name, r"[[:space:]]+", "")
     required = (
         select(RecipeIngredient.recipe_id, func.count().label("total"))
-        .where(RecipeIngredient.is_seasoning.is_(False), RecipeIngredient.is_optional.is_(False))
+        .where(
+            RecipeIngredient.is_seasoning.is_(False),
+            RecipeIngredient.is_optional.is_(False),
+            available_name.notin_(sorted(ALWAYS_AVAILABLE_INGREDIENTS)),
+        )
         .group_by(RecipeIngredient.recipe_id)
         .subquery()
     )
@@ -674,8 +701,7 @@ def _recommendation_candidates(db: Session, inventory_names: set[str], normalize
             # Like _normalize_name, take the first mapping for a shared alias.
             seen.update(raw_names)
 
-        ingredient_name = RecipeIngredient.ingredient_name
-        if db.get_bind().dialect.name == "sqlite":
+        if sqlite:
             # SQLite's built-in lower() handles ASCII only.
             db.connection().connection.driver_connection.create_function(
                 "recipe_name_key", 1, lambda name: name.strip().lower(), deterministic=True,
@@ -704,7 +730,8 @@ def get_recommendations(
     with two or more required ingredients always score below zero. Revisit
     these candidate rules when changing the scoring rules. Once household
     equipment is configured, SQL also excludes any recipe with an equipment
-    group for which no option is owned.
+    group for which no option is owned. Water and ice are always available,
+    so they count neither as required ingredients nor as inventory matches.
 
     Scoring:
     - Matched ingredient: +10 (conditional category: +6)
@@ -935,7 +962,7 @@ def get_consume_preview(db: Session, recipe_id: int) -> Optional[dict]:
     suggestions, unmatched = [], []
 
     for ingredient in ingredients:
-        if ingredient.is_seasoning or ingredient.is_optional:
+        if ingredient.is_seasoning or ingredient.is_optional or is_always_available(ingredient.ingredient_name):
             continue
         names = _name_keys(ingredient.ingredient_name)
         matches = [item for item in batches if item.id in available and names & available[item.id]]
