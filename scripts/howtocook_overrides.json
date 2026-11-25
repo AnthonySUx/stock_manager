@@ -468,7 +468,7 @@
   },
   "dishes/meat_dish/乡村啤酒鸭.md": {
     "sha256": "44a1dfea1b3ccdcd169c5f3364cb45f81f53385e9983fa2386bf59ab23b2cddd",
-    "reason": "Ginger and cassia are measured by length. Keep their names and leave their amounts blank. Use the stated red pepper count.",
+    "reason": "Ginger and cassia are measured by length. Keep their names and leave their amounts blank. Use the stated red pepper count. Use the calculated three chilies for the chili named in the required ingredients.",
     "ingredients": [
       {
         "ingredient_name": "鸭肉",
@@ -503,7 +503,9 @@
         "is_seasoning": true
       },
       {
-        "ingredient_name": "小米椒"
+        "ingredient_name": "小米椒",
+        "quantity": "3",
+        "unit": "颗"
       },
       {
         "ingredient_name": "蒜苗",
@@ -544,11 +546,6 @@
         "ingredient_name": "干辣椒",
         "quantity": "6",
         "unit": "条"
-      },
-      {
-        "ingredient_name": "小米辣",
-        "quantity": "3",
-        "unit": "颗"
       }
     ]
   },
@@ -2184,6 +2181,72 @@
       }
     ]
   },
+  "dishes/soup/玉米排骨汤/玉米排骨汤.md": {
+    "sha256": "8358b596b156a615ca980b74754c673f43e9ea2d18e6561037941ff1e8aa85ac",
+    "reason": "The required list misspells 胡萝卜 as 胡箩卜. Use the correct name and the one-carrot amount from the calculation section for inventory matching.",
+    "ingredients": [
+      {
+        "ingredient_name": "排骨",
+        "quantity": "500-800",
+        "unit": "g"
+      },
+      {
+        "ingredient_name": "玉米",
+        "quantity": "一",
+        "unit": "根"
+      },
+      {
+        "ingredient_name": "胡萝卜",
+        "quantity": "一",
+        "unit": "根"
+      },
+      {
+        "ingredient_name": "生姜",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "大葱",
+        "quantity": "一",
+        "unit": "根",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "食用油",
+        "quantity": "10",
+        "unit": "ml",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "醋",
+        "quantity": "10",
+        "unit": "ml",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "料酒",
+        "quantity": "10",
+        "unit": "ml",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "黑胡椒粉",
+        "quantity": "4",
+        "unit": "g",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "食用盐",
+        "quantity": "10-15",
+        "unit": "g",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "开水",
+        "quantity": "1000",
+        "unit": "ml"
+      }
+    ]
+  },
   "dishes/soup/紫菜蛋花汤.md": {
     "sha256": "8b83438660e9d15b9658644b4b9c8d16eecf1207cf33ac7e2fd526aa3f760020",
     "reason": "The nori and egg amounts come before their names. Preserve the required section names and the stated amounts.",
@@ -2333,10 +2396,12 @@
   },
   "dishes/staple/印度焖饭.md": {
     "sha256": "8752f21de4ae30652923b5dfda403588aa93237b0c21e941bcae4f1405a8ba8c",
-    "reason": "Add the salt from the marinade and the rice.",
+    "reason": "Add the salt from the marinade and the rice. Use the calculated 300 g of basmati rice for the long-grain basmati rice named in the required ingredients.",
     "ingredients": [
       {
-        "ingredient_name": "巴斯马蒂长粒香米"
+        "ingredient_name": "巴斯马蒂长粒香米",
+        "quantity": "300",
+        "unit": "g"
       },
       {
         "ingredient_name": "鸡腿肉",
@@ -2459,11 +2524,6 @@
         "ingredient_name": "柠檬汁",
         "quantity": "15",
         "unit": "ml"
-      },
-      {
-        "ingredient_name": "巴斯马蒂香米",
-        "quantity": "300",
-        "unit": "g"
       },
       {
         "ingredient_name": "水",

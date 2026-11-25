@@ -1427,3 +1427,15 @@ def test_tool_label_section_stops_at_the_next_label_or_heading(importer, opening
     assert [row["ingredient_name"] for row in rows] == ["中筋面粉", "盐"]
     assert groups == [["oven"]]
     assert unclassified == ["披萨石"]
+
+
+def test_cucumber_and_pork_uses_the_required_cut_name(importer, tmp_path):
+    path = tmp_path / "黄瓜炒肉.md"
+    path.write_text(
+        "# 黄瓜炒肉\n## 必备原料\n- 猪瘦肉\n## 计算\n- 猪肉 50 克\n## 操作\n- 炒熟\n",
+        encoding="utf-8",
+    )
+    recipe = importer.parse_recipe_md(str(path), recipe_path="dishes/meat_dish/黄瓜炒肉.md")
+    assert [(row["ingredient_name"], row["quantity"], row["unit"]) for row in recipe["ingredients"]] == [
+        ("猪瘦肉", "50", "克"),
+    ]
