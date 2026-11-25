@@ -822,3 +822,62 @@ def test_recipe_merges_calculations(importer, tmp_path, required, computed, expe
     rows = importer.parse_recipe_md(str(source))["ingredients"]
     assert [(r["ingredient_name"], r["quantity"], r["unit"]) for r in rows] == expected
     assert [row["sort_order"] for row in rows] == list(range(len(expected)))
+
+
+def test_nested_steps_and_image_only_bullets(importer):
+    markdown = """# 油焖大虾
+![封面](cover.png)
+
+## 操作步骤
+1. 清洗大虾
+2. 剪去虾须
+3. 准备调料：
+  - 黄酒 30g
+  - 水两小碗
+  - 盐 3g
+  - 冰糖 10 克
+  - ![调料](sauce.png)
+- ![调料完成](sauce-ready.png)
+4. 起锅热油
+5. 炒香葱姜
+6. 翻炒大虾
+7. 淋入料汁
+8. 盖锅焖煮
+9. 收汁
+10. 装盘
+"""
+    steps = importer._parse_steps(dict(importer._recipe_sections(markdown))["steps"])
+    assert [row["step_number"] for row in steps] == list(range(1, 11))
+    assert steps[2]["instruction"] == "准备调料：黄酒 30g；水两小碗；盐 3g；冰糖 10 克"
+    assert importer._photo_steps(markdown, list(range(1, 11))) == [
+        ("封面", "cover.png", None), ("调料", "sauce.png", 3), ("调料完成", "sauce-ready.png", 3),
+    ]
+
+
+def test_step_emphasis_and_continuation(importer):
+    text = """- **要求**：在开火前准备
+  - 使用 **中火** 和`平底锅`
+    倒入*热油*后转小火
+普通续段用_小火_
+- 出锅
+"""
+    assert [row["instruction"] for row in importer._parse_steps(text)] == [
+        "要求：在开火前准备：使用 中火 和平底锅 倒入热油后转小火；普通续段用小火",
+        "出锅",
+    ]
+    assert importer._clean_line("**中火**") == "中火"
+    assert [row["instruction"] for row in importer._parse_steps("加热\n翻炒\n\n装盘")] == ["加热 翻炒", "装盘"]
+
+
+@pytest.mark.parametrize("line,expected", [
+    ("放入预热至 180 度的烤箱中，烤 30-40 分钟或至熟", [["oven"]]),
+    ("也可以用高压锅压 20 分钟", []),
+    ("烤箱或空气炸锅", []),
+    ("烤箱或者平底锅", []),
+    ("平底锅 / 烤箱", []),
+    ("空气炸锅可以代替烤盘", []),
+    ("没有的话，用微波炉加热", []),
+    ("放入烤箱，或至熟，另也可以用高压锅", [["oven"]]),
+])
+def test_equipment_step_alternatives_are_local(importer, line, expected):
+    assert importer._step_equipment(line) == expected

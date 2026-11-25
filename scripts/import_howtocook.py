@@ -190,7 +190,7 @@ def _strip_bracket_notes(name: str) -> str:
 # A list marker at the start of a line: "-", "*", "+", or "1." / "1)" / "1、"
 # (not followed by a digit, so "3.5 克盐" is a quantity, not item 3). Only the
 # marker is removed, so "1. 2 个鸡蛋打散" keeps its "2".
-_LIST_MARKER_RE = re.compile(r"^(?:[-*+]|\d+[.)、](?!\d))\s*")
+_LIST_MARKER_RE = re.compile(r"^(?:[-+]|\*(?=\s)|\d+[.)、](?!\d))\s*")
 _HORIZONTAL_RULE_RE = re.compile(r"^(?:-{3,}|\*{3,}|_{3,})$")
 # A link or image target may contain one level of balanced parentheses, as in
 # "./血浆鸭(特辣).jpg"; stopping at the first ")" would cut the path short.
@@ -219,6 +219,9 @@ def _clean_line(line: str) -> str:
         if stripped == line:
             break
         line = stripped
+    # Remove Markdown emphasis without losing the first character of bold text.
+    line = re.sub(r"\*\*|__|`", "", line)
+    line = re.sub(r"([*_])([^*_]+)\1", r"\2", line)
     # Nothing but punctuation left (e.g. a stray "-"): not content.
     return line if re.search(r"\w", line) else ""
 
@@ -241,7 +244,12 @@ _SIZE_RE = re.compile(
 _HEAD_SEPARATOR_RE = re.compile(r"\s|[（(，,、/]|或者?")
 _ALTERNATIVE_RE = re.compile(r"或者?|/")
 _NOTE_ALTERNATIVE_RE = re.compile(r"可替代|代替|即可|也行|也可以|没有的话")
-_STEP_ALTERNATIVE_RE = re.compile(r"或|也可以|可以用|如果没有|没有的话|代替|替代|可选")
+_TOOL_OPTIONS = "|".join(map(re.escape, sorted(_SPECIAL_CODES.keys() | BASIC_TOOL_TERMS, key=lambda term: (-len(term), term))))
+_STEP_OPTION_BEFORE_RE = re.compile(
+    rf"(?:{_TOOL_OPTIONS})\s*(?:或者?|/)\s*$|(?:也可以(?:使用|用)?|可以用|改用)\s*$"
+)
+_STEP_OPTION_AFTER_RE = re.compile(rf"^\s*(?:或者?|/)\s*(?:{_TOOL_OPTIONS})|^[^，,]*?(?:代替|替代)")
+_STEP_FALLBACK_RE = re.compile(rf"(?:如果没有|没有的话).*?(?:{_SPECIAL_RE.pattern})")
 _INGREDIENT_MARKUP = str.maketrans("", "", "*`[]")
 _EMOJI_RE = re.compile(r"[\U0001F000-\U0001FAFF\u2600-\u27BF\ufe0f\u200d\u20e3]")
 _INGREDIENT_QUANTITY_UNITS = (
@@ -424,8 +432,14 @@ def _step_equipment(text: str) -> list[list[str]]:
             continue
         body, _ = _bracket_parts(step)
         for sentence in re.split(r"[。！？!?；;]", body):
-            if not _STEP_ALTERNATIVE_RE.search(sentence):
-                groups.extend([code] for code in _special_codes(sentence))
+            fallbacks = {match.end() for match in _STEP_FALLBACK_RE.finditer(sentence)}
+            for tool in _SPECIAL_RE.finditer(sentence):
+                if (
+                    tool.end() not in fallbacks
+                    and not _STEP_OPTION_BEFORE_RE.search(sentence[:tool.start()])
+                    and not _STEP_OPTION_AFTER_RE.match(sentence[tool.end():])
+                ):
+                    groups.append([_SPECIAL_CODES[tool[0]]])
     return groups
 
 
@@ -630,19 +644,53 @@ def _merge_ingredients(required: list[dict], computed: list[dict]) -> list[dict]
     return result
 
 
-def _parse_steps(text: str) -> list[dict]:
-    """Parse operation steps section."""
-    results = []
-    counter = 1
-    for line in text.split("\n"):
-        line = _clean_line(line)
+def _is_nested_step(line: str) -> bool:
+    indentation = line[:len(line) - len(line.lstrip(" 	"))]
+    return "	" in indentation or len(indentation) >= 2
+
+
+def _step_layout(text: str) -> tuple[list[str], list[tuple[int, int]]]:
+    """Build steps and record the step before and after each source line."""
+    lines = text.splitlines()
+    list_positions = [index for index, line in enumerate(lines) if _LIST_MARKER_RE.match(line.lstrip())]
+    has_lists = bool(list_positions)
+    steps, anchors = [], []
+    previous_blank = True
+    in_subitem = False
+    has_subitems = False
+    for index, raw in enumerate(lines):
+        previous = len(steps)
+        line = _clean_line(raw)
+        list_item = bool(_LIST_MARKER_RE.match(raw.lstrip()))
+        nested = _is_nested_step(raw)
         if line:
-            results.append({
-                "step_number": counter,
-                "instruction": line,
-            })
-            counter += 1
-    return results
+            between_items = has_lists and list_positions[0] < index < list_positions[-1]
+            standalone = has_lists and not list_item and not between_items and not (nested and in_subitem)
+            if not steps or (list_item and not nested) or (not has_lists and previous_blank) or standalone:
+                steps.append(line)
+                in_subitem = has_subitems = False
+            elif has_lists and nested and list_item:
+                separator = "；" if has_subitems else ("" if steps[-1].endswith(("：", ":")) else "：")
+                steps[-1] += separator + line
+                in_subitem = has_subitems = True
+            elif has_lists and not (nested and in_subitem):
+                steps[-1] += "；" + line
+                in_subitem = False
+            else:
+                steps[-1] += " " + line
+        if not raw.strip():
+            in_subitem = False
+        previous_blank = not raw.strip()
+        anchors.append((previous, len(steps)))
+    return steps, anchors
+
+
+def _parse_steps(text: str) -> list[dict]:
+    instructions, _ = _step_layout(text)
+    return [
+        {"step_number": number, "instruction": instruction}
+        for number, instruction in enumerate(instructions, start=1)
+    ]
 
 
 _PHOTO_REF = re.compile(rf"!\[([^\]]*)\]\(({_TARGET})\)")
@@ -650,35 +698,30 @@ _PHOTO_STATS = ("added", "updated", "removed", "missing", "remote_skipped")
 
 
 def _photo_steps(markdown: str, step_numbers: list[int]) -> list[tuple[str, str, int | None]]:
-    """Extract images while counting steps with the same rules as _parse_steps."""
+    """Extract images with the same source-line grouping as the step parser."""
+    lines = markdown.splitlines()
+    start = stop = 0
+    for index, line in enumerate(lines):
+        if heading := re.match(r"^##\s+(.+)$", line):
+            if start and not stop:
+                stop = index
+            if _section_kind(heading[1]) == "steps":
+                start, stop = index + 1, 0
+    if not stop:
+        stop = len(lines)
+    _, anchors = _step_layout("\n".join(lines[start:stop])) if start else ([], [])
     refs = []
-    in_steps = False
-    step_number = 0
-    section_start = 0
-    for line in markdown.split("\n"):
-        heading = re.match(r"^##\s+(.+)$", line)
-        if heading:
-            title = heading.group(1)
-            in_steps = not ("原料" in title or "工具" in title or "计算" in title) and (
-                "操作" in title or "步骤" in title
-            )
-            if in_steps:
-                # Like parse_recipe_md, the last steps section replaces earlier ones.
-                refs[section_start:] = [(alt, path, None) for alt, path, _ in refs[section_start:]]
-                section_start = len(refs)
-                step_number = 0
+    for index, line in enumerate(lines):
         for match in _PHOTO_REF.finditer(line):
             alt, path = match.groups()
             step = None
-            if refs and in_steps and "预览图" not in alt and "成品" not in alt:
-                step = step_number + bool(_clean_line(line[:match.start()])) or None
+            if refs and start <= index < start + len(anchors) and "预览图" not in alt and "成品" not in alt:
+                before, after = anchors[index - start]
+                attached = after if _clean_line(line[:match.start()]) else before
+                if 0 < attached <= len(step_numbers):
+                    step = step_numbers[attached - 1]
             refs.append((alt, path.strip().removeprefix("<").removesuffix(">"), step))
-        if in_steps and _clean_line(line):
-            step_number += 1
-    return [
-        (alt, path, step_numbers[index - 1] if index is not None else None)
-        for alt, path, index in refs
-    ]
+    return refs
 
 
 def _sync_photos(session, recipe, parsed, md_file, root, stored_hashes, old_hashes):
