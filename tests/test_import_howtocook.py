@@ -881,3 +881,57 @@ def test_step_emphasis_and_continuation(importer):
 ])
 def test_equipment_step_alternatives_are_local(importer, line, expected):
     assert importer._step_equipment(line) == expected
+
+
+@pytest.mark.parametrize("code,ingredients,steps,extra", [
+    ("ingredient_markup", ["盐🌶"], ["装盘"], {}),
+    ("ingredient_punct", ["盐、胡椒"], ["装盘"], {}),
+    ("ingredient_digit", ["2号盐"], ["装盘"], {}),
+    ("ingredient_long", ["一二三四五六七八九十非常长"], ["装盘"], {}),
+    ("ingredient_duplicate", ["盐", "盐"], ["装盘"], {}),
+    ("step_markup", ["盐"], ["用**大火**"], {}),
+    ("step_empty", ["盐"], [" 吃 "], {}),
+    ("recipe_empty", ["盐"], [], {}),
+    ("calc_unparsed", ["盐"], ["装盘"], {"calc_unparsed": ["2g"]}),
+    ("override_stale", ["盐"], ["装盘"], {"override_stale": True}),
+])
+def test_audit_error_codes(importer, code, ingredients, steps, extra):
+    recipe = {
+        "ingredients": [{"ingredient_name": name, "quantity": None} for name in ingredients],
+        "steps": [{"step_number": i, "instruction": text} for i, text in enumerate(steps, start=1)],
+        "raw_markdown": "",
+        "equipment": [],
+        **extra,
+    }
+    errors = [found for found, _ in importer._audit_recipe(recipe) if found in importer._ERROR_CODES]
+    assert errors == [code]
+
+
+def test_audit_cli_report_is_offline_and_fails_on_errors(importer, tmp_path, monkeypatch, capsys):
+    recipe = tmp_path / "dishes/soup/test.md"
+    recipe.parent.mkdir(parents=True)
+    recipe.write_text(
+        "# 测试汤\n![封面](cover.jpg)\n## 必备原料\n- 盐\n"
+        "## 计算\n- 2g\n## 操作步骤\n- 放入烤箱![烘烤](step.jpg)\n",
+        encoding="utf-8",
+    )
+    report = tmp_path / "review.md"
+    monkeypatch.setattr("sys.argv", ["import_howtocook.py", "--audit", str(tmp_path), "--report", str(report)])
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("Audit must not use the environment file or database")
+
+    monkeypatch.setattr(importer, "_load_env", unexpected)
+    monkeypatch.setattr(importer, "_get_db_session", unexpected)
+    with pytest.raises(SystemExit) as result:
+        importer.main()
+    assert result.value.code == 1
+    output = capsys.readouterr().out
+    assert "calc_unparsed: 1" in output
+    assert "calc_unparsed  dishes/soup/test.md  2g" in output
+    review = report.read_text(encoding="utf-8")
+    assert "## 测试汤" in review and "dishes/soup/test.md" in review
+    assert "| 盐 |  |  | Yes | No |" in review
+    assert "1. 放入烤箱" in review and "- oven" in review
+    assert "Cover: 封面" in review and "Step 1: 烘烤" in review
+    assert "`ingredient_no_quantity`: 盐" in review

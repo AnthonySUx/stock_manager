@@ -21,6 +21,7 @@ import sys
 from collections import Counter
 from collections.abc import Iterator
 from dataclasses import asdict
+import hashlib
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -84,8 +85,8 @@ def parse_recipe_md(filepath: str) -> dict:
     - "操作步骤" section
     - "附加内容" (optional)
     """
-    with open(filepath, "r", encoding="utf-8") as f:
-        content = f.read()
+    source = Path(filepath).read_bytes()
+    content = source.decode("utf-8")
 
     lines = content.split("\n")
 
@@ -136,6 +137,7 @@ def parse_recipe_md(filepath: str) -> dict:
         "equipment": _merge_equipment(equipment),
         "unclassified_tools": unclassified_tools,
         "raw_markdown": content,
+        "source_sha256": hashlib.sha256(source).hexdigest(),
     }
 
 
@@ -821,20 +823,11 @@ def import_howtocook(
             )
 
     howtocook_dir = Path(howtocook_path)
-    if not howtocook_dir.is_dir():
-        print(f"Error: {howtocook_path} is not a directory")
+    try:
+        md_files = _recipe_files(howtocook_dir)
+    except RuntimeError as exc:
+        print(f"Error: {exc}")
         sys.exit(1)
-
-    # Only dishes/ holds recipes; tips/, .github/ and the root files are articles
-    # or templates, and dishes/template/ is the example for contributors.
-    dishes_dir = howtocook_dir / "dishes"
-    if not dishes_dir.is_dir():
-        print(f"Error: {dishes_dir} not found (expected the HowToCook repository root)")
-        sys.exit(1)
-    md_files = [
-        f for f in dishes_dir.rglob("*.md")
-        if is_recipe_path(f.relative_to(howtocook_dir))
-    ]
 
     print(f"Found {len(md_files)} recipe files")
 
@@ -867,7 +860,7 @@ def import_howtocook(
     equipment_counts = Counter()
     recipes_with_equipment = group_count = 0
     unclassified_tools = []
-    for md_file in sorted(md_files):
+    for md_file in md_files:
         rel_path = str(md_file.relative_to(howtocook_dir))
         with media.file_transaction(enabled=with_photos):
             stored_hashes = set()
@@ -1067,6 +1060,156 @@ def _handle_non_recipe_rows(session, prune: bool) -> tuple[int, int]:
     return len(rows), len(rows)
 
 
+_ERROR_CODES = (
+    "ingredient_markup", "ingredient_punct", "ingredient_digit", "ingredient_long",
+    "ingredient_duplicate", "step_markup", "step_empty", "recipe_empty", "calc_unparsed", "override_stale",
+)
+_WARNING_CODES = (
+    "ingredient_no_quantity", "ingredient_maybe_duplicate", "equipment_mentioned_not_required", "step_count_changed",
+)
+_INGREDIENT_PUNCT_RE = re.compile(r"[：:、，,；;。（）()/或]|\s+or\s+", re.IGNORECASE)
+_STEP_MARKUP_RE = re.compile(r"\*\*|`|!\[|\]\(|<[a-zA-Z]")
+
+
+def _recipe_files(root: Path) -> list[Path]:
+    dishes = root / "dishes"
+    if not root.is_dir():
+        raise RuntimeError(f"{root} is not a directory")
+    if not dishes.is_dir():
+        raise RuntimeError(f"{dishes} not found (expected the HowToCook repository root)")
+    return sorted(path for path in dishes.rglob("*.md") if is_recipe_path(path.relative_to(root)))
+
+
+def _audit_recipe(recipe: dict) -> Iterator[tuple[str, str]]:
+    ingredients, steps = recipe["ingredients"], recipe["steps"]
+    names = set()
+    if not ingredients or not steps:
+        missing = ", ".join(label for label, rows in (("ingredients", ingredients), ("steps", steps)) if not rows)
+        yield "recipe_empty", f"Missing {missing}"
+    for row in ingredients:
+        name = row["ingredient_name"]
+        if re.search(r"[*`\[\]#]", name) or _EMOJI_RE.search(name):
+            yield "ingredient_markup", name
+        if _INGREDIENT_PUNCT_RE.search(name):
+            yield "ingredient_punct", name
+        if re.search(r"[0-9]", name):
+            yield "ingredient_digit", name
+        if len(name) > 12:
+            yield "ingredient_long", name
+        if name in names:
+            yield "ingredient_duplicate", name
+        names.add(name)
+        if row["quantity"] is None:
+            yield "ingredient_no_quantity", name
+
+    for inner in sorted(names, key=lambda name: (len(name), name)):
+        if len(inner) < 2:
+            continue
+        for outer in sorted(names):
+            if len(outer) > len(inner) and inner in outer:
+                yield "ingredient_maybe_duplicate", f"{inner} / {outer}"
+
+    for step in steps:
+        instruction = step["instruction"]
+        detail = f'{step["step_number"]}: {instruction}'
+        if _STEP_MARKUP_RE.search(instruction):
+            yield "step_markup", detail
+        if len(re.sub(r"\s", "", instruction)) < 2:
+            yield "step_empty", detail
+
+    for line in recipe.get("calc_unparsed", []):
+        yield "calc_unparsed", line
+    if recipe.get("override_stale"):
+        yield "override_stale", "Override SHA-256 does not match the source"
+
+    raw = recipe["raw_markdown"]
+    required = {code for group in recipe["equipment"] for code in group}
+    for code in catalog_order(set(_special_codes(raw)) - required):
+        yield "equipment_mentioned_not_required", code
+    operation = ""
+    for kind, text in _recipe_sections(raw):
+        if kind == "steps":
+            operation = text
+    top_level = sum(
+        bool(_LIST_MARKER_RE.match(line.lstrip())) and not _is_nested_step(line)
+        for line in operation.splitlines()
+    )
+    if top_level != len(steps):
+        yield "step_count_changed", f"{top_level} source list items → {len(steps)} steps"
+
+
+def _report_cell(value) -> str:
+    return str(value if value is not None else "").replace("|", r"\|").replace("\n", "<br>")
+
+
+def _write_review(report: Path, reviewed: list[tuple[str, dict, list[tuple[str, str]]]]) -> None:
+    with report.open("w", encoding="utf-8") as output:
+        print("# HowToCook import review\n", file=output)
+        for path, recipe, issues in reviewed:
+            print(f'## {recipe["title"]}\n', file=output)
+            print(f'- Category: {recipe["category"]}\n- Source: `{path}`', file=output)
+            print(f'- SHA-256: `{recipe["source_sha256"]}`\n', file=output)
+            print("### Ingredients\n\n| Name | Quantity | Unit | Seasoning | Optional |", file=output)
+            print("| --- | --- | --- | --- | --- |", file=output)
+            for row in recipe["ingredients"]:
+                cells = (
+                    row["ingredient_name"], row["quantity"], row["unit"],
+                    "Yes" if row["is_seasoning"] else "No", "Yes" if row["is_optional"] else "No",
+                )
+                print("| " + " | ".join(map(_report_cell, cells)) + " |", file=output)
+            print("\n### Steps\n", file=output)
+            for step in recipe["steps"]:
+                print(f'{step["step_number"]}. {step["instruction"]}', file=output)
+            print("\n### Equipment groups\n", file=output)
+            for group in recipe["equipment"]:
+                print("- " + " / ".join(group), file=output)
+            print("\n### Photos\n", file=output)
+            photos = _photo_steps(recipe["raw_markdown"], [step["step_number"] for step in recipe["steps"]])
+            for index, (label, reference, step) in enumerate(photos):
+                location = f"Step {step}" if step else ("Cover" if not index else "Recipe")
+                print(f"- {location}: {label} (`{reference}`)", file=output)
+            print("\n### Warnings and errors\n", file=output)
+            for code, detail in issues:
+                print(f"- `{code}`: {detail}", file=output)
+            # Include the source for line-by-line verification of joins and omissions.
+            print("\n<details><summary>Source Markdown</summary>\n\n~~~~markdown", file=output)
+            print(recipe["raw_markdown"].rstrip(), file=output)
+            print("~~~~\n\n</details>\n", file=output)
+
+
+def audit_howtocook(root: Path, report: Path | None = None) -> int:
+    """Review the local Markdown and return a failing status for audit errors."""
+    counts = Counter()
+    reviewed = []
+    ingredient_total = quantified = multi_ingredient = 0
+    for file in _recipe_files(root):
+        path = file.relative_to(root).as_posix()
+        recipe = parse_recipe_md(str(file))
+        issues = list(_audit_recipe(recipe))
+        counts.update(code for code, _ in issues)
+        reviewed.append((path, recipe, issues))
+        ingredient_total += len(recipe["ingredients"])
+        quantified += sum(row["quantity"] is not None for row in recipe["ingredients"])
+        multi_ingredient += sum(
+            bool(re.search(r"[、，,或/]|\s+or\s+", row["ingredient_name"], re.IGNORECASE))
+            for row in recipe["ingredients"]
+        )
+
+    errors = sum(counts[code] for code in _ERROR_CODES)
+    warnings = sum(counts[code] for code in _WARNING_CODES)
+    for codes in (_ERROR_CODES, _WARNING_CODES):
+        for code in codes:
+            print(f"{code}: {counts[code]}")
+    print(f"Totals: errors {errors}, warnings {warnings}, recipes {len(reviewed)}")
+    print(f"Ingredients: {ingredient_total}, with quantity {quantified}, multi-ingredient {multi_ingredient}")
+    for path, _, issues in reviewed:
+        for code, detail in issues:
+            print(f"{code}  {path}  {detail}")
+    if report is not None:
+        _write_review(report, reviewed)
+    return int(bool(errors))
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Import HowToCook recipes into Stock Manager database"
@@ -1083,7 +1226,16 @@ def main():
         help="Database URL (default: required from .env)",
     )
     parser.add_argument("--with-photos", action="store_true", help="Import local recipe photos")
+    parser.add_argument("--audit", action="store_true", help="Review parsed recipes without a database")
+    parser.add_argument("--report", type=Path, help="Write a Markdown review when auditing")
     args = parser.parse_args()
+    if args.report and not args.audit:
+        parser.error("--report requires --audit")
+    if args.audit:
+        try:
+            sys.exit(audit_howtocook(Path(args.howtocook_path), args.report))
+        except (RuntimeError, OSError) as exc:
+            parser.exit(1, f"Error: {exc}\n")
     _load_env()
     try:
         import_howtocook(
