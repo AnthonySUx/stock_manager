@@ -935,3 +935,64 @@ def test_audit_cli_report_is_offline_and_fails_on_errors(importer, tmp_path, mon
     assert "1. 放入烤箱" in review and "- oven" in review
     assert "Cover: 封面" in review and "Step 1: 烘烤" in review
     assert "`ingredient_no_quantity`: 盐" in review
+
+
+def test_recipe_override_applies_to_import_and_audit(importer, tmp_path, db, monkeypatch, capsys):
+    import json
+    from hashlib import sha256
+
+    root = tmp_path / "source"
+    source = root / "dishes" / "soup" / "test.md"
+    source.parent.mkdir(parents=True)
+    source.write_text("# 原标题\n## 必备原料\n- 盐\n## 操作\n- 使用烤箱\n", encoding="utf-8")
+    key = source.relative_to(root).as_posix()
+    entry = {
+        "reason": "Use the alternate preparation recorded in this fixture.",
+        "sha256": sha256(source.read_bytes()).hexdigest(),
+        "title": "新标题",
+        "ingredients": [{"ingredient_name": "糖", "quantity": "2", "unit": "克", "normalized_name": "白糖"}],
+        "steps": ["锅中加糖"],
+        "equipment": [],
+    }
+    override_file = tmp_path / "overrides.json"
+    override_file.write_text(json.dumps({key: entry}), encoding="utf-8")
+    monkeypatch.setattr(importer, "_OVERRIDE_PATH", override_file)
+
+    report = tmp_path / "review.md"
+    assert importer.audit_howtocook(root, report) == 0
+    review = report.read_text(encoding="utf-8")
+    assert "## 新标题" in review and "| 糖 | 2 | 克 | No | No |" in review
+    assert "1. 锅中加糖" in review
+    assert "`equipment_mentioned_not_required`: oven" in review
+
+    url, session = db
+    assert importer.import_howtocook(str(root), url)["imported"] == 1
+    loaded = session.query(Recipe).one()
+    assert loaded.title == "新标题"
+    assert [(row.ingredient_name, row.normalized_name) for row in loaded.ingredients] == [("糖", "白糖")]
+    assert [step.instruction for step in loaded.steps] == ["锅中加糖"]
+
+    source.write_text(source.read_text(encoding="utf-8") + "\n## 附加内容\n已修改\n", encoding="utf-8")
+    assert importer.audit_howtocook(root, report) == 1
+    assert "override_stale  dishes/soup/test.md" in capsys.readouterr().out
+    assert "## 原标题" in report.read_text(encoding="utf-8")
+    assert importer.import_howtocook(str(root), url)["existing"] == 1
+    assert "override_stale (source SHA-256 differs)" in capsys.readouterr().out
+    session.expire_all()
+    assert loaded.title == "原标题"
+    assert [row.ingredient_name for row in loaded.ingredients] == ["盐"]
+    assert [step.instruction for step in loaded.steps] == ["使用烤箱"]
+
+
+@pytest.mark.parametrize("line,expected", [
+    ("- 黑鳕鱼，带皮，2 片，450g", [("黑鳕鱼", "450", "g")]),
+    ("- 生粉 2 1/2 茶匙", [("生粉", "2 1/2", "茶匙")]),
+    ("- 1 汤匙 = 15ml\n- 盐 1/4 茶匙", [("盐", "1/4", "茶匙")]),
+    ("- 生抽 75g = 15g * 5", [("生抽", "75", "g")]),
+    ("- 橄榄油 7 x 5 =35g，", [("橄榄油", "35", "g")]),
+    ("- 干辣椒 = 5，6 个", [("干辣椒", "5-6", "个")]),
+])
+def test_calculation_quantities_with_notes_and_formulas(importer, line, expected):
+    rows, unparsed = importer._parse_calculations(line)
+    assert [(r["ingredient_name"], r["quantity"], r["unit"]) for r in rows] == expected
+    assert not unparsed
