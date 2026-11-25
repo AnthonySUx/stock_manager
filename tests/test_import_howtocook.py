@@ -1143,9 +1143,12 @@ def test_override_audit_rejects_reworded_steps(importer, tmp_path, replacement, 
 def reviewed_aliases(importer, tmp_path, monkeypatch):
     path = tmp_path / "aliases.json"
 
-    def write(*, same=(), different=()):
+    def write(*, same=(), different=(), recipes=None):
         importer._load_aliases.cache_clear()
-        path.write_text(json.dumps({"same": same, "different": different}), encoding="utf-8")
+        path.write_text(
+            json.dumps({"same": same, "different": different, "recipes": recipes or {}}),
+            encoding="utf-8",
+        )
 
     monkeypatch.setattr(importer, "_ALIASES_PATH", path)
     write()
@@ -1296,3 +1299,131 @@ def test_audit_flags_unused_review_entries(importer, tmp_path, reviewed_aliases)
     assert list(importer._audit_review_tables(
         [{**recipe, "ingredients": recipe["ingredients"] + other["ingredients"]}], {"蒜", "老抽"},
     )) == []
+
+
+def test_recipe_aliases_take_precedence_on_import(importer, tmp_path, db, reviewed_aliases):
+    key = "dishes/vegetable_dish/日本豆腐煲.md"
+    other = "dishes/vegetable_dish/其他豆腐煲.md"
+    reviewed_aliases(
+        different=[["日本豆腐", "豆腐"]],
+        recipes={key: {"same": [["日本豆腐", "豆腐"]]}},
+    )
+    markdown = "# {title}\n## 必备原料\n- 日本豆腐\n## 计算\n- 豆腐 2 袋\n## 操作\n- 炖煮\n"
+    for path in (key, other):
+        source = tmp_path / path
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text(markdown.format(title=source.stem), encoding="utf-8")
+
+    url, session = db
+    assert importer.import_howtocook(str(tmp_path), url)["imported"] == 2
+    scoped = session.query(Recipe).filter_by(title="日本豆腐煲").one()
+    unscoped = session.query(Recipe).filter_by(title="其他豆腐煲").one()
+    assert [(row.ingredient_name, row.quantity, row.unit) for row in scoped.ingredients] == [
+        ("日本豆腐", "2", "袋"),
+    ]
+    assert [(row.ingredient_name, row.quantity) for row in unscoped.ingredients] == [
+        ("日本豆腐", None), ("豆腐", "2"),
+    ]
+
+
+def test_recipe_aliases_are_transitive_and_respect_local_different(importer, tmp_path, reviewed_aliases):
+    same = "dishes/staple/拌面.md"
+    different = "dishes/staple/汤面.md"
+    reviewed_aliases(
+        same=[["快熟面", "风干快熟面"], ["快熟面", "速煮面"]],
+        recipes={
+            same: {"same": [["快熟面", "任何牌子的快熟面"]]},
+            different: {"different": [["风干快熟面", "速煮面"]]},
+        },
+    )
+    source = tmp_path / "拌面.md"
+    source.write_text(
+        "# 拌面\n## 必备原料\n- 风干快熟面\n## 计算\n- 任何牌子的快熟面 1 块\n", encoding="utf-8",
+    )
+    rows = importer.parse_recipe_md(str(source), recipe_path=same)["ingredients"]
+    assert [(row["ingredient_name"], row["quantity"]) for row in rows] == [("风干快熟面", "1")]
+
+    source.write_text("# 汤面\n## 必备原料\n- 风干快熟面\n## 计算\n- 速煮面 1 块\n", encoding="utf-8")
+    rows = importer.parse_recipe_md(str(source), recipe_path=different)["ingredients"]
+    assert [row["ingredient_name"] for row in rows] == ["风干快熟面", "速煮面"]
+
+
+def test_audit_flags_recipe_aliases_for_missing_paths_and_pairs(importer, tmp_path, reviewed_aliases):
+    key = "dishes/soup/汤.md"
+    absent = "dishes/soup/不存在.md"
+    reviewed_aliases(recipes={
+        key: {"same": [["香菇", "干香菇"]], "different": [["盐", "椒盐"]]},
+        absent: {"same": [["香菇", "干香菇"]]},
+    })
+    source = tmp_path / "汤.md"
+    source.write_text("# 汤\n## 必备原料\n- 香菇\n- 盐\n## 计算\n- 干香菇 20g\n", encoding="utf-8")
+    parsed = importer.parse_recipe_md(str(source), recipe_path=key)
+    assert list(importer._audit_review_tables([parsed], set())) == [
+        ("alias_unused", f"{absent}: recipe path not found"),
+        ("alias_unused", f"{key}: 椒盐 / 盐"),
+    ]
+
+
+@pytest.mark.parametrize("required,computed,classification,expected", [
+    ("生抽", "老抽 3ml", "", "生抽 / 老抽"),
+    ("辣椒", "干辣椒 5 个", "", "辣椒 / 干辣椒"),
+    ("辣椒", "干辣椒 5 个", "same", None),
+    ("辣椒", "干辣椒 5 个", "different", None),
+    ("辣椒 2 个", "干辣椒 5 个", "", None),
+    ("辣椒", "干辣椒", "", None),
+    ("辣椒（也可用干辣椒）", "干辣椒 5 个", "", None),
+    ("盐", "干辣椒 5 个", "", None),
+])
+def test_audit_unquantified_related_uses_both_source_sections(
+    importer, tmp_path, reviewed_aliases, required, computed, classification, expected,
+):
+    path = tmp_path / "菜.md"
+    key = "dishes/meat_dish/菜.md"
+    if classification:
+        reviewed_aliases(recipes={key: {classification: [["辣椒", "干辣椒"]]}})
+    path.write_text(
+        f"# 菜\n## 必备原料\n- {required}\n## 计算\n- {computed}\n## 操作\n- 炒\n", encoding="utf-8",
+    )
+    parsed = importer.parse_recipe_md(str(path), recipe_path=key)
+    details = [detail for code, detail in importer._audit_recipe(parsed) if code == "ingredient_unquantified_related"]
+    assert details == ([expected] if expected else [])
+
+
+@pytest.mark.parametrize("line,override_kind,expected", [
+    ("米酒 10 + 25 ml", "", True),
+    ("米酒 10 + 25 ml", "ingredients", False),
+    ("米酒 10 + 25 ml", "stale", True),
+    ("米酒 10 + 25 ml", "steps", True),
+    ("米酒 125g x 4= 500g", "", True),
+    ("米酒 70 × 5 = 350g", "", True),
+    ("米酒 7 * 5 = 35g", "", True),
+    ("米酒 5-10 ml", "", False),
+    ("米酒 5 ml * 份数", "", False),
+])
+def test_audit_calculation_arithmetic(importer, tmp_path, line, override_kind, expected):
+    path = tmp_path / "菜.md"
+    path.write_text(
+        f"# 菜\n## 必备原料\n- 米酒\n## 计算\n- {line}\n## 操作\n- 加米酒\n", encoding="utf-8",
+    )
+    digest = sha256(path.read_bytes()).hexdigest()
+    overrides = {
+        "ingredients": {"sha256": digest, "ingredients": [{"ingredient_name": "米酒", "quantity": "35", "unit": "ml"}]},
+        "stale": {"sha256": "stale", "ingredients": [{"ingredient_name": "米酒", "quantity": "35", "unit": "ml"}]},
+        "steps": {"sha256": digest, "steps": ["加米酒"]},
+    }
+    recipe = importer.parse_recipe_md(str(path), overrides.get(override_kind))
+    details = [detail for code, detail in importer._audit_recipe(recipe) if code == "calc_arithmetic"]
+    assert details == ([f"- {line}"] if expected else [])
+
+
+@pytest.mark.parametrize("opening,closing", [
+    ("**工具**", "**辅料**"),
+    ("工具：", "调味料："),
+    ("**所需工具**", "### 面团"),
+])
+def test_tool_label_section_stops_at_the_next_label_or_heading(importer, opening, closing):
+    text = f"- 中筋面粉\n\n{opening}\n\n- 烤箱\n- 披萨石（没有普通烤盘也可以）\n\n{closing}\n- 盐"
+    rows, groups, unclassified = importer._parse_ingredient_section(text)
+    assert [row["ingredient_name"] for row in rows] == ["中筋面粉", "盐"]
+    assert groups == [["oven"]]
+    assert unclassified == ["披萨石"]

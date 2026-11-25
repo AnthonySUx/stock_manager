@@ -552,6 +552,85 @@
       }
     ]
   },
+  "dishes/meat_dish/台式卤肉饭/台式卤肉饭.md": {
+    "sha256": "b85e44d36a166e933a7293239360ef2565ccd3d1014d44f594c5d90c295c29b8",
+    "reason": "Add the 10 ml of rice wine used in frying to the 25 ml used in braising.",
+    "ingredients": [
+      {
+        "ingredient_name": "红葱头",
+        "quantity": "25",
+        "unit": "g",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "带皮五花肉",
+        "quantity": "500",
+        "unit": "g"
+      },
+      {
+        "ingredient_name": "鸡蛋",
+        "quantity": "4",
+        "unit": "个",
+        "is_optional": true
+      },
+      {
+        "ingredient_name": "食用油",
+        "quantity": "15",
+        "unit": "ml",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "生抽酱油",
+        "quantity": "75",
+        "unit": "ml",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "米酒",
+        "quantity": "35",
+        "unit": "ml"
+      },
+      {
+        "ingredient_name": "大蒜",
+        "quantity": "25",
+        "unit": "g",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "香叶",
+        "quantity": "2",
+        "unit": "片",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "八角",
+        "quantity": "1",
+        "unit": "颗",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "冰糖",
+        "quantity": "20",
+        "unit": "g",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "白胡椒粉",
+        "quantity": "6",
+        "unit": "g",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "五香粉",
+        "quantity": "6",
+        "unit": "g",
+        "is_optional": true
+      },
+      {
+        "ingredient_name": "米饭"
+      }
+    ]
+  },
   "dishes/meat_dish/回锅肉/回锅肉.md": {
     "sha256": "e1639a38cbebb8d56aaa2661c72a3537a79df8c08dcd6b9b08558867e01835b7",
     "reason": "The pork amount spans two serving examples. Keep the original ingredient names and combine the two stated quantities into a range.",
@@ -863,7 +942,7 @@
   },
   "dishes/meat_dish/杀猪菜.md": {
     "sha256": "1c9ca8883715a8a9144f8c7f2d90f4ad71d74a6ba4b462616f145e2dc79d8aee",
-    "reason": "Add the main dish and dipping-sauce amounts of sesame oil. Use the original required-section names for the measured aliases.",
+    "reason": "Add the main dish and dipping-sauce amounts of sesame oil. Use the original required-section names for the measured aliases. Use the five dried chilies for the chili listed in the required ingredients. Keep the dipping chili oil separate.",
     "ingredients": [
       {
         "ingredient_name": "血肠",
@@ -887,7 +966,9 @@
         "is_seasoning": true
       },
       {
-        "ingredient_name": "辣椒"
+        "ingredient_name": "辣椒",
+        "quantity": "5",
+        "unit": "个"
       },
       {
         "ingredient_name": "香叶",
@@ -930,11 +1011,6 @@
         "quantity": "5",
         "unit": "克",
         "is_seasoning": true
-      },
-      {
-        "ingredient_name": "干辣椒",
-        "quantity": "5",
-        "unit": "个"
       },
       {
         "ingredient_name": "盐",
@@ -1158,7 +1234,7 @@
   },
   "dishes/meat_dish/老妈蹄花/老妈蹄花.md": {
     "sha256": "1a65ea8cb8dd1df65acb41aedd557c8155bda16bfe1797d536eda184bec70f00",
-    "reason": "Keep the first 2 g entry for angelica. The ingredient is listed twice in the same group and added once in the steps. Use the original required-section names for the measured aliases.",
+    "reason": "Keep the first 2 g entry for angelica. The ingredient is listed twice in the same group and added once in the steps. Use the original required-section names for the measured aliases. Use the 30 g of sliced ginger for the ginger listed in the required ingredients.",
     "ingredients": [
       {
         "ingredient_name": "猪蹄",
@@ -1173,7 +1249,9 @@
       },
       {
         "ingredient_name": "姜",
-        "is_seasoning": true
+        "is_seasoning": true,
+        "quantity": "30",
+        "unit": "g"
       },
       {
         "ingredient_name": "料酒",
@@ -1236,12 +1314,6 @@
         "ingredient_name": "白芸豆",
         "quantity": "200",
         "unit": "g"
-      },
-      {
-        "ingredient_name": "姜片",
-        "quantity": "30",
-        "unit": "g",
-        "is_seasoning": true
       }
     ]
   },
@@ -2500,6 +2572,45 @@
       }
     ]
   },
+  "dishes/staple/披萨饼皮/披萨饼皮.md": {
+    "sha256": "949a868fc14aad3b2bb471bd66e9d13e8305d042ca4a1caba789fe64799238ab",
+    "reason": "Use the stated results after the equals signs for four pizza crusts. The pizza stone is listed under tools.",
+    "ingredients": [
+      {
+        "ingredient_name": "中筋面粉",
+        "quantity": "500",
+        "unit": "g"
+      },
+      {
+        "ingredient_name": "水",
+        "quantity": "350",
+        "unit": "g"
+      },
+      {
+        "ingredient_name": "安琪干酵母粉",
+        "quantity": "5",
+        "unit": "g"
+      },
+      {
+        "ingredient_name": "食用盐",
+        "quantity": "3",
+        "unit": "g",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "橄榄油",
+        "quantity": "35",
+        "unit": "g",
+        "is_seasoning": true
+      },
+      {
+        "ingredient_name": "白砂糖",
+        "quantity": "3",
+        "unit": "g",
+        "is_seasoning": true
+      }
+    ]
+  },
   "dishes/staple/日式咖喱饭/日式咖喱饭.md": {
     "equipment": [],
     "reason": "Microwaving is an option for reheating refrigerated curry. The source also gives a stovetop method.",
@@ -2613,7 +2724,7 @@
   },
   "dishes/staple/蒸卤面.md": {
     "sha256": "1c4beaea2b4b130ceed9aeb7add645267f080a2b26f5cb137ae8f93bb177ce3a",
-    "reason": "The calculation describes a length of scallion. Keep the name from the ingredient list and leave its amount blank. The optional-ingredient heading is prose. Use the original required-section names for the measured aliases.",
+    "reason": "The calculation describes a length of scallion. Keep the name from the ingredient list and leave its amount blank. The optional-ingredient heading is prose. Use the original required-section names for the measured aliases. Use the 20 g of sliced ginger for the ginger listed in the required ingredients.",
     "ingredients": [
       {
         "ingredient_name": "猪五花肉",
@@ -2638,7 +2749,9 @@
       },
       {
         "ingredient_name": "姜",
-        "is_seasoning": true
+        "is_seasoning": true,
+        "quantity": "20",
+        "unit": "g"
       },
       {
         "ingredient_name": "蒜",
@@ -2692,12 +2805,6 @@
         "ingredient_name": "青椒",
         "quantity": "2",
         "unit": "个"
-      },
-      {
-        "ingredient_name": "姜片",
-        "quantity": "20",
-        "unit": "g",
-        "is_seasoning": true
       }
     ]
   },

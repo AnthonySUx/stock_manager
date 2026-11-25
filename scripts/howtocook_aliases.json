@@ -550,5 +550,133 @@
       "黑椒",
       "黑椒腌料"
     ]
-  ]
+  ],
+  "recipes": {
+    "dishes/aquatic/红烧鱼.md": {
+      "same": [
+        [
+          "姜",
+          "姜丝"
+        ]
+      ]
+    },
+    "dishes/dessert/芋泥雪媚娘/芋泥雪媚娘.md": {
+      "same": [
+        [
+          "糯米粉",
+          "糯米粉 a"
+        ],
+        [
+          "糯米粉",
+          "糯米粉 b"
+        ]
+      ]
+    },
+    "dishes/meat_dish/小米辣炒肉.md": {
+      "different": [
+        [
+          "姜",
+          "姜蒜"
+        ]
+      ]
+    },
+    "dishes/meat_dish/山西过油肉.md": {
+      "same": [
+        [
+          "酱油",
+          "生抽"
+        ]
+      ]
+    },
+    "dishes/meat_dish/杀猪菜.md": {
+      "same": [
+        [
+          "辣椒",
+          "干辣椒"
+        ]
+      ],
+      "different": [
+        [
+          "辣椒",
+          "辣椒油"
+        ]
+      ]
+    },
+    "dishes/meat_dish/枝竹羊腩煲/枝竹羊腩煲.md": {
+      "same": [
+        [
+          "腐竹",
+          "炸腐竹"
+        ]
+      ]
+    },
+    "dishes/meat_dish/老妈蹄花/老妈蹄花.md": {
+      "same": [
+        [
+          "姜",
+          "姜片"
+        ]
+      ]
+    },
+    "dishes/meat_dish/血浆鸭/血浆鸭.md": {
+      "same": [
+        [
+          "酒",
+          "高度白酒"
+        ]
+      ]
+    },
+    "dishes/meat_dish/香辣鸡爪煲/香辣鸡爪煲.md": {
+      "same": [
+        [
+          "姜",
+          "姜末"
+        ]
+      ]
+    },
+    "dishes/meat_dish/黄瓜炒肉.md": {
+      "same": [
+        [
+          "生抽",
+          "酱油"
+        ]
+      ]
+    },
+    "dishes/staple/利提巧卡.md": {
+      "different": [
+        [
+          "柠檬",
+          "柠檬汁"
+        ]
+      ]
+    },
+    "dishes/staple/蒸卤面.md": {
+      "same": [
+        [
+          "姜",
+          "姜片"
+        ]
+      ]
+    },
+    "dishes/staple/蛋包饭.md": {
+      "different": [
+        [
+          "玉米粒",
+          "玉米粒和青豆"
+        ],
+        [
+          "青豆",
+          "玉米粒和青豆"
+        ]
+      ]
+    },
+    "dishes/vegetable_dish/金针菇日本豆腐煲.md": {
+      "same": [
+        [
+          "日本豆腐",
+          "豆腐"
+        ]
+      ]
+    }
+  }
 }
