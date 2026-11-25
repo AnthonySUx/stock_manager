@@ -13,6 +13,11 @@ from stock_manager.api import ai_client
 
 from stock_manager.api.rate_limit import require_ai_quota
 from stock_manager.api.db import get_session
+from stock_manager.api.equipment_services import (
+    get_household_equipment,
+    load_recipe_equipment,
+    missing_equipment,
+)
 from stock_manager.api.errors import APIError
 from stock_manager.api.photo_schemas import RecipeCover
 from stock_manager.api.photo_services import load_covers
@@ -71,6 +76,7 @@ HOWTOCOOK_SOURCE = SourceResponse(
 
 def _recipe_to_summary(
     recipe, favorite_ids: set[int], cooked_ids: set[int], cover: RecipeCover,
+    equipment: list[list[str]], owned: set[str] | None,
 ) -> RecipeSummary:
     return RecipeSummary(
         id=recipe.id, source_type=recipe.source_type, source_name=recipe.source_name,
@@ -78,13 +84,17 @@ def _recipe_to_summary(
         cook_time_minutes=recipe.cook_time_minutes, is_user_created=recipe.is_user_created,
         base_recipe_id=recipe.base_recipe_id, is_favorite=recipe.id in favorite_ids,
         has_been_cooked=recipe.id in cooked_ids,
+        equipment=equipment, missing_equipment=missing_equipment(equipment, owned),
         created_at=recipe.created_at, cover=cover.cover, cover_mode=cover.cover_mode,
     )
 
 
 def _recipe_to_response(recipe, db: Session) -> RecipeResponse:
     cover = load_covers(db, [recipe.id]).get(recipe.id, RecipeCover())
+    equipment = load_recipe_equipment(db, [recipe.id]).get(recipe.id, [])
+    codes, configured = get_household_equipment(db)
     return RecipeResponse(
+        equipment=equipment, missing_equipment=missing_equipment(equipment, set(codes) if configured else None),
         id=recipe.id, source_type=recipe.source_type, source_name=recipe.source_name,
         source_url=recipe.source_url, source_path=recipe.source_path,
         license_name=recipe.license_name, title=recipe.title, category=recipe.category,
@@ -126,17 +136,25 @@ def list_sources():
 def list_recipes(
     source_type: Optional[str] = Query(None, pattern="^(howtocook|user|ai_saved)$"),
     category: Optional[str] = None, query: Optional[str] = None,
-    favorite_only: bool = False, limit: int = Query(20, ge=1, le=100),
+    favorite_only: bool = False, cookable_only: bool = False, limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0), db: Session = Depends(get_session),
 ):
     recipes = get_recipes(db, source_type=source_type, category=category,
-        query=query, favorite_only=favorite_only, limit=limit, offset=offset)
+        query=query, favorite_only=favorite_only, cookable_only=cookable_only, limit=limit, offset=offset)
     # Flags for the whole page in two queries, not two per recipe (#48).
     recipe_ids = [r.id for r in recipes]
     favorite_ids, cooked_ids = get_recipe_flags(db, recipe_ids)
+    if not recipe_ids:
+        return []
     covers = load_covers(db, recipe_ids)
+    equipment = load_recipe_equipment(db, recipe_ids)
+    codes, configured = get_household_equipment(db)
+    owned = set(codes) if configured else None
     empty = RecipeCover()
-    return [_recipe_to_summary(r, favorite_ids, cooked_ids, covers.get(r.id, empty)) for r in recipes]
+    return [
+        _recipe_to_summary(r, favorite_ids, cooked_ids, covers.get(r.id, empty), equipment.get(r.id, []), owned)
+        for r in recipes
+    ]
 
 
 @router.get("/recommendations", response_model=RecipeRecommendationResponse)

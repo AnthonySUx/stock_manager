@@ -39,6 +39,42 @@ Users can favorite/unfavorite recipes. Favorites are prioritized in search resul
 
 ---
 
+## Kitchen equipment
+
+`GET /api/equipment` returns the ordered catalog of special equipment codes.
+Households choose the equipment they own in [Settings](features.md#settings).
+Basic cookware and utensils are assumed to be available. Clay pots are special
+equipment and use the code `clay_pot`.
+
+Recipe details and list entries include `equipment` and `missing_equipment`.
+Each inner list is a group of alternatives. For example,
+`[["oven", "air_fryer"], ["kitchen_scale"]]` requires either an oven or an air fryer,
+plus a kitchen scale. `missing_equipment` contains the groups for which the
+household owns none of the alternatives. Until the household saves its equipment
+settings, `missing_equipment` is always empty and every recipe remains eligible
+for equipment-based filtering.
+
+Once equipment is configured, Today Recommendations excludes recipes with
+missing equipment. The recipe library and search keep those recipes visible
+and show their missing groups. Send `cookable_only=true` to `GET /api/recipes`
+to exclude them from the library or search results. Explore keeps its usual
+results regardless of equipment settings.
+
+Recipe creation and updates accept up to 10 groups of 1–5 codes each. Duplicate
+codes and duplicate groups are collapsed. To keep the current requirements,
+omit `equipment` when updating a recipe. Send `[]` to clear them. Forking a recipe
+copies its groups.
+
+The HowToCook importer reads the ingredient and tool list, cooking steps, and
+title. It keeps required special tools, treats explicit substitutes as
+alternatives, and drops a group if it has a basic cookware alternative. Tips
+and supplemental sections are skipped. Importing again refreshes the
+requirements of the imported recipe.
+
+Expand returns required special equipment in `recipe_draft.equipment`, with
+each recognized code in its own group and the groups in catalog order.
+Unrecognized codes are dropped with a warning.
+
 ## Today Recommendations
 
 `GET /api/recipes/recommendations?scene=<scene>&limit=<n>`
@@ -460,7 +496,8 @@ Response:
     "difficulty": "easy", "servings": "2", "cook_time_minutes": 15, "raw_markdown": null,
     "ingredients": [{"ingredient_name": "番茄", "normalized_name": null, "quantity": "2",
                      "unit": "个", "is_optional": false, "is_seasoning": false, "sort_order": 0}],
-    "steps": [{"step_number": 1, "instruction": "…"}]
+    "steps": [{"step_number": 1, "instruction": "…"}],
+    "equipment": []
   },
   "warnings": [{"code": "draft_ai_generated", "params": {}}]
 }
@@ -478,7 +515,7 @@ to return just the title with no ingredients or steps); the user can retry or cr
 by hand.
 
 To save an Expand draft, send its `draft_hash` as `ai_draft_hash` in `POST /api/recipes`.
-The hash covers every draft field apart from `category`. An unchanged draft saves as
+The hash excludes `category` and `equipment`. An unchanged draft saves as
 `ai_saved` with source name `AI`. Missing or mismatched hashes save as `user`.
 An edit converts an `ai_saved` recipe to `user`. Favoriting preserves its source.
 Earlier saved recipes keep their existing source.

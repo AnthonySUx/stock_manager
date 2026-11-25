@@ -73,6 +73,7 @@ code. Authentication errors retain the `WWW-Authenticate` header.
 | 404 | `favorite_not_found` | Favorite is missing | |
 | 409 | `cook_nothing_consumed` | Every requested deduction failed | `lines` |
 | 422 | `duplicate_item` | Cook request repeats a stock item | `item_id` |
+| 422 | `equipment_unknown` | Settings or recipe request contains unknown equipment codes | `codes` |
 | 429 | `rate_limited` | AI request quota for the token has been reached | `retry_after` (seconds) |
 | 500 | `ai_error` | General AI failure | |
 | 502 | `ai_upstream_error` | AI provider failed or returned unusable output | |

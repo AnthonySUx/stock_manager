@@ -15,6 +15,7 @@ import re
 from dataclasses import dataclass, field as dc_field
 from typing import Optional, get_args
 
+from stock_manager.api.equipment import EQUIPMENT_CODES, catalog_order
 from stock_manager.api.localization import LANGUAGE_NAMES
 from stock_manager.api.quantity import normalize_unit, parse_quantity
 from stock_manager.api.recipe_schemas import CookingMethod, CuisineGroup, Difficulty, RecipeCategory
@@ -428,6 +429,15 @@ def clean_draft(data, idea: dict, locale: str, inventory: Inventory) -> DraftRes
     cook_time = data.get("cook_time_minutes")
     cook_time = positive_int_or_none(cook_time) or positive_int_or_none(idea.get("estimated_time_minutes"))
 
+    equipment_codes = []
+    raw_equipment = data.get("equipment")
+    if isinstance(raw_equipment, list):
+        for code in raw_equipment:
+            if isinstance(code, str) and code in EQUIPMENT_CODES:
+                equipment_codes.append(code)
+            else:
+                warnings.append(warning("field_value_dropped", field="equipment", value=str(code)[:50]))
+
     if fatal:
         return DraftResult(None, [], problems)
     draft = {
@@ -440,6 +450,7 @@ def clean_draft(data, idea: dict, locale: str, inventory: Inventory) -> DraftRes
         "raw_markdown": None,
         "ingredients": ingredients,
         "steps": steps,
+        "equipment": [[code] for code in catalog_order(equipment_codes)],
     }
     return DraftResult(draft, dedupe_warnings(warnings), problems)
 

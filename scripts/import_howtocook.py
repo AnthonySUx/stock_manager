@@ -19,6 +19,7 @@ import os
 import re
 import sys
 from collections import Counter
+from collections.abc import Iterator
 from dataclasses import asdict
 from pathlib import Path
 from urllib.parse import unquote
@@ -27,6 +28,15 @@ from urllib.parse import unquote
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+# The script can be run directly from scripts/, with the repository on sys.path.
+from stock_manager.api.equipment import (  # noqa: E402
+    BASIC_TOOL_TERMS,
+    EQUIPMENT_CODES,
+    EQUIPMENT_TERMS,
+    INGREDIENT_EXCEPTIONS,
+    TOOL_SUFFIXES,
+    catalog_order,
+)
 
 
 def _load_env() -> None:
@@ -99,6 +109,8 @@ def parse_recipe_md(filepath: str) -> dict:
 
     # Parse sections
     ingredients = []
+    equipment = [[code] for code in _special_codes(title)]
+    unclassified_tools = []
     steps = []
     description = ""
     servings = ""
@@ -114,9 +126,12 @@ def parse_recipe_md(filepath: str) -> dict:
             # Flush previous section buffer
             section_text = "\n".join(buffer).strip()
             if current_section == "ingredients":
-                ingredients = _parse_ingredients(section_text)
+                ingredients, tool_groups, unclassified = _parse_ingredient_section(section_text)
+                equipment.extend(tool_groups)
+                unclassified_tools.extend(unclassified)
             elif current_section == "steps":
                 steps = _parse_steps(section_text)
+                equipment.extend(_step_equipment(section_text))
             elif current_section == "compute":
                 if "至少" in section_text or "份" in section_text:
                     m = re.search(r"每份.*?(\d+)\s*[份人]", section_text)
@@ -127,18 +142,14 @@ def parse_recipe_md(filepath: str) -> dict:
             buffer = []
 
             section_title = h_match.group(1).strip()
+            if re.search(r"附加|小贴士|技巧", section_title):
+                continue
             if "原料" in section_title or "工具" in section_title:
                 current_section = "ingredients"
             elif "计算" in section_title:
                 current_section = "compute"
             elif "操作" in section_title or "步骤" in section_title:
                 current_section = "steps"
-            elif "附加" in section_title:
-                current_section = None  # Skip
-            elif "技巧" in section_title:
-                current_section = None  # Skip
-            else:
-                current_section = None
         else:
             if line.strip():
                 buffer.append(line)
@@ -146,9 +157,12 @@ def parse_recipe_md(filepath: str) -> dict:
     # Flush last buffer
     section_text = "\n".join(buffer).strip()
     if current_section == "ingredients":
-        ingredients = _parse_ingredients(section_text)
+        ingredients, tool_groups, unclassified = _parse_ingredient_section(section_text)
+        equipment.extend(tool_groups)
+        unclassified_tools.extend(unclassified)
     elif current_section == "steps":
         steps = _parse_steps(section_text)
+        equipment.extend(_step_equipment(section_text))
 
     return {
         "title": title,
@@ -159,6 +173,8 @@ def parse_recipe_md(filepath: str) -> dict:
         "cook_time_minutes": cook_time,
         "ingredients": ingredients,
         "steps": steps,
+        "equipment": _merge_equipment(equipment),
+        "unclassified_tools": unclassified_tools,
         "raw_markdown": content,
     }
 
@@ -220,36 +236,273 @@ def _clean_line(line: str) -> str:
     return line if re.search(r"\w", line) else ""
 
 
-def _parse_ingredients(text: str) -> list[dict]:
-    """Parse ingredient section into structured list."""
-    results = []
-    seen: set[str] = set()
-    for line in text.split("\n"):
-        line = _clean_line(line)
-        if not line:
+_SPECIAL_CODES = {
+    term: code for code, terms in EQUIPMENT_TERMS.items() for term in terms
+}
+_SPECIAL_RE = re.compile("|".join(sorted(_SPECIAL_CODES, key=len, reverse=True)))
+_MARKDOWN_EMPHASIS = str.maketrans("", "", "`*")
+_SENTENCE_PUNCTUATION_RE = re.compile(r"[。！!；;]")
+_INGREDIENT_CATEGORIES = frozenset({"调味料", "主料", "辅料", "配料", "原料", "材料", "其他调味料"})
+_CATEGORY_PROSE_RE = re.compile(r"[。！!；;]|随便|建议|可以|例如|即可")
+_INGREDIENT_PROSE_PREFIXES = ("注", "注意", "建议", "原则", "说明", "提示")
+_COLON_RE = re.compile(r"[：:]")
+_LABEL_RE = re.compile(r"^(需要|必备|工具|可选)\s*[：:]?\s*")
+_SIZE_RE = re.compile(
+    r"^\d+(?:\.\d+)?\s*(?:厘米|公分|毫米|cm|mm|°C|℃|个|把|口|只|件|升|克|kg|ml|g)?"
+    r"(?:以上|以下|左右)?(?:的)?\s*", re.IGNORECASE,
+)
+_HEAD_SEPARATOR_RE = re.compile(r"\s|[（(，,、/]|或者?")
+_ALTERNATIVE_RE = re.compile(r"或者?|/")
+_NOTE_ALTERNATIVE_RE = re.compile(r"可替代|代替|即可|也行|也可以|没有的话")
+_STEP_ALTERNATIVE_RE = re.compile(r"或|也可以|可以用|如果没有|没有的话|代替|替代|可选")
+_INGREDIENT_QUANTITY_UNITS = (
+    r"克|毫升|升|斤|两|kg|g|ml|l|勺|汤匙|茶匙|根|条|片|个|只|颗|包|袋|把|捆|块|份|碗|盒|瓶|罐|扎|打"
+)
+_INGREDIENT_QUANTITY_RE = re.compile(
+    rf"([\d.]+)\s*({_INGREDIENT_QUANTITY_UNITS})"
+    rf"(?:(?:\s*\+\s*\d+(?:\.\d+)?\s*(?:{_INGREDIENT_QUANTITY_UNITS}))+"
+    r"(?=\s*(?:[（(]|$)))?"
+)
+
+
+def _strip_ingredient_prefix(segment: str) -> tuple[str, bool]:
+    """Strip list numbering and labels while tracking optional ingredients."""
+    segment = re.sub(r"^(?:[①-⑩]|\d+[.)、](?!\d))\s*", "", segment.strip())
+    optional = False
+    while label := _LABEL_RE.match(segment):
+        optional |= label[1] == "可选"
+        segment = segment[label.end():]
+    return segment, optional
+
+
+def _tool_subject(segment: str) -> tuple[str, bool]:
+    segment, optional = _strip_ingredient_prefix(segment.translate(_MARKDOWN_EMPHASIS))
+    subject = _COLON_RE.split(segment, maxsplit=1)[0]
+    subject = _SIZE_RE.sub("", subject)
+    subject = _HEAD_SEPARATOR_RE.split(subject, maxsplit=1)[0]
+    return re.sub(r"一个$|一把$|一口$|若干$", "", subject), optional
+
+
+def _special_codes(text: str) -> list[str]:
+    return list(dict.fromkeys(_SPECIAL_CODES[match[0]] for match in _SPECIAL_RE.finditer(text)))
+
+
+def _bracket_parts(segment: str) -> tuple[str, list[str]]:
+    """Split text and notes, including a note with an unclosed parenthesis."""
+    body, notes, note = [], [], []
+    depth = 0
+    for char in segment:
+        if char in "(（":
+            depth += 1
+        elif char in ")）" and depth:
+            depth -= 1
+            if not depth:
+                notes.append("".join(note))
+                note.clear()
+        elif depth:
+            note.append(char)
+        else:
+            body.append(char)
+    if note:
+        notes.append("".join(note))
+    return "".join(body), notes
+
+
+def _split_outside_notes(line: str, separators: str) -> list[str]:
+    """Split at separators outside parenthetical notes."""
+    depth = start = 0
+    segments = []
+    for index, char in enumerate(line):
+        if char in "(（":
+            depth += 1
+        elif char in ")）" and depth:
+            depth -= 1
+        elif char in separators and not depth:
+            segments.append(line[start:index].strip())
+            start = index + 1
+    segments.append(line[start:].strip())
+    return segments
+
+
+def _ingredient_segments(line: str) -> list[str]:
+    """Split top-level plus signs unless a segment starts with a quantity."""
+    if "+" not in line:
+        return [line]
+    segments = _split_outside_notes(line, "+")
+    if any(segment and segment[0].isdigit() for segment in segments):
+        return [line]
+    return segments
+
+
+def _is_explanatory_line(line: str) -> bool:
+    body, _ = _bracket_parts(line)
+    if _SENTENCE_PUNCTUATION_RE.search(body):
+        return True
+    parts = re.split(r"[，,]", body)
+    return len(parts) > 1 and len(body.strip()) > 30 and any(len(part.strip()) > 10 for part in parts)
+
+
+def _ingredient_text(segment: str, explanatory: bool) -> tuple[str, str | None, bool] | None:
+    """Return ingredient text and an optional name override, skipping headings and prose."""
+    plain = segment.translate(_MARKDOWN_EMPHASIS)
+    stripped, _ = _strip_ingredient_prefix(plain)
+    body, _ = _bracket_parts(stripped)
+    body = body.strip()
+    if (not body and _bracket_parts(plain)[0].strip()) or body.rstrip("：:").strip() == "原料":
+        return None
+
+    ingredient, _ = _strip_ingredient_prefix(segment)
+    parts = _COLON_RE.split(body, maxsplit=1)
+    if len(parts) == 2 and (name := parts[0].strip()):
+        if _COLON_RE.split(stripped, maxsplit=1)[1].strip() == "可选":
+            return ingredient, name, True
+        if len(name) <= 8:
+            description = parts[1]
+            if "、" not in description or _SENTENCE_PUNCTUATION_RE.search(description):
+                return ingredient, name, False
+            return ingredient, None, False
+    return (ingredient, None, False) if ingredient and not explanatory else None
+
+
+def _basic_note_alternative(note: str) -> bool:
+    # Remove appliance names before testing standalone basic-tool mentions.
+    # In particular, the 锅 in 电饭锅 or 锅胆 is not an alternative.
+    text = _SPECIAL_RE.sub(" ", note)
+    if any(len(term) > 1 and term in text for term in BASIC_TOOL_TERMS):
+        return True
+    for phrase in re.split(r"[，,。；;、\s]|可替代|代替|即可|也行|也可以|没有的话", text):
+        phrase = re.sub(r"^(?:可以用|改用|就用|用)", "", phrase)
+        subject, _ = _tool_subject(phrase)
+        if subject in BASIC_TOOL_TERMS:
+            return True
+    return False
+
+
+def _tool_groups(segment: str, optional: bool) -> list[list[str]]:
+    if optional or "可选" in segment:
+        return []
+    body, notes = _bracket_parts(segment)
+    codes = _special_codes(body)
+    if not codes:
+        return []
+    alternative = bool(_ALTERNATIVE_RE.search(body))
+    if alternative and any(
+        _tool_subject(part)[0] in BASIC_TOOL_TERMS for part in _ALTERNATIVE_RE.split(body)
+    ):
+        return []
+    for note in notes:
+        if _NOTE_ALTERNATIVE_RE.search(note):
+            if _basic_note_alternative(note):
+                return []
+            note_codes = _special_codes(note)
+            alternative |= bool(note_codes)
+            codes.extend(note_codes)
+    return [catalog_order(codes)] if alternative else [[code] for code in codes]
+
+
+def _lines_outside_notes(text: str) -> Iterator[str]:
+    """Skip tips subheadings and everything nested under them."""
+    notes_level = 0
+    for line in text.splitlines():
+        heading = re.match(r"^(#{3,6})\s+(.+)", line.strip())
+        if heading:
+            level = len(heading[1])
+            if not notes_level or level <= notes_level:
+                notes_level = level if re.search(r"附加|小贴士|技巧", heading[2]) else 0
+        elif not notes_level:
+            yield line
+
+
+def _step_equipment(text: str) -> list[list[str]]:
+    groups = []
+    for line in _lines_outside_notes(text):
+        step = _clean_line(line)
+        if re.match(r"^(?:小贴士|附加内容)\s*[：:]", step):
             continue
-        # Skip tool lines
-        if any(kw in line for kw in ["锅", "刀", "勺", "碗", "板", "炉", "烤箱", "蒸"]):
+        body, _ = _bracket_parts(step)
+        for sentence in re.split(r"[。！？!?；;]", body):
+            if not _STEP_ALTERNATIVE_RE.search(sentence):
+                groups.extend([code] for code in _special_codes(sentence))
+    return groups
+
+
+def _merge_equipment(groups: list[list[str]]) -> list[list[str]]:
+    required = {group[0] for group in groups if len(group) == 1}
+    return [
+        list(group) for group in dict.fromkeys(map(tuple, groups))
+        if len(group) == 1 or required.isdisjoint(group)
+    ]
+
+
+def _parse_ingredients(text: str) -> list[dict]:
+    """Parse ingredient rows without the equipment metadata."""
+    return _parse_ingredient_section(text)[0]
+
+
+def _parse_ingredient_section(text: str) -> tuple[list[dict], list[list[str]], list[str]]:
+    """Split ingredients and equipment, then parse ingredients as before."""
+    ingredients, groups, unclassified = [], [], []
+    for raw_line in _lines_outside_notes(text):
+        line = _clean_line(raw_line)
+        plain = line.translate(_MARKDOWN_EMPHASIS).strip()
+        content, line_optional = _strip_ingredient_prefix(plain)
+        if not plain or plain.endswith(("：", ":")) or content.startswith(_INGREDIENT_PROSE_PREFIXES):
             continue
 
+        category, *description = _COLON_RE.split(content, maxsplit=1)
+        category = category.strip()
+        if description and category == "其他" and "随便" in description[0]:
+            continue
+        category_list = bool(description and (category in _INGREDIENT_CATEGORIES or category.endswith("材料")))
+        if category_list:
+            if _CATEGORY_PROSE_RE.search(description[0]):
+                continue
+            segments = [
+                segment
+                for item in _split_outside_notes(description[0], "、，,")
+                for segment in _ingredient_segments(item)
+            ]
+            explanatory = False
+        else:
+            line_optional = False
+            segments = _ingredient_segments(line)
+            explanatory = _is_explanatory_line(line)
+
+        for segment in segments:
+            if not segment:
+                continue
+            subject, optional = _tool_subject(segment)
+            listed_tool = subject in _SPECIAL_CODES or subject in BASIC_TOOL_TERMS
+            if listed_tool or (
+                subject.endswith(TOOL_SUFFIXES) and subject not in INGREDIENT_EXCEPTIONS
+            ):
+                if not listed_tool:
+                    unclassified.append(subject)
+                groups.extend(_tool_groups(segment, optional or line_optional))
+            elif ingredient := _ingredient_text(segment, explanatory):
+                ingredient_line, name_override, optional_suffix = ingredient
+                ingredients.append((ingredient_line, name_override, optional or line_optional or optional_suffix))
+
+    results = []
+    seen: set[str] = set()
+    for line, name_override, optional in ingredients:
         is_seasoning = any(kw in line for kw in [
             "盐", "糖", "酱油", "醋", "料酒", "油", "胡椒", "花椒",
             "八角", "桂皮", "香叶", "生抽", "老抽", "蚝油", "味精",
             "鸡精", "淀粉", "葱", "姜", "蒜",
         ])
 
-        # Try to extract quantity
-        qty_match = re.search(
-            r"([\d.]+)\s*(克|毫升|升|斤|两|kg|g|ml|l|勺|汤匙|茶匙|根|条|片|个|只|颗|包|袋|把|捆|块|份|碗|盒|瓶|罐|扎|打)",
-            line,
-        )
-        # Remove "500克" from the name; store 500 and 克 separately (#47).
-        name = line
-        if qty_match:
-            name = name.replace(qty_match.group(0), "", 1)
-        name = _strip_bracket_notes(name)
-        # Clean up leading punctuation/spaces
-        name = re.sub(r"^[\s,，、；;]+", "", name) or line
+        # Store the first quantity as before. Strip any additional quantities
+        # connected by plus signs so they do not become part of the name.
+        qty_match = _INGREDIENT_QUANTITY_RE.search(line)
+        name = name_override
+        if name is None:
+            name = line
+            if qty_match:
+                name = name.replace(qty_match.group(0), "", 1)
+            name = _strip_bracket_notes(name)
+            # Clean up leading punctuation and spaces.
+            name = re.sub(r"^[\s,，、；;]+", "", name) or line
 
         # Some recipes list an ingredient twice (口水鸡: 花椒); keep the first.
         if name in seen:
@@ -261,11 +514,11 @@ def _parse_ingredients(text: str) -> list[dict]:
             "quantity": qty_match.group(1) if qty_match else None,
             "unit": qty_match.group(2) if qty_match else None,
             "is_seasoning": is_seasoning,
-            "is_optional": False,
+            "is_optional": optional,
             "sort_order": len(results),
         })
 
-    return results
+    return results, _merge_equipment(groups), unclassified
 
 
 def _parse_steps(text: str) -> list[dict]:
@@ -434,6 +687,7 @@ def import_howtocook(
     print(f"Found {len(md_files)} recipe files")
 
     from stock_manager.api import media
+    from stock_manager.api.equipment_services import replace_recipe_equipment
     from stock_manager.api.models import Recipe, RecipeIngredient, RecipeStep
 
     if with_photos or prune_non_recipes:
@@ -458,6 +712,9 @@ def import_howtocook(
     titles_synced_count = 0
 
     photo_stats = Counter()
+    equipment_counts = Counter()
+    recipes_with_equipment = group_count = 0
+    unclassified_tools = []
     for md_file in sorted(md_files):
         rel_path = str(md_file.relative_to(howtocook_dir))
         with media.file_transaction(enabled=with_photos):
@@ -510,6 +767,7 @@ def import_howtocook(
                     if steps_changed:
                         messages.append(f"  ↻ {rel_path}: steps re-parsed")
 
+                replace_recipe_equipment(session, recipe.id, recipe_data["equipment"])
                 if with_photos:
                     stats = _sync_photos(
                         session, recipe, recipe_data, md_file, root, stored_hashes, old_hashes,
@@ -530,6 +788,11 @@ def import_howtocook(
                     media.delete_files_if_unused(session, sha256)
                 if old_hashes:
                     session.rollback()
+        groups = recipe_data["equipment"]
+        recipes_with_equipment += bool(groups)
+        group_count += len(groups)
+        equipment_counts.update(code for group in groups for code in group)
+        unclassified_tools.extend((rel_path, term) for term in recipe_data["unclassified_tools"])
         if new_recipe:
             imported_count += 1
             print(f"  ✓ {rel_path} → {recipe_data['title']}")
@@ -560,6 +823,13 @@ def import_howtocook(
         print("photos: " + ", ".join(f"{key} {photo_stats[key]}" for key in _PHOTO_STATS))
         if photo_stats["missing"]:
             print(f"Images are missing. Run: git -C {howtocook_path} sparse-checkout disable")
+    per_code = ", ".join(f"{code} {equipment_counts[code]}" for code in EQUIPMENT_CODES)
+    print(
+        f"equipment: recipes {recipes_with_equipment}, groups {group_count}; "
+        f"per code: {per_code}; unclassified tool lines {len(unclassified_tools)}"
+    )
+    for path, term in unclassified_tools:
+        print(f"  ? {path}: {term}")
     return result
 
 
@@ -628,9 +898,11 @@ def _handle_non_recipe_rows(session, prune: bool) -> tuple[int, int]:
         return len(rows), 0
 
     from stock_manager.api import media
+    from stock_manager.api.equipment_services import delete_recipe_equipment
     from stock_manager.api.photo_services import delete_recipe_photos
 
     ids = [r.id for r in rows]
+    delete_recipe_equipment(session, ids)
     hashes = delete_recipe_photos(session, ids)
     session.query(RecipeFavorite).filter(RecipeFavorite.recipe_id.in_(ids)).delete(synchronize_session=False)
     session.query(RecipeUsageHistory).filter(RecipeUsageHistory.recipe_id.in_(ids)).delete(synchronize_session=False)

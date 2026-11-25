@@ -303,6 +303,7 @@ def test_get_recipes_order_matches_old_version(db_session, recipe_library, query
 def test_recipe_list_queries_do_not_grow_with_page_size(
     client, db_session, recipe_library, tmp_path, monkeypatch,
 ):
+    assert client.patch("/api/settings", json={"kitchen_equipment": ["oven"]}).status_code == 200
     counts = []
     for limit in (2, 20):
         monkeypatch.delenv("MEDIA_DIR", raising=False)
@@ -315,6 +316,10 @@ def test_recipe_list_queries_do_not_grow_with_page_size(
             response = client.get(f"/api/recipes?limit={limit}")
         assert len(response.json()) == limit
         assert len(_selects_from(statements, "recipe_photos")) == 1
+        assert len(_selects_from(statements, "recipe_equipment")) == 1
+        assert sum("join household_equipment" in sql for sql in statements) == 1
+        # Before equipment: one page query and two flag queries without media.
+        assert len(baseline) <= 3 + 2
         assert len(statements) == len(baseline) + 1
         counts.append(len(statements))
     assert counts[0] == counts[1]

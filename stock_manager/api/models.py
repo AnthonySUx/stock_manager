@@ -224,6 +224,28 @@ class Recipe(Base):
     base_recipe = relationship("Recipe", remote_side="Recipe.id", backref="forks")
 
 
+class HouseholdEquipment(Base):
+    __tablename__ = "household_equipment"
+
+    code = Column(String(32), primary_key=True)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+
+
+class RecipeEquipment(Base):
+    __tablename__ = "recipe_equipment"
+    __table_args__ = (
+        UniqueConstraint(
+            "recipe_id", "group_index", "equipment_code", name="uq_recipe_equipment_group_code",
+        ),
+        Index("ix_recipe_equipment_recipe_id", "recipe_id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    recipe_id = Column(Integer, ForeignKey("recipes.id"), nullable=False)
+    group_index = Column(Integer, nullable=False)
+    equipment_code = Column(String(32), nullable=False)
+
+
 class RecipeIngredient(Base):
     """Ingredient entry for a recipe."""
     __tablename__ = "recipe_ingredients"

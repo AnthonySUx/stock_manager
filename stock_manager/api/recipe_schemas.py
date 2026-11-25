@@ -1,8 +1,10 @@
 """Pydantic schemas for recipe features."""
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import AfterValidator, BaseModel, BeforeValidator, Field, field_validator, model_validator
+
+from stock_manager.api.equipment import EquipmentCode, catalog_order, validate_equipment_codes
 
 from stock_manager.api.photo_schemas import RecipeCover
 from stock_manager.api.schemas import ItemStatus, PositiveStockQuantity, RestockItemResponse
@@ -53,6 +55,28 @@ class StepSchema(BaseModel):
     instruction: str
 
 
+def _check_equipment_codes(value):
+    if isinstance(value, list):
+        validate_equipment_codes(
+            code for group in value if isinstance(group, list) for code in group if isinstance(code, str)
+        )
+    return value
+
+
+def _normalize_equipment(groups: list[list[EquipmentCode]]) -> list[list[EquipmentCode]]:
+    ordered_groups = dict.fromkeys(tuple(catalog_order(group)) for group in groups)
+    return [[EquipmentCode(code) for code in group] for group in ordered_groups]
+
+
+EquipmentGroup = Annotated[list[EquipmentCode], Field(min_length=1, max_length=5)]
+RecipeEquipmentInput = Annotated[
+    list[EquipmentGroup],
+    Field(max_length=10),
+    BeforeValidator(_check_equipment_codes),
+    AfterValidator(_normalize_equipment),
+]
+
+
 class RecipeCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
     # Required for new recipes so Today Recommendations can place them in a scene.
@@ -64,6 +88,8 @@ class RecipeCreate(BaseModel):
     raw_markdown: Optional[str] = None
     ingredients: list[IngredientSchema] = []
     steps: list[StepSchema] = []
+
+    equipment: RecipeEquipmentInput = []
 
     ai_draft_hash: Optional[str] = Field(None, pattern="^[0-9a-f]{64}$")
 
@@ -79,7 +105,9 @@ class RecipeUpdate(BaseModel):
     ingredients: Optional[list[IngredientSchema]] = None
     steps: Optional[list[StepSchema]] = None
 
-    @field_validator("title", "category", mode="before")
+    equipment: RecipeEquipmentInput | None = None
+
+    @field_validator("title", "category", "equipment", mode="before")
     @classmethod
     def reject_null(cls, value, info):
         """Omit a field to keep it; null would clear a required value."""
@@ -108,6 +136,8 @@ class RecipeResponse(RecipeCover):
     has_been_cooked: bool = False
     ingredients: list[IngredientSchema] = []
     steps: list[StepSchema] = []
+    equipment: list[list[str]] = []
+    missing_equipment: list[list[str]] = []
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -126,6 +156,8 @@ class RecipeSummary(RecipeCover):
     base_recipe_id: Optional[int] = None
     is_favorite: bool = False
     has_been_cooked: bool = False
+    equipment: list[list[str]] = []
+    missing_equipment: list[list[str]] = []
     created_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
@@ -342,6 +374,7 @@ class RecipeDraft(BaseModel):
     raw_markdown: Optional[str] = None
     ingredients: list[IngredientSchema] = []
     steps: list[StepSchema] = []
+    equipment: list[list[str]] = []
 
 
 class ExpandResponse(BaseModel):

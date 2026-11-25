@@ -32,7 +32,10 @@ def _save(client, expanded, **changes):
 
 
 def test_expand_hashes_canonical_content_and_unchanged_save_is_ai_saved(client, expanded_draft):
-    content = {key: value for key, value in expanded_draft["recipe_draft"].items() if key != "category"}
+    content = {
+        key: value for key, value in expanded_draft["recipe_draft"].items()
+        if key not in {"category", "equipment"}
+    }
     canonical = json.dumps(content, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     assert expanded_draft["draft_hash"] == sha256(canonical.encode("utf-8")).hexdigest()
 
@@ -120,3 +123,58 @@ def test_ai_saved_can_be_favorited_forked_in_place_and_deleted(client, expanded_
     assert (fork.json()["id"], fork.json()["source_type"]) == (recipe["id"], "ai_saved")
     assert client.delete(path).status_code == 200
     assert client.get(path).status_code == 404
+
+
+@pytest.mark.parametrize(("equipment", "expected", "warning_values"), [
+    (["steamer", "oven", "steamer"], [["oven"], ["steamer"]], []),
+    (["oven", "x" * 80, 123], [["oven"]], ["x" * 50, "123"]),
+    ("oven", [], []),
+])
+def test_expand_equipment_and_warnings(client, fake_ai, equipment, expected, warning_values):
+    from stock_manager.api.equipment import EQUIPMENT_CODES
+
+    fake_ai.reply = json.dumps({
+        "title": "Soup", "category": "soup",
+        "steps": [{"instruction": "Cook the soup."}], "equipment": equipment,
+    })
+    response = client.post("/api/recipes/explore/expand", json={
+        "idea": {"title": "Soup"}, "locale": "en",
+    })
+
+    assert response.status_code == 200, response.text
+    expanded = response.json()
+    assert expanded["recipe_draft"]["equipment"] == expected
+    assert [w for w in expanded["warnings"] if w["code"] == "field_value_dropped"] == [
+        {"code": "field_value_dropped", "params": {"field": "equipment", "value": value}}
+        for value in warning_values
+    ]
+    assert len(fake_ai.requests) == 1
+    prompt = fake_ai.system_prompts[0]
+    assert ", ".join(EQUIPMENT_CODES) in prompt
+    example = prompt.split("```json", 1)[1].split("```", 1)[0]
+    assert json.loads(example)["equipment"] == ["oven"]
+
+
+def test_equipment_does_not_affect_draft_identity(client, expanded_draft):
+    from stock_manager.api.recipe_schemas import RecipeDraft
+    from stock_manager.api.recipe_services import recipe_draft_hash
+
+    draft = RecipeDraft.model_validate(expanded_draft["recipe_draft"])
+    equipped = draft.model_copy(update={"equipment": [["oven"]]})
+    assert recipe_draft_hash(equipped) == recipe_draft_hash(draft) == expanded_draft["draft_hash"]
+    assert _save(client, expanded_draft, equipment=equipped.equipment)["source_type"] == "ai_saved"
+    payload = equipped.model_dump(exclude={"equipment"})
+    response = client.post("/api/recipes", json={**payload, "ai_draft_hash": recipe_draft_hash(equipped)})
+    assert response.status_code == 201, response.text
+    assert response.json()["source_type"] == "ai_saved"
+
+
+def test_dropped_equipment_does_not_create_draft_problem():
+    from stock_manager.api.ai_output import Inventory, clean_draft
+
+    result = clean_draft(
+        {"title": "Soup", "steps": ["Cook the soup."], "equipment": ["unknown"]},
+        {}, "en", Inventory([]),
+    )
+    assert result.draft["equipment"] == []
+    assert result.problems == []

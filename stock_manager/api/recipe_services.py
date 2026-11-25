@@ -13,6 +13,12 @@ from sqlalchemy.orm import Session
 from stock_manager.api import media
 from stock_manager.api.photo_services import delete_recipe_photos, move_orphaned_step_photos
 from stock_manager.api.category_services import RECIPE_USAGE_NEVER
+from stock_manager.api.equipment_services import (
+    delete_recipe_equipment,
+    load_recipe_equipment,
+    meets_equipment_requirements,
+    replace_recipe_equipment,
+)
 from stock_manager.api.errors import APIError
 from stock_manager.api.models import (
     Recipe,
@@ -179,6 +185,7 @@ def get_recipes(
     category: Optional[str] = None,
     query: Optional[str] = None,
     favorite_only: bool = False,
+    cookable_only: bool = False,
     limit: int = 20,
     offset: int = 0,
 ) -> list[Recipe]:
@@ -211,6 +218,8 @@ def get_recipes(
         )
     if favorite_only:
         q = q.filter(is_fav)
+    if cookable_only:
+        q = q.filter(meets_equipment_requirements())
 
     if not query:
         q = q.order_by(
@@ -276,8 +285,12 @@ def get_recipe(db: Session, recipe_id: int) -> Optional[Recipe]:
 
 
 def recipe_draft_hash(data: RecipeDraft | RecipeCreate) -> str:
-    """Hash the full draft content apart from the user-selected category."""
-    fields = RecipeDraft.model_fields.keys() - {"category"}
+    """Hash draft content excluding category and equipment.
+
+    Older iOS clients omit equipment when saving, so its omission must
+    preserve the AI draft identity.
+    """
+    fields = RecipeDraft.model_fields.keys() - {"category", "equipment"}
     content = data.model_dump(mode="json", include=fields)
     canonical = json.dumps(content, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     return sha256(canonical.encode("utf-8")).hexdigest()
@@ -324,6 +337,8 @@ def create_recipe(db: Session, data: RecipeCreate, source_type: str = "user") ->
             instruction=step.instruction,
         ))
 
+    if data.equipment:
+        replace_recipe_equipment(db, recipe.id, data.equipment)
     db.commit()
     db.refresh(recipe)
     return recipe
@@ -338,7 +353,7 @@ def update_recipe(db: Session, recipe_id: int, data: RecipeUpdate) -> Optional[R
     if not is_user_editable(recipe):
         return None  # cannot edit HowToCook recipes directly
 
-    update_data = data.model_dump(exclude_unset=True, exclude={"ingredients", "steps"})
+    update_data = data.model_dump(exclude_unset=True, exclude={"ingredients", "steps", "equipment"})
     for key, value in update_data.items():
         setattr(recipe, key, value)
 
@@ -367,8 +382,11 @@ def update_recipe(db: Session, recipe_id: int, data: RecipeUpdate) -> Optional[R
                 instruction=step.instruction,
             ))
 
+    if data.equipment is not None:
+        replace_recipe_equipment(db, recipe_id, data.equipment)
+
     if recipe.source_type == "ai_saved" and (
-        update_data or data.ingredients is not None or data.steps is not None
+        update_data or data.ingredients is not None or data.steps is not None or data.equipment is not None
     ):
         recipe.source_type = "user"
         recipe.source_name = "User"
@@ -390,6 +408,7 @@ def delete_recipe(db: Session, recipe_id: int) -> bool:
     # Remove rows that reference this recipe so the delete does not violate
     # foreign keys (issue #43). Forks are kept: the `forks` backref sets their
     # base_recipe_id to NULL when the recipe is deleted.
+    delete_recipe_equipment(db, [recipe_id])
     hashes = delete_recipe_photos(db, [recipe_id])
     db.query(RecipeFavorite).filter(RecipeFavorite.recipe_id == recipe_id).delete(
         synchronize_session=False
@@ -449,6 +468,10 @@ def fork_recipe(db: Session, recipe_id: int) -> Optional[Recipe]:
             step_number=step.step_number,
             instruction=step.instruction,
         ))
+
+    equipment = load_recipe_equipment(db, [original.id]).get(original.id, [])
+    if equipment:
+        replace_recipe_equipment(db, recipe.id, equipment)
 
     photos = db.query(RecipePhoto).filter(
         RecipePhoto.recipe_id == original.id, RecipePhoto.hidden.is_(False),
@@ -679,7 +702,9 @@ def get_recommendations(
     favorites, and recipes with at most one required ingredient. Favorites can
     overcome missing ingredients with their bonus. Other unmatched recipes
     with two or more required ingredients always score below zero. Revisit
-    these candidate rules when changing the scoring rules.
+    these candidate rules when changing the scoring rules. Once household
+    equipment is configured, SQL also excludes any recipe with an equipment
+    group for which no option is owned.
 
     Scoring:
     - Matched ingredient: +10 (conditional category: +6)
@@ -726,6 +751,7 @@ def get_recommendations(
     recipes = [
         recipe for recipe in db.query(Recipe)
         .join(candidates, candidates.c.id == Recipe.id)
+        .filter(meets_equipment_requirements())
         .order_by(Recipe.id)
         if is_recommendable(recipe) and recipe_matches_scene(recipe, scene)
     ]
