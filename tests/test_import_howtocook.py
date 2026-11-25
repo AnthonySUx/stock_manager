@@ -914,7 +914,8 @@ def test_equipment_step_alternatives_are_local(importer, line, expected):
     ("calc_unparsed", ["盐"], ["装盘"], {"calc_unparsed": ["2g"]}),
     ("override_stale", ["盐"], ["装盘"], {"override_stale": True}),
 ])
-def test_audit_error_codes(importer, code, ingredients, steps, extra):
+def test_audit_error_codes(importer, code, ingredients, steps, extra, reviewed_seasonings):
+    reviewed_seasonings(not_seasonings=sorted(set(ingredients)))
     recipe = {
         "ingredients": [{"ingredient_name": name, "quantity": None} for name in ingredients],
         "steps": [{"step_number": i, "instruction": text} for i, text in enumerate(steps, start=1)],
@@ -926,7 +927,10 @@ def test_audit_error_codes(importer, code, ingredients, steps, extra):
     assert errors == [code]
 
 
-def test_audit_cli_report_is_offline_and_fails_on_errors(importer, tmp_path, monkeypatch, capsys):
+def test_audit_cli_report_is_offline_and_fails_on_errors(
+    importer, tmp_path, monkeypatch, capsys, reviewed_seasonings,
+):
+    reviewed_seasonings(seasonings=["盐"])
     recipe = tmp_path / "dishes/soup/test.md"
     recipe.parent.mkdir(parents=True)
     recipe.write_text(
@@ -949,6 +953,7 @@ def test_audit_cli_report_is_offline_and_fails_on_errors(importer, tmp_path, mon
     assert "calc_unparsed: 1" in output
     assert "calc_unparsed  dishes/soup/test.md  2g" in output
     review = report.read_text(encoding="utf-8")
+    assert "## Seasoning list\n\n- Seasonings: 1\n- Non-seasonings: 0" in review
     assert "## 测试汤" in review and "dishes/soup/test.md" in review
     assert "| 盐 |  |  | Yes | No |" in review
     assert "1. 放入烤箱" in review and "- oven" in review
@@ -957,8 +962,9 @@ def test_audit_cli_report_is_offline_and_fails_on_errors(importer, tmp_path, mon
 
 
 def test_recipe_override_applies_to_import_and_audit(
-    importer, tmp_path, db, monkeypatch, capsys, reviewed_aliases,
+    importer, tmp_path, db, monkeypatch, capsys, reviewed_aliases, reviewed_seasonings,
 ):
+    reviewed_seasonings(seasonings=["糖"])
     root = tmp_path / "source"
     source = root / "dishes" / "soup" / "test.md"
     source.parent.mkdir(parents=True)
@@ -982,7 +988,7 @@ def test_recipe_override_applies_to_import_and_audit(
     report = tmp_path / "review.md"
     assert importer.audit_howtocook(root, report) == 0
     review = report.read_text(encoding="utf-8")
-    assert "## 新标题" in review and "| 糖 | 2 | 克 | No | No |" in review
+    assert "## 新标题" in review and "| 糖 | 2 | 克 | Yes | No |" in review
     assert "1. 锅中加糖" in review
     assert "`equipment_mentioned_not_required`: oven" in review
 
@@ -991,9 +997,11 @@ def test_recipe_override_applies_to_import_and_audit(
     loaded = session.query(Recipe).one()
     assert loaded.title == "新标题"
     assert [(row.ingredient_name, row.normalized_name) for row in loaded.ingredients] == [("糖", "白糖")]
+    assert loaded.ingredients[0].is_seasoning is True
     assert [step.instruction for step in loaded.steps] == ["锅中加糖"]
 
     source.write_text(source.read_text(encoding="utf-8") + "\n## 附加内容\n已修改\n", encoding="utf-8")
+    reviewed_seasonings(seasonings=["盐"])
     assert importer.audit_howtocook(root, report) == 1
     assert "override_stale  dishes/soup/test.md" in capsys.readouterr().out
     assert "## 原标题" in report.read_text(encoding="utf-8")
@@ -1197,8 +1205,9 @@ def test_same_aliases_merge_transitively(importer, tmp_path, reviewed_aliases, w
     ("- 姜 2g\n- 姜沫 3g", {"姜", "姜沫"}),
 ])
 def test_audit_demands_review_of_synonyms_and_single_character_names(
-    importer, tmp_path, reviewed_aliases, calculation, expected_pair,
+    importer, tmp_path, reviewed_aliases, calculation, expected_pair, reviewed_seasonings,
 ):
+    reviewed_seasonings(not_seasonings=sorted(expected_pair))
     path = tmp_path / "recipe.md"
     path.write_text(f"# 测试\n## 计算\n{calculation}\n## 操作\n- 调味\n", encoding="utf-8")
 
@@ -1439,3 +1448,90 @@ def test_cucumber_and_pork_uses_the_required_cut_name(importer, tmp_path):
     assert [(row["ingredient_name"], row["quantity"], row["unit"]) for row in recipe["ingredients"]] == [
         ("猪瘦肉", "50", "克"),
     ]
+
+
+@pytest.fixture
+def reviewed_seasonings(importer, tmp_path, monkeypatch):
+    path = tmp_path / "seasonings.json"
+
+    def write(*, seasonings=(), not_seasonings=()):
+        path.write_text(json.dumps({"seasonings": seasonings, "not_seasonings": not_seasonings}), encoding="utf-8")
+        importer._load_seasonings.cache_clear()
+
+    monkeypatch.setattr(importer, "_SEASONINGS_PATH", path)
+    return write
+
+
+@pytest.mark.parametrize(("name", "expected"), [
+    ("洋葱", False), ("黄油", False), ("淡奶油", False), ("蒜苗", False), ("油麦菜", False),
+    ("干辣椒", True), ("豆瓣酱", True), ("五香粉", True), ("孜然粉", True), ("十三香", True),
+    ("白 芝麻", True), ("水", False), ("冰块", False),
+])
+def test_imported_seasoning_uses_reviewed_names(importer, name, expected):
+    [row] = importer._parse_ingredients(f"- {name}")
+    assert row["is_seasoning"] is expected
+
+
+@pytest.mark.parametrize("error", [
+    None, "seasoning_unclassified", "seasoning_conflict", "seasoning_unused", "override_seasoning_field",
+])
+def test_seasoning_audit_reports_each_error(
+    importer, tmp_path, monkeypatch, capsys, reviewed_aliases, reviewed_seasonings, error,
+):
+    source = tmp_path / "dishes" / "soup" / "test.md"
+    source.parent.mkdir(parents=True)
+    source.write_text("# 汤\n## 必备原料\n- 洋葱 100g\n- 白芝麻\n## 操作\n- 加热\n", encoding="utf-8")
+    whitelist = tmp_path / "ingredient_names.txt"
+    whitelist.touch()
+    monkeypatch.setattr(importer, "_INGREDIENT_NAMES_PATH", whitelist)
+
+    nonseasonings = ["洋葱"] if error != "seasoning_unclassified" else []
+    if error == "seasoning_conflict":
+        nonseasonings.append("白 芝麻")
+    if error == "seasoning_unused":
+        nonseasonings.append("黄油")
+    reviewed_seasonings(seasonings=["白芝麻"], not_seasonings=nonseasonings)
+
+    override_fields = {"is_seasoning": True} if error == "override_seasoning_field" else {}
+    override = {
+        "sha256": sha256(source.read_bytes()).hexdigest(),
+        "reason": "Use the quantities from the source.",
+        "ingredients": [
+            {"ingredient_name": "洋葱", "quantity": "100", "unit": "g", **override_fields},
+            {"ingredient_name": "白芝麻"},
+        ],
+    }
+    override_path = tmp_path / "overrides.json"
+    override_path.write_text(json.dumps({"dishes/soup/test.md": override}), encoding="utf-8")
+    monkeypatch.setattr(importer, "_OVERRIDE_PATH", override_path)
+
+    recipe = importer.parse_recipe_md(str(source), override)
+    assert [(row["ingredient_name"], row["is_seasoning"]) for row in recipe["ingredients"]] == [
+        ("洋葱", False), ("白芝麻", True),
+    ]
+    assert importer.audit_howtocook(tmp_path) == int(error is not None)
+    output = capsys.readouterr().out
+    for code in ("seasoning_unclassified", "seasoning_conflict", "seasoning_unused", "override_seasoning_field"):
+        assert f"{code}: {int(code == error)}\n" in output
+
+
+def test_reimport_updates_legacy_seasoning_flag_without_changing_ingredient_fields(importer, tmp_path, db):
+    from stock_manager.api.models import RecipeIngredient
+
+    source = tmp_path / "dishes" / "soup" / "test.md"
+    source.parent.mkdir(parents=True)
+    source.write_text("# 洋葱汤\n## 必备原料\n- 洋葱 100g\n## 操作\n- 煮汤\n", encoding="utf-8")
+    url, session = db
+    assert importer.import_howtocook(str(tmp_path), url) == _counts(imported=1)
+    item = session.query(RecipeIngredient).one()
+    fields = ("ingredient_name", "normalized_name", "quantity", "unit", "is_optional", "sort_order")
+    before = tuple(getattr(item, field) for field in fields)
+    assert (item.quantity, item.unit) == ("100", "g")
+    item.is_seasoning = True
+    session.commit()
+
+    assert importer.import_howtocook(str(tmp_path), url) == _counts(existing=1, ingredients_synced=1)
+    session.expire_all()
+    item = session.query(RecipeIngredient).one()
+    assert item.is_seasoning is False
+    assert tuple(getattr(item, field) for field in fields) == before
