@@ -883,5 +883,49 @@
     "黔式腊肠",
     "龙舌兰酒",
     "龟苓膏粉"
-  ]
+  ],
+  "recipes": {
+    "dishes/aquatic/微波葱姜黑鳕鱼.md": {
+      "not_seasonings": [
+        "姜",
+        "青葱"
+      ]
+    },
+    "dishes/aquatic/葱烧海参/葱烧海参.md": {
+      "not_seasonings": [
+        "大葱葱白"
+      ]
+    },
+    "dishes/condiment/葱油.md": {
+      "not_seasonings": [
+        "葱"
+      ]
+    },
+    "dishes/meat_dish/姜炒鸡/姜炒鸡.md": {
+      "not_seasonings": [
+        "生姜"
+      ]
+    },
+    "dishes/meat_dish/姜葱捞鸡/姜葱捞鸡.md": {
+      "not_seasonings": [
+        "姜",
+        "葱"
+      ]
+    },
+    "dishes/meat_dish/葱烧鸡腿.md": {
+      "not_seasonings": [
+        "大葱"
+      ]
+    },
+    "dishes/staple/葱油拌面.md": {
+      "not_seasonings": [
+        "小葱"
+      ]
+    },
+    "dishes/vegetable_dish/葱煎豆腐.md": {
+      "not_seasonings": [
+        "葱"
+      ]
+    }
+  }
 }

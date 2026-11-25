@@ -176,6 +176,11 @@ def parse_recipe_md(filepath: str, override: dict | None = None, *, recipe_path:
     }
     if override is not None:
         _apply_override(parsed, override)
+    _, _, recipe_nonseasonings = _load_seasonings(_SEASONINGS_PATH)
+    if exceptions := recipe_nonseasonings.get(recipe_path):
+        for row in parsed["ingredients"]:
+            if _ingredient_key(row["ingredient_name"]) in exceptions:
+                row["is_seasoning"] = False
     return parsed
 
 
@@ -287,17 +292,23 @@ def _aliases_for(recipe_path: str | None) -> tuple[dict[str, str], frozenset[fro
 
 
 @lru_cache(maxsize=4)
-def _load_seasonings(path: Path) -> tuple[frozenset[str], frozenset[str]]:
+def _load_seasonings(
+    path: Path,
+) -> tuple[frozenset[str], frozenset[str], dict[str, frozenset[str]]]:
     with path.open(encoding="utf-8") as source:
         entries = json.load(source)
     return (
         frozenset(map(_ingredient_key, entries["seasonings"])),
         frozenset(map(_ingredient_key, entries["not_seasonings"])),
+        {
+            recipe_path: frozenset(map(_ingredient_key, entry["not_seasonings"]))
+            for recipe_path, entry in entries.get("recipes", {}).items()
+        },
     )
 
 
 def _is_seasoning(name: str) -> bool:
-    seasonings, _ = _load_seasonings(_SEASONINGS_PATH)
+    seasonings, _, _ = _load_seasonings(_SEASONINGS_PATH)
     return _ingredient_key(name) in seasonings
 
 
@@ -1476,7 +1487,7 @@ def _audit_recipe(recipe: dict, vocabulary: set[str] | None = None) -> Iterator[
     names = {}
     original = _ingredient_key(recipe.get("ingredient_source", "").translate(_INGREDIENT_MARKUP))
     same, different = _aliases_for(recipe.get("recipe_path"))
-    seasonings, not_seasonings = _load_seasonings(_SEASONINGS_PATH)
+    seasonings, not_seasonings, _ = _load_seasonings(_SEASONINGS_PATH)
     if not ingredients or not steps:
         missing = ", ".join(label for label, rows in (("ingredients", ingredients), ("steps", steps)) if not rows)
         yield "recipe_empty", f"Missing {missing}"
@@ -1592,12 +1603,21 @@ def _audit_review_tables(recipes: list[dict], whitelist: set[str]) -> Iterator[t
             yield "whitelist_unused", name
 
 
-def _audit_seasoning_list(final_names: set[str]) -> Iterator[tuple[str, str]]:
-    seasonings, not_seasonings = _load_seasonings(_SEASONINGS_PATH)
+def _audit_seasoning_list(names_by_recipe: dict[str, set[str]]) -> Iterator[tuple[str, str]]:
+    seasonings, not_seasonings, recipe_nonseasonings = _load_seasonings(_SEASONINGS_PATH)
+    final_names = set().union(*names_by_recipe.values())
     for name in sorted(seasonings & not_seasonings):
         yield "seasoning_conflict", name
     for name in sorted((seasonings | not_seasonings) - final_names):
         yield "seasoning_unused", name
+    for path, exceptions in sorted(recipe_nonseasonings.items()):
+        if path not in names_by_recipe:
+            yield "seasoning_unused", f"{path}: recipe path not found"
+        else:
+            for name in sorted(exceptions - names_by_recipe[path]):
+                yield "seasoning_unused", f"{path}: {name}"
+        for name in sorted(exceptions - seasonings):
+            yield "seasoning_conflict", f"{path}: {name} is outside global seasonings"
 
 
 def _audit_override_seasonings(override: dict) -> Iterator[tuple[str, str]]:
@@ -1615,7 +1635,7 @@ def _report_cell(value) -> str:
 def _write_review(report: Path, reviewed: list[tuple[str, dict, list[tuple[str, str]]]]) -> None:
     with report.open("w", encoding="utf-8") as output:
         print("# HowToCook import review\n", file=output)
-        seasonings, not_seasonings = _load_seasonings(_SEASONINGS_PATH)
+        seasonings, not_seasonings, _ = _load_seasonings(_SEASONINGS_PATH)
         print("## Seasoning list\n", file=output)
         print(f"- Seasonings: {len(seasonings)}", file=output)
         print(f"- Non-seasonings: {len(not_seasonings)}\n", file=output)
@@ -1683,8 +1703,11 @@ def audit_howtocook(root: Path, report: Path | None = None) -> int:
         )
 
     review_issues = list(_audit_review_tables([recipe for _, recipe in parsed], whitelist))
-    final_names = {_ingredient_key(row["ingredient_name"]) for _, recipe in parsed for row in recipe["ingredients"]}
-    seasoning_issues = list(_audit_seasoning_list(final_names))
+    names_by_recipe = {
+        path: {_ingredient_key(row["ingredient_name"]) for row in recipe["ingredients"]}
+        for path, recipe in parsed
+    }
+    seasoning_issues = list(_audit_seasoning_list(names_by_recipe))
     counts.update(code for code, _ in review_issues + seasoning_issues)
     for issues in override_issues.values():
         counts.update(code for code, _ in issues)

@@ -1454,8 +1454,11 @@ def test_cucumber_and_pork_uses_the_required_cut_name(importer, tmp_path):
 def reviewed_seasonings(importer, tmp_path, monkeypatch):
     path = tmp_path / "seasonings.json"
 
-    def write(*, seasonings=(), not_seasonings=()):
-        path.write_text(json.dumps({"seasonings": seasonings, "not_seasonings": not_seasonings}), encoding="utf-8")
+    def write(*, seasonings=(), not_seasonings=(), recipes=None):
+        path.write_text(
+            json.dumps({"seasonings": seasonings, "not_seasonings": not_seasonings, "recipes": recipes or {}}),
+            encoding="utf-8",
+        )
         importer._load_seasonings.cache_clear()
 
     monkeypatch.setattr(importer, "_SEASONINGS_PATH", path)
@@ -1535,3 +1538,63 @@ def test_reimport_updates_legacy_seasoning_flag_without_changing_ingredient_fiel
     item = session.query(RecipeIngredient).one()
     assert item.is_seasoning is False
     assert tuple(getattr(item, field) for field in fields) == before
+
+
+def test_scallions_are_not_seasoning_in_scallion_oil_noodles(importer, tmp_path):
+    source = tmp_path / "葱油拌面.md"
+    source.write_text("# 拌面\n## 必备原料\n- 小 葱 100g\n## 操作\n- 拌面\n", encoding="utf-8")
+    scoped = importer.parse_recipe_md(str(source), recipe_path="dishes/staple/葱油拌面.md")
+    other = importer.parse_recipe_md(str(source), recipe_path="dishes/staple/其他拌面.md")
+    assert scoped["ingredients"][0]["is_seasoning"] is False
+    assert other["ingredients"][0]["is_seasoning"] is True
+
+
+def test_recipe_nonseasonings_apply_after_ingredient_override(importer, tmp_path, reviewed_seasonings):
+    path = "dishes/aquatic/微波葱姜黑鳕鱼.md"
+    reviewed_seasonings(seasonings=["青葱", "姜"], recipes={path: {"not_seasonings": ["青 葱", "姜"]}})
+    source = tmp_path / "微波葱姜黑鳕鱼.md"
+    source.write_text("# 鳕鱼\n## 必备原料\n- 青葱\n- 姜\n## 操作\n- 蒸鱼\n", encoding="utf-8")
+    override = {
+        "sha256": sha256(source.read_bytes()).hexdigest(),
+        "ingredients": [
+            {"ingredient_name": "青葱", "quantity": "35", "unit": "g"},
+            {"ingredient_name": "姜", "quantity": "13", "unit": "g"},
+        ],
+    }
+    recipe = importer.parse_recipe_md(str(source), override, recipe_path=path)
+    assert [(row["quantity"], row["unit"], row["is_seasoning"]) for row in recipe["ingredients"]] == [
+        ("35", "g", False), ("13", "g", False),
+    ]
+
+
+@pytest.mark.parametrize("path,name,error,detail", [
+    ("dishes/staple/葱油拌面.md", "小 葱", None, None),
+    ("dishes/staple/不存在.md", "小葱", "seasoning_unused", "recipe path not found"),
+    ("dishes/staple/葱油拌面.md", "姜", "seasoning_unused", "姜"),
+    ("dishes/staple/葱油拌面.md", "洋葱", "seasoning_conflict", "洋葱 is outside global seasonings"),
+])
+def test_recipe_nonseasoning_audit(
+    importer, tmp_path, monkeypatch, capsys, reviewed_aliases, reviewed_seasonings, path, name, error, detail,
+):
+    reviewed_seasonings(
+        seasonings=["小葱", "姜"],
+        not_seasonings=["洋葱"],
+        recipes={path: {"not_seasonings": [name]}},
+    )
+    whitelist = tmp_path / "ingredient_names.txt"
+    whitelist.touch()
+    monkeypatch.setattr(importer, "_INGREDIENT_NAMES_PATH", whitelist)
+    for relative, ingredient_rows in (
+        ("dishes/staple/葱油拌面.md", "- 小葱 100g\n- 洋葱\n"),
+        ("dishes/soup/姜汤.md", "- 姜\n"),
+    ):
+        source = tmp_path / relative
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text(f"# {source.stem}\n## 必备原料\n{ingredient_rows}## 操作\n- 加热\n", encoding="utf-8")
+
+    assert importer.audit_howtocook(tmp_path) == int(error is not None)
+    output = capsys.readouterr().out
+    assert f"seasoning_unused: {int(error == 'seasoning_unused')}\n" in output
+    assert f"seasoning_conflict: {int(error == 'seasoning_conflict')}\n" in output
+    if error:
+        assert f"{error}  scripts/seasonings.json  {path}: {detail}\n" in output
