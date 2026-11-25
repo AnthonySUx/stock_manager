@@ -161,13 +161,14 @@ class TestParseIngredients:
         rows = [(r["ingredient_name"], r["quantity"], r["unit"], r["sort_order"])
                 for r in importer._parse_ingredients(text)]
         assert rows == [
-            ("剑骨鱼或鲤鱼", "1.5", "斤", 0),
-            ("漓泉啤酒", "330", "ml", 1),
-            ("黄油", None, None, 2),
-            ("花椒", None, None, 3),
-            ("鲜面条", None, None, 4),  # nested brackets from a markdown link
-            ("色拉油 或 菜籽油", "1000", "ml", 5),  # only a note: its text is the name
-            ("适量", None, None, 6),
+            ("剑骨鱼", None, None, 0),
+            ("鲤鱼", "1.5", "斤", 1),
+            ("漓泉啤酒", "330", "ml", 2),
+            ("黄油", None, None, 3),
+            ("花椒", None, None, 4),
+            ("鲜面条", None, None, 5),  # nested brackets from a markdown link
+            ("色拉油 或 菜籽油", "1000", "ml", 6),  # only a note: its text is the name
+            ("适量", None, None, 7),
         ]
 
 
@@ -576,7 +577,7 @@ def test_image_and_link_targets_may_contain_parentheses(importer):
     ("④烤箱：烘烤食材……", [], [["oven"]]),
     (
         "香叶， 花椒，八角，干辣椒，丁香，甘草，干辣椒，小米辣（可选），姜，蒜",
-        ["香叶， 花椒，八角，干辣椒，丁香，甘草，干辣椒，小米辣，姜，蒜"], [],
+        ["香叶", "花椒", "八角", "干辣椒", "丁香", "甘草", "小米辣", "姜", "蒜"], [],
     ),
     ("可选（洒在顶部）", [], []),
     ("可选（巧克力味）", [], []),
@@ -723,3 +724,101 @@ def test_equipment_groups_follow_section_order_and_skip_nested_tips(importer, tm
     )
     parsed = importer.parse_recipe_md(str(recipe))
     assert parsed["equipment"] == [["microwave"], ["steamer"], ["clay_pot"]]
+
+
+@pytest.mark.parametrize(("line", "name", "quantity", "unit"), [
+    ("皮蛋 2 个", "皮蛋", "2", "个"),
+    ("白砂糖 2.5g", "白砂糖", "2.5", "g"),
+    ("生抽 15 ml", "生抽", "15", "ml"),
+    ("清水 = 50g", "清水", "50", "g"),
+    ("西红柿 = 1 个", "西红柿", "1", "个"),
+    ("蒜瓣: 2-3 个", "蒜瓣", "2-3", "个"),
+    ("食用油：100ml", "食用油", "100", "ml"),
+    ("盐 (15g)", "盐", "15", "g"),
+    ("盐量 = 份数 * 3g", "盐", "3", "g"),
+    ("青辣椒 = 份数 * 0.5 个", "青辣椒", "0.5", "个"),
+    ("辣椒的数量 = 1.5 只/三人", "辣椒", "1.5", "只"),
+    ("大葱 = 半颗", "大葱", "半", "颗"),
+    ("包菜 半 颗", "包菜", "半", "颗"),
+    ("糖 2～3g", "糖", "2～3", "g"),
+    ("辣椒 2~3 根", "辣椒", "2~3", "根"),
+    ("油 10-15ml", "油", "10-15", "ml"),
+    ("醋", "醋", None, None),
+])
+def test_calculation_ingredient_formats(importer, line, name, quantity, unit):
+    rows, unparsed = importer._parse_calculations("  - " + line)
+    assert [(r["ingredient_name"], r["quantity"], r["unit"]) for r in rows] == [(name, quantity, unit)]
+    assert not unparsed
+
+
+@pytest.mark.parametrize("table,expected", [
+    ("| 材料 | 用量 |\n| --- | --- |\n| 低筋面粉 | 40g |\n| 鸡蛋 | 2 个 |",
+     [("低筋面粉", "40", "g"), ("鸡蛋", "2", "个")]),
+    ("| 原料 | 数量 | 单位 |\n| :-- | --: | --- |\n| 猪肘 | 1 | 只 |\n| 油 | 200 | ml |",
+     [("猪肘", "1", "只"), ("油", "200", "ml")]),
+])
+def test_calculation_tables(importer, table, expected):
+    rows, unparsed = importer._parse_calculations(table)
+    assert [(r["ingredient_name"], r["quantity"], r["unit"]) for r in rows] == expected
+    assert not unparsed
+
+
+def test_calculation_alternatives_and_explanation_lines(importer):
+    text = """### 小标题
+普通段落
+> - 鸡蛋 3 个
+- 注：推荐红葱
+- 每次制作前先搅拌
+- 每份都要调味
+- 总量只供参考
+- 使用上述条件变更
+- 一份正好够吃
+- 以上仅供参考
+- 份数根据情况调整
+- 1 → 2 个
+1. 干木耳: 20g / 湿木耳: 120g
+"""
+    rows, unparsed = importer._parse_calculations(text)
+    assert [(r["ingredient_name"], r["quantity"], r["is_optional"]) for r in rows] == [
+        ("干木耳", "20", False), ("湿木耳", "120", True),
+    ]
+    assert not unparsed
+
+
+@pytest.mark.parametrize("line,expected", [
+    ("料酒、盐、冰糖、植物油", [("料酒", False), ("盐", False), ("冰糖", False), ("植物油", False)]),
+    ("剑骨鱼或鲤鱼", [("剑骨鱼", False), ("鲤鱼", True)]),
+    ("茉莉绿茶茶叶/苏打气泡水二选一", [("茉莉绿茶茶叶", True), ("苏打气泡水", True)]),
+    ("烤鹰嘴豆粉— 可用炒熟的鹰嘴豆磨粉替代", [("烤鹰嘴豆粉", False)]),
+    ("豆腐—可选但强烈推荐", [("豆腐", True)]),
+])
+def test_required_ingredient_lists(importer, line, expected):
+    assert [(r["ingredient_name"], r["is_optional"]) for r in importer._parse_ingredients(line)] == expected
+
+
+@pytest.mark.parametrize("line,expected", [
+    ("小葱 3-", ("小葱", "3", None)),
+    ("蒜 2 瓣", ("蒜", "2", "瓣")),
+    ("干小米椒🌶", ("干小米椒", None, None)),
+    ("鸡蛋 **", ("鸡蛋", None, None)),
+])
+def test_ingredient_name_cleanup(importer, line, expected):
+    assert [(r["ingredient_name"], r["quantity"], r["unit"]) for r in importer._parse_ingredients(line)] == [expected]
+
+
+@pytest.mark.parametrize("required,computed,expected", [
+    ("- 蒜", "- 大蒜 3 瓣", [("蒜", "3", "瓣")]),
+    ("- 海参\n- 葱白", "- 蚝油 20g\n- 生抽 10ml",
+     [("海参", None, None), ("葱白", None, None), ("蚝油", "20", "g"), ("生抽", "10", "ml")]),
+    ("- 葱、姜、油", "- 姜片 = 10g\n- 蚝油 20g",
+     [("葱", None, None), ("姜", None, None), ("油", None, None), ("姜片", "10", "g"), ("蚝油", "20", "g")]),
+    ("- 盐\n- 盐 2g", "- 盐 3g", [("盐", "3", "g")]),
+])
+def test_recipe_merges_calculations(importer, tmp_path, required, computed, expected):
+    source = tmp_path / "recipe.md"
+    source.write_text(
+        f"# 试菜\n\n## 必备原料和工具\n{required}\n\n## 计算\n{computed}\n", encoding="utf-8",
+    )
+    rows = importer.parse_recipe_md(str(source))["ingredients"]
+    assert [(r["ingredient_name"], r["quantity"], r["unit"]) for r in rows] == expected
+    assert [row["sort_order"] for row in rows] == list(range(len(expected)))
