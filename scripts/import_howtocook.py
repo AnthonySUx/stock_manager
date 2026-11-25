@@ -242,6 +242,10 @@ _SPECIAL_CODES = {
 _SPECIAL_RE = re.compile("|".join(sorted(_SPECIAL_CODES, key=len, reverse=True)))
 _MARKDOWN_EMPHASIS = str.maketrans("", "", "`*")
 _SENTENCE_PUNCTUATION_RE = re.compile(r"[。！!；;]")
+_INGREDIENT_CATEGORIES = frozenset({"调味料", "主料", "辅料", "配料", "原料", "材料", "其他调味料"})
+_CATEGORY_PROSE_RE = re.compile(r"[。！!；;]|随便|建议|可以|例如|即可")
+_INGREDIENT_PROSE_PREFIXES = ("注", "注意", "建议", "原则", "说明", "提示")
+_COLON_RE = re.compile(r"[：:]")
 _LABEL_RE = re.compile(r"^(需要|必备|工具|可选)\s*[：:]?\s*")
 _SIZE_RE = re.compile(
     r"^\d+(?:\.\d+)?\s*(?:厘米|公分|毫米|cm|mm|°C|℃|个|把|口|只|件|升|克|kg|ml|g)?"
@@ -273,7 +277,7 @@ def _strip_ingredient_prefix(segment: str) -> tuple[str, bool]:
 
 def _tool_subject(segment: str) -> tuple[str, bool]:
     segment, optional = _strip_ingredient_prefix(segment.translate(_MARKDOWN_EMPHASIS))
-    subject = re.split(r"[：:]", segment, maxsplit=1)[0]
+    subject = _COLON_RE.split(segment, maxsplit=1)[0]
     subject = _SIZE_RE.sub("", subject)
     subject = _HEAD_SEPARATOR_RE.split(subject, maxsplit=1)[0]
     return re.sub(r"一个$|一把$|一口$|若干$", "", subject), optional
@@ -304,10 +308,8 @@ def _bracket_parts(segment: str) -> tuple[str, list[str]]:
     return "".join(body), notes
 
 
-def _ingredient_segments(line: str) -> list[str]:
-    """Split top-level plus signs unless a segment starts with a quantity."""
-    if "+" not in line:
-        return [line]
+def _split_outside_notes(line: str, separators: str) -> list[str]:
+    """Split at separators outside parenthetical notes."""
     depth = start = 0
     segments = []
     for index, char in enumerate(line):
@@ -315,10 +317,18 @@ def _ingredient_segments(line: str) -> list[str]:
             depth += 1
         elif char in ")）" and depth:
             depth -= 1
-        elif char == "+" and not depth:
+        elif char in separators and not depth:
             segments.append(line[start:index].strip())
             start = index + 1
     segments.append(line[start:].strip())
+    return segments
+
+
+def _ingredient_segments(line: str) -> list[str]:
+    """Split top-level plus signs unless a segment starts with a quantity."""
+    if "+" not in line:
+        return [line]
+    segments = _split_outside_notes(line, "+")
     if any(segment and segment[0].isdigit() for segment in segments):
         return [line]
     return segments
@@ -332,7 +342,7 @@ def _is_explanatory_line(line: str) -> bool:
     return len(parts) > 1 and len(body.strip()) > 30 and any(len(part.strip()) > 10 for part in parts)
 
 
-def _ingredient_text(segment: str, explanatory: bool) -> tuple[str, str | None] | None:
+def _ingredient_text(segment: str, explanatory: bool) -> tuple[str, str | None, bool] | None:
     """Return ingredient text and an optional name override, skipping headings and prose."""
     plain = segment.translate(_MARKDOWN_EMPHASIS)
     stripped, _ = _strip_ingredient_prefix(plain)
@@ -342,13 +352,16 @@ def _ingredient_text(segment: str, explanatory: bool) -> tuple[str, str | None] 
         return None
 
     ingredient, _ = _strip_ingredient_prefix(segment)
-    parts = re.split(r"[：:]", body, maxsplit=1)
-    if len(parts) == 2 and 0 < len(name := parts[0].strip()) <= 8:
-        description = parts[1]
-        if "、" in description and not _SENTENCE_PUNCTUATION_RE.search(description):
-            return ingredient, None
-        return ingredient, name
-    return (ingredient, None) if ingredient and not explanatory else None
+    parts = _COLON_RE.split(body, maxsplit=1)
+    if len(parts) == 2 and (name := parts[0].strip()):
+        if _COLON_RE.split(stripped, maxsplit=1)[1].strip() == "可选":
+            return ingredient, name, True
+        if len(name) <= 8:
+            description = parts[1]
+            if "、" not in description or _SENTENCE_PUNCTUATION_RE.search(description):
+                return ingredient, name, False
+            return ingredient, None, False
+    return (ingredient, None, False) if ingredient and not explanatory else None
 
 
 def _basic_note_alternative(note: str) -> bool:
@@ -431,10 +444,31 @@ def _parse_ingredient_section(text: str) -> tuple[list[dict], list[list[str]], l
     ingredients, groups, unclassified = [], [], []
     for raw_line in _lines_outside_notes(text):
         line = _clean_line(raw_line)
-        if not line or line.startswith(("注：", "注意", "建议")):
+        plain = line.translate(_MARKDOWN_EMPHASIS).strip()
+        content, line_optional = _strip_ingredient_prefix(plain)
+        if not plain or plain.endswith(("：", ":")) or content.startswith(_INGREDIENT_PROSE_PREFIXES):
             continue
-        explanatory = _is_explanatory_line(line)
-        for segment in _ingredient_segments(line):
+
+        category, *description = _COLON_RE.split(content, maxsplit=1)
+        category = category.strip()
+        if description and category == "其他" and "随便" in description[0]:
+            continue
+        category_list = bool(description and (category in _INGREDIENT_CATEGORIES or category.endswith("材料")))
+        if category_list:
+            if _CATEGORY_PROSE_RE.search(description[0]):
+                continue
+            segments = [
+                segment
+                for item in _split_outside_notes(description[0], "、，,")
+                for segment in _ingredient_segments(item)
+            ]
+            explanatory = False
+        else:
+            line_optional = False
+            segments = _ingredient_segments(line)
+            explanatory = _is_explanatory_line(line)
+
+        for segment in segments:
             if not segment:
                 continue
             subject, optional = _tool_subject(segment)
@@ -444,10 +478,10 @@ def _parse_ingredient_section(text: str) -> tuple[list[dict], list[list[str]], l
             ):
                 if not listed_tool:
                     unclassified.append(subject)
-                groups.extend(_tool_groups(segment, optional))
+                groups.extend(_tool_groups(segment, optional or line_optional))
             elif ingredient := _ingredient_text(segment, explanatory):
-                line, name_override = ingredient
-                ingredients.append((line, name_override, optional))
+                ingredient_line, name_override, optional_suffix = ingredient
+                ingredients.append((ingredient_line, name_override, optional or line_optional or optional_suffix))
 
     results = []
     seen: set[str] = set()

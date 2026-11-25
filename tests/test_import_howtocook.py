@@ -556,7 +556,7 @@ def test_image_and_link_targets_may_contain_parentheses(importer):
     ('泡好的粉丝（放碗底）', ['泡好的粉丝'], []),
     ('面团（封锅口用）', ['面团'], []),
     ('昆布', ['昆布'], []),
-    ('调味料：火锅底料、花生酱、全脂牛奶', ['调味料：火锅底料、花生酱、全脂牛奶'], []),
+    ('调味料：火锅底料、花生酱、全脂牛奶', ['火锅底料', '花生酱', '全脂牛奶'], []),
     ('油 + 锅 + 菜刀 + 铲子', ['油'], []),
     ('烤箱（普通的炒锅也行）', [], []),
     ("清水 720g + 600g（720 克用于蒸饭，后 500g 用于发酵）", ["清水"], []),
@@ -585,8 +585,22 @@ def test_image_and_link_targets_may_contain_parentheses(importer):
     ("工具", [], []),
     (
         "调味料：火锅底料、花生酱、全脂牛奶、生抽、辣椒油、醋、花椒油",
-        ["调味料：火锅底料、花生酱、全脂牛奶、生抽、辣椒油、醋、花椒油"], [],
+        ["火锅底料", "花生酱", "全脂牛奶", "生抽", "辣椒油", "醋", "花椒油"], [],
     ),
+    ("主料：`五花肉`", ["五花肉"], []),
+    ("调味料: 酱油，盐", ["酱油", "盐"], []),
+    ("其他调味料：胡椒粉", ["胡椒粉"], []),
+    ("配料：生抽 + 老抽，蚝油", ["生抽", "老抽", "蚝油"], []),
+    ("菜类材料：建议荤素搭配，选择自己喜欢的食材洗干净即可。例如：", [], []),
+    (
+        "面食材料：可以是手工面条、龙须面、面鱼，也可以是泡面面饼、各类规格粉丝，"
+        "或者是其他任何自己所喜欢的面食形式。",
+        [], [],
+    ),
+    ("原则：万物皆可酿", [], []),
+    ("其他：随便，不会影响到口味", [], []),
+    ("糖：", [], []),
+    ("调味料：", [], []),
 ])
 def test_kitchen_equipment_ingredient_lines(importer, line, names, groups):
     rows, equipment, _ = importer._parse_ingredient_section(line)
@@ -594,11 +608,15 @@ def test_kitchen_equipment_ingredient_lines(importer, line, names, groups):
     assert equipment == groups
 
 
-def test_ingredient_colon_name_preserves_quantity(importer):
-    rows = importer._parse_ingredients("高筋面粉：400g")
-    assert [(row["ingredient_name"], row["quantity"], row["unit"]) for row in rows] == [
-        ("高筋面粉", "400", "g"),
-    ]
+@pytest.mark.parametrize("line,expected", [
+    ("高筋面粉：400g", [("高筋面粉", "400", "g")]),
+    ("水: 120g", [("水", "120", "g")]),
+    ("③**辅料**：`盐` 2g、糖（3g，调味用）", [("盐", "2", "g"), ("糖", "3", "g")]),
+])
+def test_ingredient_colon_name_preserves_quantity(importer, line, expected):
+    rows, equipment, unclassified = importer._parse_ingredient_section(line)
+    assert [(row["ingredient_name"], row["quantity"], row["unit"]) for row in rows] == expected
+    assert equipment == unclassified == []
 
 
 @pytest.mark.parametrize("line,subject,unclassified", [
@@ -607,6 +625,9 @@ def test_ingredient_colon_name_preserves_quantity(importer):
     ("砵或者有一定深度的碗", "砵", []),
     ("工具：`锅`（砂锅为宜，铝锅其次，高压锅也可以，最好不要铁锅、铜锅）", "锅", []),
     ("工具：**铁锅**", "铁锅", []),
+    ("⑦喷壶：使面团或容器表面均匀覆盖上水或油，用于烤制脆皮和防粘。", "喷壶", ["喷壶"]),
+    ("⑧筛子：使面粉均匀铺开或过滤面粉结块和杂质。", "筛子", ["筛子"]),
+    ("⑩刷子：用于给面团刷蛋液，使成品更加光鲜、亮丽、有光泽。", "刷子", ["刷子"]),
 ])
 def test_kitchen_equipment_tool_subjects(importer, line, subject, unclassified):
     assert importer._tool_subject(line) == (subject, False)
@@ -617,6 +638,8 @@ def test_kitchen_equipment_tool_subjects(importer, line, subject, unclassified):
     ("必备：东北米（金龙鱼 30 元 5kg 的就行）", "东北米", False),
     ("可选：香菜", "香菜", True),
     ("④可选: 香菜", "香菜", True),
+    ("花椒：可选", "花椒", True),
+    ("鸡精：可选", "鸡精", True),
 ])
 def test_kitchen_equipment_ingredient_prefixes(importer, line, name, optional):
     rows, equipment, unclassified = importer._parse_ingredient_section(line)

@@ -32,7 +32,7 @@ BASIC_TOOL_TERMS = frozenset(
 )
 TOOL_SUFFIXES = tuple(
     "锅 刀 碗 盘 盆 勺 铲 板 炉 箱 机 器 笼 屉 垫 架 篦子 笊篱 臼 罐 容器 "
-    "盖 膜 纸 布 手套 模具 杖 筷 夹 钳 秤 计 煲 盘子 勺子 铲子 筷子 碟子 夹子 杯".split()
+    "盖 膜 纸 布 手套 模具 杖 筷 夹 钳 秤 计 煲 盘子 勺子 铲子 筷子 碟子 夹子 杯 壶 筛 筛子 刷 刷子".split()
 )
 INGREDIENT_EXCEPTIONS = frozenset({"昆布", "糯米纸"})
 
