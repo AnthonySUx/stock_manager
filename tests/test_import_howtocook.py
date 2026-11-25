@@ -5,6 +5,8 @@ and every run uses a throwaway SQLite file.
 """
 
 import importlib.util
+import json
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
@@ -739,9 +741,18 @@ def test_equipment_groups_follow_section_order_and_skip_nested_tips(importer, tm
     ("辣椒的数量 = 1.5 只/三人", "辣椒", "1.5", "只"),
     ("大葱 = 半颗", "大葱", "半", "颗"),
     ("包菜 半 颗", "包菜", "半", "颗"),
-    ("糖 2～3g", "糖", "2～3", "g"),
-    ("辣椒 2~3 根", "辣椒", "2~3", "根"),
+    ("糖 2～3g", "糖", "2-3", "g"),
+    ("辣椒 2~3 根", "辣椒", "2-3", "根"),
     ("油 10-15ml", "油", "10-15", "ml"),
+    ("白胡椒粉 5g-10g", "白胡椒粉", "5-10", "g"),
+    ("白胡椒粉 5g - 10g", "白胡椒粉", "5-10", "g"),
+    ("排骨 250g 到 500g", "排骨", "250-500", "g"),
+    ("叶菜类蔬菜：300g ~ 500g", "叶菜类蔬菜", "300-500", "g"),
+    ("橄榄油：10ml - 15ml", "橄榄油", "10-15", "ml"),
+    ("米：100ml-200ml/人", "米", "100-200", "ml"),
+    ("鸡蛋 3 - 4 个", "鸡蛋", "3-4", "个"),
+    ("鸡蛋 3 - 4", "鸡蛋", "3-4", None),
+    ("姜，13g。", "姜", "13", "g"),
     ("醋", "醋", None, None),
 ])
 def test_calculation_ingredient_formats(importer, line, name, quantity, unit):
@@ -800,6 +811,8 @@ def test_required_ingredient_lists(importer, line, expected):
     ("蒜 2 瓣", ("蒜", "2", "瓣")),
     ("干小米椒🌶", ("干小米椒", None, None)),
     ("鸡蛋 **", ("鸡蛋", None, None)),
+    ("百味来  拿坡里意面酱", ("百味来 拿坡里意面酱", None, None)),
+    ("排骨 250g 到 500g", ("排骨", "250-500", "g")),
 ])
 def test_ingredient_name_cleanup(importer, line, expected):
     assert [(r["ingredient_name"], r["quantity"], r["unit"]) for r in importer._parse_ingredients(line)] == [expected]
@@ -812,6 +825,12 @@ def test_ingredient_name_cleanup(importer, line, expected):
     ("- 葱、姜、油", "- 姜片 = 10g\n- 蚝油 20g",
      [("葱", None, None), ("姜", None, None), ("油", None, None), ("姜片", "10", "g"), ("蚝油", "20", "g")]),
     ("- 盐\n- 盐 2g", "- 盐 3g", [("盐", "3", "g")]),
+    ("- 百味来  拿坡里意面酱", "- 百味来拿坡里意面酱 1 罐",
+     [("百味来 拿坡里意面酱", "1", "罐")]),
+    ("- 百味来拿坡里意面酱", "- 百味来  拿坡里意面酱 1 罐",
+     [("百味来拿坡里意面酱", "1", "罐")]),
+    ("- 生抽", "- 生抽 15ml\n- 老抽 3ml",
+     [("生抽", "15", "ml"), ("老抽", "3", "ml")]),
 ])
 def test_recipe_merges_calculations(importer, tmp_path, required, computed, expected):
     source = tmp_path / "recipe.md"
@@ -888,6 +907,7 @@ def test_equipment_step_alternatives_are_local(importer, line, expected):
     ("ingredient_digit", ["2号盐"], ["装盘"], {}),
     ("ingredient_long", ["一二三四五六七八九十非常长"], ["装盘"], {}),
     ("ingredient_duplicate", ["盐", "盐"], ["装盘"], {}),
+    ("ingredient_duplicate", ["百味来 拿坡里意面酱", "百味来拿坡里意面酱"], ["装盘"], {}),
     ("step_markup", ["盐"], ["用**大火**"], {}),
     ("step_empty", ["盐"], [" "], {}),
     ("recipe_empty", ["盐"], [], {}),
@@ -936,10 +956,9 @@ def test_audit_cli_report_is_offline_and_fails_on_errors(importer, tmp_path, mon
     assert "`ingredient_no_quantity`: 盐" in review
 
 
-def test_recipe_override_applies_to_import_and_audit(importer, tmp_path, db, monkeypatch, capsys):
-    import json
-    from hashlib import sha256
-
+def test_recipe_override_applies_to_import_and_audit(
+    importer, tmp_path, db, monkeypatch, capsys, reviewed_aliases,
+):
     root = tmp_path / "source"
     source = root / "dishes" / "soup" / "test.md"
     source.parent.mkdir(parents=True)
@@ -956,6 +975,9 @@ def test_recipe_override_applies_to_import_and_audit(importer, tmp_path, db, mon
     override_file = tmp_path / "overrides.json"
     override_file.write_text(json.dumps({key: entry}), encoding="utf-8")
     monkeypatch.setattr(importer, "_OVERRIDE_PATH", override_file)
+    whitelist = tmp_path / "ingredient_names.txt"
+    whitelist.write_text("", encoding="utf-8")
+    monkeypatch.setattr(importer, "_INGREDIENT_NAMES_PATH", whitelist)
 
     report = tmp_path / "review.md"
     assert importer.audit_howtocook(root, report) == 0
@@ -1027,13 +1049,17 @@ def test_step_method_headings_preserve_tips(importer):
     ]
 
 
-@pytest.mark.parametrize("tool", ["密封袋", "牛轧糖模具", "港式奶茶过滤袋", "陶瓷容器", "筷子一双", "蒸锅用水"])
+@pytest.mark.parametrize("tool", [
+    "密封袋", "牛轧糖模具", "港式奶茶过滤袋", "陶瓷容器", "筷子一双", "蒸锅用水", "杯子", "例如带刻度的杯子",
+    "陶瓷杯", "保温杯", "筛网", "过滤网", "滤网", "烤网", "雪克瓶", "圆碟子，直径 28cm", "直径 28cm",
+])
 def test_required_and_calculation_tools_do_not_become_ingredients(importer, tool):
     assert importer._parse_ingredients(f"- {tool}") == []
     assert importer._parse_calculations(f"- {tool}") == ([], [])
 
 
-def test_reviewed_aliases_merge_only_same_pairs(importer, tmp_path):
+def test_reviewed_aliases_merge_only_same_pairs(importer, tmp_path, reviewed_aliases):
+    reviewed_aliases(same=[["茄子", "长的上小下大的茄子"]], different=[["豆腐", "日本豆腐"]])
     source = tmp_path / "test.md"
     source.write_text(
         "# 测试\n## 必备原料\n- 茄子\n- 豆腐\n## 计算\n- 长的上小下大的茄子 100g\n- 日本豆腐 2 个\n",
@@ -1048,6 +1074,14 @@ def test_reviewed_aliases_merge_only_same_pairs(importer, tmp_path):
 
 @pytest.mark.parametrize("code,bad,good,known", [
     ("ingredient_prose", ["姜切段备用"], ["姜"], {"姜切段备用", "姜"}),
+    ("ingredient_prose", ["例如加盐"], ["盐"], None),
+    ("ingredient_prose", ["比如白糖"], ["白糖"], None),
+    ("ingredient_prose", ["直径"], ["小葱"], None),
+    ("ingredient_prose", ["额外的食材"], ["葱"], None),
+    ("ingredient_prose", ["用作调味的食材"], ["葱"], None),
+    ("ingredient_prose", ["点缀的食材"], ["葱"], None),
+    ("ingredient_tool", ["雪克瓶"], ["瓶装椰子汁"], None),
+    ("ingredient_tool", ["滤网"], ["牛奶"], None),
     ("ingredient_tool", ["港式奶茶过滤袋"], ["袋泡红茶"], {"港式奶茶过滤袋", "袋泡红茶"}),
     ("ingredient_unknown", ["虚构食材"], ["盐"], {"盐"}),
     ("ingredient_maybe_duplicate", ["豌豆", "青豌豆"], ["豆腐", "日本豆腐"], {"豌豆", "青豌豆", "豆腐", "日本豆腐"}),
@@ -1074,8 +1108,6 @@ def test_round_two_audit_ingredient_codes(importer, code, bad, good, known):
 def test_calculation_diagnostics_require_a_valid_ingredient_replacement(
     importer, tmp_path, override_fields, stale, expected,
 ):
-    from hashlib import sha256
-
     path = tmp_path / "recipe.md"
     path.write_text(
         "# 测试\n## 必备原料\n- 香菜\n## 计算\n- 香菜按照个人口味\n## 操作\n1. 吃\n",
@@ -1093,8 +1125,6 @@ def test_calculation_diagnostics_require_a_valid_ingredient_replacement(
     ("享用煮好的面条", True),
 ])
 def test_override_audit_rejects_reworded_steps(importer, tmp_path, replacement, error):
-    from hashlib import sha256
-
     path = tmp_path / "recipe.md"
     path.write_text(
         "# 测试\n## 必备原料\n- 盐\n## 操作\n### 方法一\n- 煮面\n  - 调味\n",
@@ -1107,3 +1137,162 @@ def test_override_audit_rejects_reworded_steps(importer, tmp_path, replacement, 
     assert ("override_text_not_in_source" in errors) is error
     if error:
         assert recipe["steps"][0]["instruction"] == "【方法一】煮面：调味"
+
+
+@pytest.fixture
+def reviewed_aliases(importer, tmp_path, monkeypatch):
+    path = tmp_path / "aliases.json"
+
+    def write(*, same=(), different=()):
+        importer._load_aliases.cache_clear()
+        path.write_text(json.dumps({"same": same, "different": different}), encoding="utf-8")
+
+    monkeypatch.setattr(importer, "_ALIASES_PATH", path)
+    write()
+    return write
+
+
+def test_calculation_rejects_mismatched_range_units(importer):
+    assert importer._parse_calculations("- 排骨 250g 到 500ml") == ([], ["排骨 250g 到 500ml"])
+
+
+@pytest.mark.parametrize("punctuation,separator", [("。", ""), ("！", ""), ("？", ""), ("；", ""), ("", "；")])
+def test_step_quote_join_respects_existing_punctuation(importer, punctuation, separator):
+    steps = importer._parse_steps(f"1. 静置\n> 体积明显增大{punctuation}\n> 发酵失败了？")
+    assert [step["instruction"] for step in steps] == [
+        f"静置；体积明显增大{punctuation}{separator}发酵失败了？",
+    ]
+
+
+def test_step_tip_intro_preserves_the_preceding_full_stop(importer):
+    steps = importer._parse_steps(
+        "1. 最终的面糊应该是表面有很多气泡的且体积明显增大。\n\n"
+        "**发酵失败了？看看这里：**\n\n> 确定酵母没有过期\n\n2. 揉面",
+    )
+    assert steps[0]["instruction"].startswith(
+        "最终的面糊应该是表面有很多气泡的且体积明显增大。发酵失败了？看看这里：",
+    )
+    assert "确定酵母没有过期" in steps[0]["instruction"]
+
+
+@pytest.mark.parametrize("with_required", [True, False])
+def test_same_aliases_merge_transitively(importer, tmp_path, reviewed_aliases, with_required):
+    reviewed_aliases(same=[["快熟面", "风干快熟面"], ["任何牌子的快熟面", "快熟面"]])
+    path = tmp_path / "recipe.md"
+    required = "## 必备原料\n- 风干快熟面\n" if with_required else ""
+    path.write_text(
+        f"# 拌面\n{required}## 计算\n- 任何牌子的快熟面 1 块\n- 风干快熟面\n## 操作\n- 煮熟\n",
+        encoding="utf-8",
+    )
+    parsed = importer.parse_recipe_md(str(path))
+    expected_name = "风干快熟面" if with_required else "任何牌子的快熟面"
+    assert [(row["ingredient_name"], row["quantity"]) for row in parsed["ingredients"]] == [(expected_name, "1")]
+
+
+@pytest.mark.parametrize("calculation,expected_pair", [
+    ("- 生抽 15ml\n- 老抽 3ml", {"生抽", "老抽"}),
+    ("- 姜 2g\n- 姜沫 3g", {"姜", "姜沫"}),
+])
+def test_audit_demands_review_of_synonyms_and_single_character_names(
+    importer, tmp_path, reviewed_aliases, calculation, expected_pair,
+):
+    path = tmp_path / "recipe.md"
+    path.write_text(f"# 测试\n## 计算\n{calculation}\n## 操作\n- 调味\n", encoding="utf-8")
+
+    def issues():
+        parsed = importer.parse_recipe_md(str(path))
+        assert {row["ingredient_name"] for row in parsed["ingredients"]} == expected_pair
+        return [(code, detail) for code, detail in importer._audit_recipe(parsed) if code in importer._ERROR_CODES]
+
+    [(code, detail)] = issues()
+    assert code == "ingredient_maybe_duplicate"
+    assert set(detail.split(" / ")) == expected_pair
+    reviewed_aliases(different=[sorted(expected_pair)])
+    assert issues() == []
+
+
+@pytest.mark.parametrize("resolution,expected", [
+    ("none", ["calc_repeated_name"]),
+    ("steps", ["calc_repeated_name"]),
+    ("stale", ["calc_repeated_name", "override_stale"]),
+    ("sum", []),
+])
+def test_repeated_calculation_needs_reviewed_ingredient_override(importer, tmp_path, resolution, expected):
+    path = tmp_path / "recipe.md"
+    path.write_text(
+        "# 草莓冰淇淋\n## 必备原料\n- 香草精\n## 计算\n### 草莓糖浆\n- 香草精 1 克\n"
+        "### 冰淇淋底料\n- 香草 精 5 克\n## 操作\n- 冷冻\n",
+        encoding="utf-8",
+    )
+    override = None
+    if resolution in {"sum", "stale"}:
+        override = {
+            "sha256": sha256(path.read_bytes()).hexdigest() if resolution == "sum" else "stale",
+            "reason": "Add the syrup and base amounts.",
+            "ingredients": [{"ingredient_name": "香草精", "quantity": "6", "unit": "克"}],
+        }
+    elif resolution == "steps":
+        override = {"sha256": sha256(path.read_bytes()).hexdigest(), "steps": ["冷冻"]}
+
+    recipe = importer.parse_recipe_md(str(path), override)
+    errors = [(code, detail) for code, detail in importer._audit_recipe(recipe) if code in importer._ERROR_CODES]
+    assert [code for code, _ in errors] == expected
+    if resolution == "sum":
+        assert [(row["ingredient_name"], row["quantity"], row["unit"]) for row in recipe["ingredients"]] == [
+            ("香草精", "6", "克"),
+        ]
+    else:
+        assert errors[0] == ("calc_repeated_name", "香草精: 1 克, 5 克")
+
+
+@pytest.mark.parametrize("unit,bad", [
+    ("cm", True), ("mm", True), ("厘米", True), ("毫米", True), ("寸", True),
+    ("W", True), ("℃", True), ("°C", True), ("g", False), ("根", False), (None, False),
+])
+def test_audit_rejects_dimension_and_temperature_units(importer, unit, bad):
+    recipe = {
+        "ingredients": [{"ingredient_name": "葱", "quantity": "10", "unit": unit}],
+        "steps": [{"step_number": 1, "instruction": "调味"}],
+        "equipment": [],
+        "raw_markdown": "",
+    }
+    errors = [code for code, _ in importer._audit_recipe(recipe) if code in importer._ERROR_CODES]
+    assert errors == (["ingredient_bad_unit"] if bad else [])
+
+
+@pytest.mark.parametrize("quantity,unit,expected", [
+    ("一个", None, None),
+    ("水饺体积的两倍", None, None),
+    (1, None, None),
+    ("一", "个", "一"),
+    ("1/2", "个", "1/2"),
+    ("3 - 4", "个", "3-4"),
+])
+def test_audit_validates_override_quantity_format(importer, tmp_path, quantity, unit, expected):
+    path = tmp_path / "recipe.md"
+    path.write_text("# 测试\n## 必备原料\n- 玉米 2 个\n## 操作\n- 水煮\n", encoding="utf-8")
+    recipe = importer.parse_recipe_md(str(path), {
+        "sha256": sha256(path.read_bytes()).hexdigest(),
+        "ingredients": [{"ingredient_name": "玉米", "quantity": quantity, "unit": unit}],
+    })
+    errors = [code for code, _ in importer._audit_recipe(recipe) if code in importer._ERROR_CODES]
+    assert errors == (["override_quantity_format"] if expected is None else [])
+    assert recipe["ingredients"][0]["quantity"] == (expected or "2")
+
+
+def test_audit_flags_unused_review_entries(importer, tmp_path, reviewed_aliases):
+    reviewed_aliases(same=[["蒜", "大蒜"]], different=[["姜", "姜片"], ["生抽", "老抽"]])
+    path = tmp_path / "recipe.md"
+    path.write_text("# 测试\n## 必备原料\n- 蒜、姜、姜片、生抽\n## 计算\n- 大蒜 3 瓣\n", encoding="utf-8")
+    recipe = importer.parse_recipe_md(str(path))
+    assert [row["ingredient_name"] for row in recipe["ingredients"]] == ["蒜", "姜", "姜片", "生抽"]
+
+    # An alias still counts as used after the parser has merged its two names.
+    other = {"ingredients": [{"ingredient_name": "老抽"}]}
+    assert list(importer._audit_review_tables([recipe, other], {"蒜", "大蒜", "老抽"})) == [
+        ("alias_unused", "生抽 / 老抽"),
+        ("whitelist_unused", "大蒜"),
+    ]
+    assert list(importer._audit_review_tables(
+        [{**recipe, "ingredients": recipe["ingredients"] + other["ingredients"]}], {"蒜", "老抽"},
+    )) == []

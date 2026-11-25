@@ -24,6 +24,7 @@ from collections.abc import Iterator
 from dataclasses import asdict
 from functools import lru_cache
 import hashlib
+from itertools import combinations
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -40,6 +41,8 @@ from stock_manager.api.equipment import (  # noqa: E402
     TOOL_SUFFIXES,
     catalog_order,
 )
+
+from stock_manager.api.quantity import normalize_unit  # noqa: E402
 
 
 def _load_env() -> None:
@@ -131,6 +134,11 @@ def parse_recipe_md(filepath: str, override: dict | None = None) -> dict:
             computed.extend(rows)
             calc_unparsed.extend(unparsed)
 
+    calculated_amounts = {}
+    for row in computed:
+        name = _ingredient_key(row["ingredient_name"])
+        amount = " ".join(filter(None, (row["quantity"], row["unit"]))) or "no amount"
+        calculated_amounts.setdefault(name, []).append(amount)
     parsed = {
         "title": title,
         "category": category,
@@ -142,6 +150,14 @@ def parse_recipe_md(filepath: str, override: dict | None = None) -> dict:
         "required_names": {row["ingredient_name"] for row in ingredients},
         "ingredient_source": "\n".join(ingredient_source),
         "calc_unparsed": calc_unparsed,
+        "calc_repeated": [
+            f"{name}: " + ", ".join(amounts)
+            for name, amounts in calculated_amounts.items() if len(amounts) > 1
+        ],
+        # Reviewed aliases are used when both endpoints occur before merging.
+        "source_ingredient_names": {
+            _ingredient_key(row["ingredient_name"]) for row in ingredients + computed
+        },
         "steps": steps,
         "equipment": _merge_equipment(equipment),
         "unclassified_tools": unclassified_tools,
@@ -171,7 +187,13 @@ def _apply_override(recipe: dict, override: dict) -> None:
     recipe["override_unverified"] = [
         text for text in texts if not (normalized := _source_text(text)) or normalized not in normalized_source
     ]
-    if recipe["override_unverified"]:
+    recipe["override_bad_quantities"] = [
+        f'{row["ingredient_name"]}: {row["quantity"]}'
+        for row in override.get("ingredients", [])
+        if (quantity := row.get("quantity")) is not None
+        and (not isinstance(quantity, str) or not re.fullmatch(_QUANTITY, quantity))
+    ]
+    if recipe["override_unverified"] or recipe["override_bad_quantities"]:
         return
     for field in ("title", "equipment"):
         if field in override:
@@ -180,10 +202,16 @@ def _apply_override(recipe: dict, override: dict) -> None:
         from stock_manager.api.recipe_schemas import IngredientSchema
 
         recipe["ingredients"] = [
-            IngredientSchema(**{**row, "sort_order": index}).model_dump()
+            IngredientSchema(**{
+                **row,
+                "ingredient_name": _display_ingredient_name(row["ingredient_name"]),
+                "quantity": _normalize_quantity(row.get("quantity")),
+                "sort_order": index,
+            }).model_dump()
             for index, row in enumerate(override["ingredients"])
         ]
         recipe["calc_unparsed"] = []
+        recipe["calc_repeated"] = []
     if "steps" in override:
         recipe["steps"] = [
             {"step_number": index, "instruction": instruction}
@@ -205,14 +233,26 @@ def _source_text(markdown: str) -> str:
 
 
 @lru_cache(maxsize=4)
-def _load_aliases(path: Path) -> tuple[dict[str, set[str]], set[frozenset[str]]]:
+def _load_aliases(path: Path) -> tuple[dict[str, str], set[frozenset[str]], set[frozenset[str]]]:
     with path.open(encoding="utf-8") as source:
         pairs = json.load(source)
-    same = {}
-    for left, right in pairs["same"]:
-        same.setdefault(left, set()).add(right)
-        same.setdefault(right, set()).add(left)
-    return same, {frozenset(pair) for pair in pairs["different"]}
+    direct = {frozenset(map(_ingredient_key, pair)) for pair in pairs["same"]}
+    different = {frozenset(map(_ingredient_key, pair)) for pair in pairs["different"]}
+    groups = [{name} for pair in direct for name in pair]
+    for pair in direct:
+        linked = [group for group in groups if group & pair]
+        groups = [group for group in groups if not group & pair]
+        groups.append(set().union(*linked))
+    canonical = {name: min(group) for group in groups for name in group}
+    return canonical, different, direct
+
+
+def _display_ingredient_name(name: str) -> str:
+    return " ".join(name.split())
+
+
+def _ingredient_key(name: str) -> str:
+    return "".join(name.split())
 
 
 def _section_kind(title: str) -> str | None:
@@ -331,17 +371,20 @@ _EMOJI_RE = re.compile(r"[\U0001F000-\U0001FAFF\u2600-\u27BF\ufe0f\u200d\u20e3]"
 _INGREDIENT_QUANTITY_UNITS = (
     "汤匙|茶匙|毫升|千克|ml|mL|kg|cm|克|升|斤|个|只|根|颗|瓣|片|勺|碗|杯|"
     "盒|包|袋|罐|块|条|把|株|朵|粒|头|份|两|瓶盖|瓶|片|小块|小段|拇指块|"
-    "段|棵|叶|撮|滴|圈|卷|枚|张|节|扎|点|杯|cup|公分|厘米|毫米|小盒|g|L"
+    "段|棵|叶|撮|滴|圈|卷|枚|张|节|扎|点|杯|cup|公分|厘米|毫米|小盒|mm|寸|W|℃|°C|g|L"
 )
 _DECIMAL = r"\d+(?:\.\d+)?"
 _AMOUNT = rf"(?:{_DECIMAL}(?:\s+\d+/\d+|/\d+|[¼½¾⅓⅔⅛])?|[¼½¾⅓⅔⅛])"
-_QUANTITY = rf"(?:{_AMOUNT}(?:\s*(?:[-–—～~]|到|至)\s*{_AMOUNT})?|[半一二三四五六七八九十两几]+)"
+_RANGE_SEPARATOR = r"[-–—～~]|到|至"
+_AMOUNT_ENDPOINT = rf"(?:{_AMOUNT}|[半一二三四五六七八九十两几]+)"
+_QUANTITY = rf"{_AMOUNT_ENDPOINT}(?:\s*(?:{_RANGE_SEPARATOR})\s*{_AMOUNT_ENDPOINT})?"
 _INGREDIENT_QUANTITY_RE = re.compile(
     rf"({_QUANTITY})\s*({_INGREDIENT_QUANTITY_UNITS})"
+    rf"(?:\s*(?:{_RANGE_SEPARATOR})\s*({_AMOUNT_ENDPOINT})\s*({_INGREDIENT_QUANTITY_UNITS}))?"
     rf"(?:(?:\s*\+\s*{_DECIMAL}\s*(?:{_INGREDIENT_QUANTITY_UNITS}))+(?=\s*(?:[（(]|$)))?"
 )
 _TRAILING_QUANTITY_RE = re.compile(
-    rf"\s*({_AMOUNT})(?:\s*[-～~]|\s*[x×*]\s*{_DECIMAL})?\s*$", re.IGNORECASE,
+    rf"\s*({_QUANTITY})(?:\s*[-～~]|\s*[x×*]\s*{_DECIMAL})?\s*$", re.IGNORECASE,
 )
 _TEMPERATURE_RE = re.compile(r"(?:约\s*)?\d+(?:\.\d+)?\s*(?:°\s*[CF]|[℃℉])", re.IGNORECASE)
 _INGREDIENT_COMMENT_RE = re.compile(r"\s+#.*$")
@@ -359,10 +402,11 @@ _CALC_PROSE_PREFIXES = ("每次制作前", "每份", "总量", "使用上述条�
 _CALC_NAME_SUFFIX_RE = re.compile(r"(?:的数量|的用量为|的用量|用量为|用量|数量|量)$")
 _INGREDIENT_PROSE_RE = re.compile(
     r"建议|可以|即可|按照|根据|口味|备用|切开|切段|准备|大小|左右|用于|用量|注|必须|进阶|方法|"
-    r"都可以|减半|取整|搭配|总共|差不多|依次|忽略|本教程|份数|[¼½¾⅓⅔⅛]|cup", re.IGNORECASE,
+    r"都可以|减半|取整|搭配|总共|差不多|依次|忽略|本教程|份数|例如|比如|直径|额外|用作|点缀|[¼½¾⅓⅔⅛]|cup", re.IGNORECASE,
 )
 _INGREDIENT_PROSE_WORDS = frozenset("个 各 调 料 袋 份 只 根 片 块 勺 克".split())
-_TOOL_INGREDIENT_SUFFIXES = ("袋", "模具", "容器", "筷子", "一双")
+_TOOL_INGREDIENT_SUFFIXES = tuple("袋 模具 容器 筷子 一双 杯 杯子 网 瓶 碟 碟子 架 碗 盘 勺 刀 铲 板 夹 纸 膜 盒".split())
+_BAD_INGREDIENT_UNITS = frozenset({"cm", "mm", "厘米", "毫米", "寸", "w", "℃", "°c"})
 _CALC_NOTES_RE = re.compile(
     r"^(?:男人$|女人$|按人|提前|方便|然后|正常|中间|看锅|此处|和味精|适量$|约$|"
     r"整锅|以正常|必选配料|实测|该步骤|推荐合计|淹过|比拳头|用猪骨也|向上取整|"
@@ -645,6 +689,22 @@ def _ingredient_items(segment: str, explanatory: bool, optional: bool) -> list[d
     return rows
 
 
+def _normalize_quantity(quantity: str | None) -> str | None:
+    if quantity is None:
+        return None
+    return re.sub(rf"\s*(?:{_RANGE_SEPARATOR})\s*", "-", quantity)
+
+
+def _quantity_value(match: re.Match | None) -> tuple[str | None, str | None]:
+    if not match:
+        return None, None
+    if match[3]:
+        if normalize_unit(match[2]) != normalize_unit(match[4]):
+            return None, None
+        return f"{match[1]}-{match[3]}", match[2]
+    return _normalize_quantity(match[1]), match[2]
+
+
 def _ingredient_row(
     text: str, name: str | None = None, optional: bool = False,
 ) -> dict | None:
@@ -658,8 +718,7 @@ def _ingredient_row(
             (match for match in _INGREDIENT_QUANTITY_RE.finditer(text) if match[1][0].isascii()),
             quantity_match,
         )
-    quantity = quantity_match[1] if quantity_match else None
-    unit = quantity_match[2] if quantity_match else None
+    quantity, unit = _quantity_value(quantity_match)
     if name is None:
         if outer_match := _INGREDIENT_QUANTITY_RE.search(outer):
             before = outer[:outer_match.start()].strip(" \t=：:、，,；;～~-±")
@@ -672,18 +731,19 @@ def _ingredient_row(
             number_list = re.search(rf"({_AMOUNT})\s*\+\s*$", name)
             if number_list and before:
                 name = name[:number_list.start()]
-            quantity, unit = outer_match[1], outer_match[2]
-            if number_list:
+            quantity, unit = _quantity_value(outer_match)
+            if number_list and quantity is not None:
                 quantity = f"{number_list[1]} + {quantity}"
         else:
             name = outer if any(char.isalpha() for char in outer) else text
             if quantity is None and (trailing := _TRAILING_QUANTITY_RE.search(name)):
-                quantity = trailing[1]
+                quantity = _normalize_quantity(trailing[1])
                 name = name[:trailing.start()]
 
     name = _strip_bracket_notes(_EMOJI_RE.sub("", name.translate(_INGREDIENT_MARKUP)))
     name = re.sub(r"\s+品牌(?:不限|自选).*$|足够涂满.*$", "", name)
     name = name.strip(" \t=：:、，,；;。()-（）")
+    name = _display_ingredient_name(name)
     if name.startswith("新鲜") and len(name) > 2:
         name = name[2:].strip()
     if not any(char.isalpha() for char in name):
@@ -720,6 +780,9 @@ def _calculation_item(text: str, optional: bool) -> list[dict]:
     quantity = first or next(
         (match for note in notes if (match := _INGREDIENT_QUANTITY_RE.search(note))), None,
     )
+    amount, unit = _quantity_value(quantity)
+    if quantity and amount is None:
+        return []
     # A quoted quantity or a decimal before a count delimiter can still
     # express a single amount (for example, 干辣椒 = 5，6 个).
     if first and separator and (bare := re.fullmatch(r"\s*(\d+)\s*[，,]\s*", body[end + 1:first.start()])):
@@ -735,14 +798,14 @@ def _calculation_item(text: str, optional: bool) -> list[dict]:
     cleaned = []
     for name, alternate in alternatives:
         name = re.sub(r"注\s*$|用量通常来说为.*$|足够涂满.*$|总共\s*$", "", name)
+        name = re.sub(r"\s+(?:每\S*|足量|一小[片把]|[≥≤])$", "", name.strip())
         name = re.sub(r"(?:总量|共)$", "", name.strip())
         if quantity and quantity[1].startswith("半"):
             name = re.sub(r"[大小]$", "", name)
         name = _CALC_NAME_SUFFIX_RE.sub("", name.strip()).strip()
         if name == "盐量":
             name = "盐"
-        name = re.sub(r"\s*(?:大约|约为|约|至少|左右|各)\s*$", "", name)
-        name = name.split(maxsplit=1)[0] if name.split() else ""
+        name = re.sub(r"\s*(?:大约|大概|约为|约|至少|左右|各)\s*$", "", name)
         # The previous step calculated a name only. A quantity at the end
         # without a unit still belongs to that name.
         row = _ingredient_row(name, optional=optional or alternate)
@@ -760,12 +823,12 @@ def _calculation_item(text: str, optional: bool) -> list[dict]:
         separator is None and re.search(r"\s+(?:建议|按照|根据|可以|如果|正常)", name_text)
     ):
         for row in cleaned:
-            row.update(quantity=quantity[1], unit=quantity[2])
+            row["quantity"], row["unit"] = amount, unit
     elif separator:
         amount = body[separator.end():].strip()
         if re.fullmatch(_QUANTITY, amount):
             for row in cleaned:
-                row["quantity"] = amount
+                row["quantity"] = _normalize_quantity(amount)
     return cleaned
 
 
@@ -824,7 +887,12 @@ def _parse_calculations(text: str) -> tuple[list[dict], list[str]]:
                 continue
             segments = _split_outside_notes(description[0].rstrip("。"), "、，,")
         else:
-            if not _ingredient_text(line, _is_explanatory_line(line)):
+            # A comma-delimited ingredient and amount can end in a full stop.
+            candidate = line
+            if line.endswith("。") and (amount := _INGREDIENT_QUANTITY_RE.search(line)):
+                if line[:amount.start()].rstrip().endswith(("，", ",")) and line[amount.end():].strip() == "。":
+                    candidate = line[:-1]
+            if not _ingredient_text(candidate, _is_explanatory_line(candidate)):
                 continue
             segments = [plain]
 
@@ -846,13 +914,13 @@ def _parse_calculations(text: str) -> tuple[list[dict], list[str]]:
                     rows.extend(item_rows)
                 else:
                     unparsed.append(item)
-    return _dedupe_ingredients(rows), unparsed
+    return rows, unparsed
 
 
 def _dedupe_ingredients(rows: list[dict]) -> list[dict]:
     seen = {}
     for row in rows:
-        name = row["ingredient_name"]
+        name = _ingredient_key(row["ingredient_name"])
         if name not in seen:
             seen[name] = {**row, "sort_order": len(seen)}
         elif row["quantity"] is not None:
@@ -861,42 +929,17 @@ def _dedupe_ingredients(rows: list[dict]) -> list[dict]:
 
 
 def _merge_ingredients(required: list[dict], computed: list[dict]) -> list[dict]:
-    from stock_manager.api.recipe_services import _normalize_name
-
-    same, different = _load_aliases(_ALIASES_PATH)
-
-    def explicit_match(name: str, rows: list[dict]) -> dict | None:
-        return next(
-            (row for row in rows if row["ingredient_name"] == name
-             or row["ingredient_name"] in same.get(name, ())),
-            None,
-        )
-
-    result = []
-    for row in _dedupe_ingredients(required):
-        prior = explicit_match(row["ingredient_name"], result)
-        if prior is None:
-            result.append({**row, "sort_order": len(result)})
-        elif prior["quantity"] is None and row["quantity"] is not None:
-            prior.update(quantity=row["quantity"], unit=row["unit"])
-    required_rows = list(result)
-    for row in _dedupe_ingredients(computed):
-        name = row["ingredient_name"]
-        match = explicit_match(name, result)
-        if match is None:
-            normalized = _normalize_name(name)
-            match = next(
-                (candidate for candidate in required_rows
-                 if frozenset((name, candidate["ingredient_name"])) not in different
-                 and _normalize_name(candidate["ingredient_name"]) == normalized),
-                None,
-            )
-        if match is not None:
-            if row["quantity"] is not None:
-                match.update(quantity=row["quantity"], unit=row["unit"])
-        else:
-            result.append({**row, "sort_order": len(result)})
-    return result
+    same, _, _ = _load_aliases(_ALIASES_PATH)
+    result = {}
+    for rows, from_calculation in ((required, False), (computed, True)):
+        for row in _dedupe_ingredients(rows):
+            key = _ingredient_key(row["ingredient_name"])
+            canonical = same.get(key, key)
+            if canonical not in result:
+                result[canonical] = {**row, "sort_order": len(result)}
+            elif row["quantity"] is not None and (from_calculation or result[canonical]["quantity"] is None):
+                result[canonical].update(quantity=row["quantity"], unit=row["unit"])
+    return list(result.values())
 
 
 def _is_nested_step(line: str) -> bool:
@@ -925,20 +968,21 @@ def _step_layout(text: str) -> tuple[list[str], list[tuple[int, int]]]:
         list_item = bool(_LIST_MARKER_RE.match(raw.lstrip()))
         nested = _is_nested_step(raw)
         if line:
+            continuation = "" if steps and steps[-1].endswith(("。", "！", "？", "；")) else "；"
             between_items = has_lists and list_positions[0] < index < list_positions[-1]
             standalone = has_lists and not list_item and not between_items and not (nested and in_subitem)
             if raw.lstrip().startswith(">") and steps and not pending_heading:
-                steps[-1] += "；" + line
+                steps[-1] += continuation + line
             elif pending_heading or not steps or (list_item and not nested) or (not has_lists and previous_blank) or standalone:
                 steps.append(f"【{pending_heading}】{line}" if pending_heading else line)
                 pending_heading = ""
                 in_subitem = has_subitems = False
             elif has_lists and nested and list_item:
-                separator = "；" if has_subitems else ("" if steps[-1].endswith(("：", ":")) else "：")
+                separator = continuation if has_subitems else ("" if steps[-1].endswith(("：", ":")) else "：")
                 steps[-1] += separator + line
                 in_subitem = has_subitems = True
             elif has_lists and not (nested and in_subitem):
-                steps[-1] += "；" + line
+                steps[-1] += continuation + line
                 in_subitem = False
             else:
                 steps[-1] += " " + line
@@ -1333,7 +1377,8 @@ _ERROR_CODES = (
     "ingredient_markup", "ingredient_punct", "ingredient_digit", "ingredient_long",
     "ingredient_duplicate", "step_markup", "step_empty", "recipe_empty", "calc_unparsed", "override_stale",
     "ingredient_prose", "ingredient_tool", "ingredient_unknown", "ingredient_maybe_duplicate",
-    "override_text_not_in_source",
+    "override_text_not_in_source", "calc_repeated_name", "ingredient_bad_unit", "override_quantity_format",
+    "alias_unused", "whitelist_unused",
 )
 _WARNING_CODES = (
     "ingredient_no_quantity", "equipment_mentioned_not_required", "step_count_changed",
@@ -1353,9 +1398,11 @@ def _recipe_files(root: Path) -> list[Path]:
 
 def _audit_recipe(recipe: dict, vocabulary: set[str] | None = None) -> Iterator[tuple[str, str]]:
     ingredients, steps = recipe["ingredients"], recipe["steps"]
-    names = set()
-    original = recipe.get("ingredient_source", "").translate(_INGREDIENT_MARKUP)
-    same, different = _load_aliases(_ALIASES_PATH)
+    from stock_manager.api.recipe_services import _normalize_name
+
+    names = {}
+    original = _ingredient_key(recipe.get("ingredient_source", "").translate(_INGREDIENT_MARKUP))
+    same, different, _ = _load_aliases(_ALIASES_PATH)
     if not ingredients or not steps:
         missing = ", ".join(label for label, rows in (("ingredients", ingredients), ("steps", steps)) if not rows)
         yield "recipe_empty", f"Missing {missing}"
@@ -1369,25 +1416,27 @@ def _audit_recipe(recipe: dict, vocabulary: set[str] | None = None) -> Iterator[
             yield "ingredient_digit", name
         if len(name) > 12:
             yield "ingredient_long", name
-        if name in names:
+        key = _ingredient_key(name)
+        if key in names:
             yield "ingredient_duplicate", name
-        names.add(name)
+        names[key] = name
+        if (row.get("unit") or "").casefold() in _BAD_INGREDIENT_UNITS:
+            yield "ingredient_bad_unit", f'{name}: {row["unit"]}'
         if _is_ingredient_prose(name):
             yield "ingredient_prose", name
         if _is_ingredient_tool(name):
             yield "ingredient_tool", name
-        if vocabulary is not None and name not in vocabulary and name not in original:
+        if vocabulary is not None and key not in vocabulary and key not in original:
             yield "ingredient_unknown", name
         if not row["quantity"]:
             yield "ingredient_no_quantity", name
 
-    for inner in sorted(names, key=lambda name: (len(name), name)):
-        if len(inner) < 2:
+    normalized = {key: _normalize_name(name) for key, name in names.items()}
+    for left, right in combinations(sorted(names), 2):
+        if same.get(left, left) == same.get(right, right) or frozenset((left, right)) in different:
             continue
-        for outer in sorted(names):
-            if (len(outer) > len(inner) and inner in outer
-                    and outer not in same.get(inner, ()) and frozenset((inner, outer)) not in different):
-                yield "ingredient_maybe_duplicate", f"{inner} / {outer}"
+        if left in right or right in left or normalized[left] == normalized[right]:
+            yield "ingredient_maybe_duplicate", f"{names[left]} / {names[right]}"
 
     for step in steps:
         instruction = step["instruction"]
@@ -1397,6 +1446,10 @@ def _audit_recipe(recipe: dict, vocabulary: set[str] | None = None) -> Iterator[
         if not _clean_line(re.sub(r"^【[^】]+】", "", instruction)):
             yield "step_empty", detail
 
+    for detail in recipe.get("calc_repeated", []):
+        yield "calc_repeated_name", detail
+    for detail in recipe.get("override_bad_quantities", []):
+        yield "override_quantity_format", detail
     for line in recipe.get("calc_unparsed", []):
         yield "calc_unparsed", line
     for text in recipe.get("override_unverified", []):
@@ -1418,6 +1471,21 @@ def _audit_recipe(recipe: dict, vocabulary: set[str] | None = None) -> Iterator[
     )
     if top_level != len(steps):
         yield "step_count_changed", f"{top_level} source list items → {len(steps)} steps"
+
+
+def _audit_review_tables(recipes: list[dict], whitelist: set[str]) -> Iterator[tuple[str, str]]:
+    _, different, same = _load_aliases(_ALIASES_PATH)
+    aliases = same | different
+    final_names = {_ingredient_key(row["ingredient_name"]) for recipe in recipes for row in recipe["ingredients"]}
+    for recipe in recipes:
+        names = {_ingredient_key(row["ingredient_name"]) for row in recipe["ingredients"]}
+        names.update(recipe.get("source_ingredient_names", ()))
+        aliases = {pair for pair in aliases if not pair <= names}
+    for pair in sorted(map(sorted, aliases)):
+        yield "alias_unused", " / ".join(pair)
+    for name in sorted(whitelist):
+        if _ingredient_key(name) not in final_names:
+            yield "whitelist_unused", name
 
 
 def _report_cell(value) -> str:
@@ -1469,13 +1537,14 @@ def audit_howtocook(root: Path, report: Path | None = None) -> int:
 
     vocabulary = set(SYNONYM_MAP) | {alias for names in SYNONYM_MAP.values() for alias in names}
     with _INGREDIENT_NAMES_PATH.open(encoding="utf-8") as names:
-        vocabulary.update(name for line in names if (name := line.strip()) and not name.startswith("#"))
+        whitelist = {name for line in names if (name := line.strip()) and not name.startswith("#")}
+    vocabulary = {_ingredient_key(name) for name in vocabulary | whitelist}
     parsed = []
     for file in _recipe_files(root):
         path = file.relative_to(root).as_posix()
         recipe = parse_recipe_md(str(file), overrides.get(path))
         parsed.append((path, recipe))
-        vocabulary.update(recipe["required_names"])
+        vocabulary.update(map(_ingredient_key, recipe["required_names"]))
     for path, recipe in parsed:
         issues = list(_audit_recipe(recipe, vocabulary))
         counts.update(code for code, _ in issues)
@@ -1487,6 +1556,8 @@ def audit_howtocook(root: Path, report: Path | None = None) -> int:
             for row in recipe["ingredients"]
         )
 
+    review_issues = list(_audit_review_tables([recipe for _, recipe in parsed], whitelist))
+    counts.update(code for code, _ in review_issues)
     errors = sum(counts[code] for code in _ERROR_CODES)
     warnings = sum(counts[code] for code in _WARNING_CODES)
     for codes in (_ERROR_CODES, _WARNING_CODES):
@@ -1497,6 +1568,9 @@ def audit_howtocook(root: Path, report: Path | None = None) -> int:
     for path, _, issues in reviewed:
         for code, detail in issues:
             print(f"{code}  {path}  {detail}")
+    for code, detail in review_issues:
+        filename = _ALIASES_PATH.name if code == "alias_unused" else _INGREDIENT_NAMES_PATH.name
+        print(f"{code}  scripts/{filename}  {detail}")
     if report is not None:
         _write_review(report, reviewed)
     return int(bool(errors))
